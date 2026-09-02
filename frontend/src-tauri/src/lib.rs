@@ -641,6 +641,7 @@ pub fn run() {
             openai_codex::openai_codex_get_models,
             live_translation::api_translate_live_text,
             live_translation::api_cancel_live_translation,
+            live_translation::api_warm_live_translation,
             anthropic::anthropic::get_anthropic_models,
             groq::groq::get_groq_models,
             api::api_get_meetings,
