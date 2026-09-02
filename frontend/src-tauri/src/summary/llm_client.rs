@@ -67,6 +67,7 @@ pub struct ClaudeChatContent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum LLMProvider {
     OpenAI,
+    OpenAICodex,
     Claude,
     Groq,
     Ollama,
@@ -80,6 +81,7 @@ impl LLMProvider {
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s.to_lowercase().as_str() {
             "openai" => Ok(Self::OpenAI),
+            "openai-codex" | "codex" | "chatgpt" => Ok(Self::OpenAICodex),
             "claude" => Ok(Self::Claude),
             "groq" => Ok(Self::Groq),
             "ollama" => Ok(Self::Ollama),
@@ -130,6 +132,22 @@ pub async fn generate_summary(
         if token.is_cancelled() {
             return Err("Summary generation was cancelled".to_string());
         }
+    }
+
+    // OpenAI Codex is a separate subscription-backed provider. It uses the
+    // MeetOdds-owned OAuth session in app data and the Codex Responses backend.
+    if provider == &LLMProvider::OpenAICodex {
+        let app_data_dir = app_data_dir
+            .ok_or_else(|| "app_data_dir is required for OpenAI Codex provider".to_string())?;
+        return crate::openai_codex::generate_codex_summary(
+            client,
+            app_data_dir,
+            model_name,
+            system_prompt,
+            user_prompt,
+            cancellation_token,
+        )
+        .await;
     }
 
     // Handle BuiltInAI provider separately (uses local sidecar, no HTTP API)
@@ -192,11 +210,16 @@ pub async fn generate_summary(
                     .parse()
                     .map_err(|_| "Invalid anthropic version".to_string())?,
             );
-            ("https://api.anthropic.com/v1/messages".to_string(), header_map)
+            (
+                "https://api.anthropic.com/v1/messages".to_string(),
+                header_map,
+            )
         }
         LLMProvider::BuiltInAI => {
-            // This case is handled earlier with early returns
             unreachable!("BuiltInAI is handled before this match statement")
+        }
+        LLMProvider::OpenAICodex => {
+            unreachable!("OpenAICodex is handled before this match statement")
         }
     };
 
@@ -219,7 +242,8 @@ pub async fn generate_summary(
     // Build request body based on provider
     let request_body = if provider != &LLMProvider::Claude {
         // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
+        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI
+        {
             (max_tokens, temperature, top_p)
         } else {
             (None, None, None)
@@ -253,7 +277,11 @@ pub async fn generate_summary(
         })
     };
 
-    info!("🐞 LLM Request to {}: model={}", provider_name(provider), model_name);
+    info!(
+        "🐞 LLM Request to {}: model={}",
+        provider_name(provider),
+        model_name
+    );
 
     // Send request with timeout and cancellation support
     let request_future = client
@@ -336,6 +364,7 @@ pub async fn generate_summary(
 fn provider_name(provider: &LLMProvider) -> &str {
     match provider {
         LLMProvider::OpenAI => "OpenAI",
+        LLMProvider::OpenAICodex => "OpenAI Codex (ChatGPT subscription)",
         LLMProvider::Claude => "Claude",
         LLMProvider::Groq => "Groq",
         LLMProvider::Ollama => "Ollama",

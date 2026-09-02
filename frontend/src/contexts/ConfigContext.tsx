@@ -367,7 +367,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     claude: ['claude-3-5-sonnet-latest'],
     groq: ['llama-3.3-70b-versatile'],
     openrouter: [],
-    openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    openai: ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    'openai-codex': ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4'],
     'builtin-ai': [],
     'custom-openai': [],
   };

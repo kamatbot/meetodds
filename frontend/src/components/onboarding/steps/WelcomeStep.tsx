@@ -10,22 +10,22 @@ export function WelcomeStep() {
   const features = [
     {
       icon: Lock,
-      title: 'Your data never leaves your device',
+      title: 'Recordings and transcripts stay on your device',
     },
     {
       icon: Sparkles,
-      title: 'Intelligent summaries & insights',
+      title: 'Choose local or cloud AI for summaries & insights',
     },
     {
       icon: Cpu,
-      title: 'Works offline, no cloud required',
+      title: 'Works offline when you use local models',
     },
   ];
 
   return (
     <OnboardingContainer
-      title="Welcome to Meetily"
-      description="Record. Transcribe. Summarize. All on your device."
+      title="Welcome to MeetOdds"
+      description="Record. Transcribe locally. Summarize with the model you choose."
       step={1}
       hideProgress={true}
     >
