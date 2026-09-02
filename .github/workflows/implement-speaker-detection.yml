@@ -27,7 +27,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Remove duplicate live transcript metadata
+      - name: Normalize live transcript speaker metadata
         working-directory: /tmp/notes
         run: |
           set -euo pipefail
@@ -54,16 +54,17 @@ jobs:
               '            speaker_source: update.speaker_source,\n'
               '            speaker_confidence: update.speaker_confidence,\n'
           )
-          if duplicate not in text:
-              if corrected in text:
-                  raise SystemExit('Duplicate block already fixed; refusing an empty milestone commit')
-              raise SystemExit('Expected duplicate speaker block was not found')
-          path.write_text(text.replace(duplicate, corrected, 1))
+          if duplicate in text:
+              path.write_text(text.replace(duplicate, corrected, 1))
+          elif corrected not in text:
+              raise SystemExit('Expected live speaker metadata block was not found')
           PY
 
           git add frontend/src/contexts/TranscriptContext.tsx
-          git commit -m "fix(speakers): deduplicate live transcript metadata"
-          git push origin HEAD:feature/speaker-detection
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(speakers): normalize live transcript metadata"
+            git push origin HEAD:feature/speaker-detection
+          fi
 
       - name: Validate acoustic clustering and migration
         working-directory: /tmp/notes
@@ -125,4 +126,13 @@ jobs:
         working-directory: /tmp/notes
         env:
           WHISPER_DONT_GENERATE_BINDINGS: "1"
-        run: cargo check -p meetily --lib
+        run: |
+          set -euo pipefail
+          # Tauri validates every declared external binary before Rust type-checking.
+          # The real llama-helper is built only in release packaging, so provide the
+          # expected target-named path for this Linux compile-only validation.
+          mkdir -p frontend/src-tauri/binaries
+          printf '#!/usr/bin/env sh\nexit 0\n' \
+            > frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          cargo check -p meetily --lib
