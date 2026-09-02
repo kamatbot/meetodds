@@ -117,17 +117,27 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
       activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
       updateCounts();
 
-      setTranslations((previous) => ({
-        ...previous,
-        [job.segmentKey]: {
-          ...(previous[job.segmentKey] ?? {}),
-          segmentKey: job.segmentKey,
-          sourceText: job.text,
-          targetLanguage: job.targetLanguage,
-          status: 'translating',
-          error: undefined,
-        },
-      }));
+      setTranslations((previous) => {
+        const previousEntry = previous[job.segmentKey];
+        const sourceMatches =
+          previousEntry?.sourceText === job.text &&
+          previousEntry?.targetLanguage === job.targetLanguage;
+
+        return {
+          ...previous,
+          [job.segmentKey]: {
+            segmentKey: job.segmentKey,
+            sourceText: job.text,
+            targetLanguage: job.targetLanguage,
+            status: 'translating',
+            translatedText: sourceMatches ? previousEntry?.translatedText : undefined,
+            provider: sourceMatches ? previousEntry?.provider : undefined,
+            model: sourceMatches ? previousEntry?.model : undefined,
+            latencyMs: sourceMatches ? previousEntry?.latencyMs : undefined,
+            cached: sourceMatches ? previousEntry?.cached : undefined,
+          },
+        };
+      });
 
       void (async () => {
         try {
@@ -337,17 +347,27 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
         isPartial,
       };
 
-      setTranslations((previous) => ({
-        ...previous,
-        [segmentKey]: {
-          ...(previous[segmentKey] ?? {}),
-          segmentKey,
-          sourceText: text,
-          targetLanguage: settings.targetLanguage,
-          status: 'queued',
-          error: undefined,
-        },
-      }));
+      setTranslations((previous) => {
+        const previousEntry = previous[segmentKey];
+        const sourceMatches =
+          previousEntry?.sourceText === text &&
+          previousEntry?.targetLanguage === settings.targetLanguage;
+
+        return {
+          ...previous,
+          [segmentKey]: {
+            segmentKey,
+            sourceText: text,
+            targetLanguage: settings.targetLanguage,
+            status: 'queued',
+            translatedText: sourceMatches ? previousEntry?.translatedText : undefined,
+            provider: sourceMatches ? previousEntry?.provider : undefined,
+            model: sourceMatches ? previousEntry?.model : undefined,
+            latencyMs: sourceMatches ? previousEntry?.latencyMs : undefined,
+            cached: sourceMatches ? previousEntry?.cached : undefined,
+          },
+        };
+      });
 
       if (isPartial) {
         const timer = setTimeout(() => {

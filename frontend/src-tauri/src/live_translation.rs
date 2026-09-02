@@ -17,7 +17,9 @@ const MAX_LIVE_TEXT_CHARS: usize = 6_000;
 const LIVE_TRANSLATION_TIMEOUT: Duration = Duration::from_secs(30);
 const TRANSLATION_CACHE_CAPACITY: usize = 256;
 
-static TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(2));
+static CLOUD_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(2));
+static LOCAL_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(1));
+static TRANSLATION_HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
 static ACTIVE_TRANSLATIONS: Lazy<Mutex<HashMap<String, ActiveTranslation>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static NEXT_TRANSLATION_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -293,6 +295,10 @@ fn clean_translation_output(raw: &str) -> String {
     trimmed.to_string()
 }
 
+fn uses_local_translation_worker(provider: &LLMProvider) -> bool {
+    matches!(provider, LLMProvider::Ollama | LLMProvider::BuiltInAI)
+}
+
 fn cache_key(
     provider: &str,
     model: &str,
@@ -465,8 +471,17 @@ pub async fn api_translate_live_text<R: Runtime>(
     let (generation, cancellation_token) = register_translation(&request_id).await;
     let started = Instant::now();
 
+    // Cloud requests get limited parallelism and reuse pooled HTTP connections.
+    // Local generation stays single-flight so it cannot steal the CPU/GPU budget
+    // reserved for live Whisper/Parakeet transcription on Apple Silicon.
+    let worker_pool = if uses_local_translation_worker(&config.provider) {
+        &*LOCAL_TRANSLATION_SEMAPHORE
+    } else {
+        &*CLOUD_TRANSLATION_SEMAPHORE
+    };
+
     let permit = tokio::select! {
-        permit = TRANSLATION_SEMAPHORE.acquire() => {
+        permit = worker_pool.acquire() => {
             permit.map_err(|_| "Live translation worker pool is unavailable.".to_string())?
         }
         _ = cancellation_token.cancelled() => {
@@ -477,9 +492,8 @@ pub async fn api_translate_live_text<R: Runtime>(
 
     let (system_prompt, user_prompt) = build_translation_prompts(text, source, target);
     let app_data_dir = app.path().app_data_dir().ok();
-    let client = reqwest::Client::new();
     let translation_future = generate_summary(
-        &client,
+        &TRANSLATION_HTTP_CLIENT,
         &config.provider,
         &config.model_name,
         &config.api_key,
@@ -569,6 +583,14 @@ mod tests {
         assert!(system.contains("Thai"));
         assert!(system.contains("Return only the translated text"));
         assert_eq!(user, "Hello Mayur");
+    }
+
+    #[test]
+    fn local_providers_are_single_flight() {
+        assert!(uses_local_translation_worker(&LLMProvider::Ollama));
+        assert!(uses_local_translation_worker(&LLMProvider::BuiltInAI));
+        assert!(!uses_local_translation_worker(&LLMProvider::OpenAICodex));
+        assert!(!uses_local_translation_worker(&LLMProvider::OpenAI));
     }
 
     #[test]
