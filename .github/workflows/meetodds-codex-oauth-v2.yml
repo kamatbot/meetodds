@@ -1,0 +1,318 @@
+name: Resync main and validate ChatGPT subscription OAuth
+
+on:
+  push:
+    branches: [feature/meetodds-openai-cloud]
+    paths:
+      - .github/workflows/meetodds-codex-oauth-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/meetodds-openai-cloud
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git and sync latest main
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          git push origin HEAD:feature/meetodds-openai-cloud
+
+      - name: Wire ChatGPT subscription provider
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old in text:
+                  p.write_text(text.replace(old, new, 1))
+                  return
+              if new in text:
+                  return
+              raise SystemExit(f"Missing anchor in {path}: {old[:160]!r}")
+
+          # Codex module: let the summary engine use the same MeetOdds-owned auth file
+          # via the app-data directory it already passes to LLM providers.
+          p = Path('frontend/src-tauri/src/openai_codex.rs')
+          text = p.read_text()
+          marker = '''async fn request_models(\n    client: &Client,\n    auth: &CodexAuthState,\n) -> Result<reqwest::Response, String> {'''
+          helper = '''async fn load_valid_auth_from_dir(\n    app_data_dir: &Path,\n    client: &Client,\n) -> Result<CodexAuthState, String> {\n    let _guard = AUTH_LOCK.lock().await;\n    let path = app_data_dir.join(AUTH_FILE_NAME);\n    let auth = read_auth(&path)?.ok_or_else(|| {\n        "OpenAI Codex is not connected. Sign in with your ChatGPT subscription in MeetOdds settings."\n            .to_string()\n    })?;\n    if token_needs_refresh(&auth) {\n        refresh_auth_with_client(client, &path, &auth).await\n    } else {\n        Ok(auth)\n    }\n}\n\nasync fn force_refresh_from_dir(\n    app_data_dir: &Path,\n    client: &Client,\n) -> Result<CodexAuthState, String> {\n    let _guard = AUTH_LOCK.lock().await;\n    let path = app_data_dir.join(AUTH_FILE_NAME);\n    let auth = read_auth(&path)?.ok_or_else(|| {\n        "OpenAI Codex is not connected. Sign in again in MeetOdds settings.".to_string()\n    })?;\n    refresh_auth_with_client(client, &path, &auth).await\n}\n\n'''
+          if 'async fn load_valid_auth_from_dir(' not in text:
+              if marker not in text:
+                  raise SystemExit('Codex model-request anchor changed after main sync')
+              text = text.replace(marker, helper + marker, 1)
+          text = text.replace(
+              'pub async fn generate_codex_summary<R: Runtime>(\n    client: &Client,\n    app: &AppHandle<R>,',
+              'pub async fn generate_codex_summary(\n    client: &Client,\n    app_data_dir: &Path,',
+              1,
+          )
+          start = text.index('pub async fn generate_codex_summary(')
+          head, tail = text[:start], text[start:]
+          tail = tail.replace('load_valid_auth(app, client).await?', 'load_valid_auth_from_dir(app_data_dir, client).await?', 1)
+          tail = tail.replace('force_refresh(app, client).await?', 'force_refresh_from_dir(app_data_dir, client).await?', 1)
+          text = head + tail
+          text = text.replace(
+              '''    let trimmed = body.trim();\n    if trimmed.len() <= 600 {\n        return trimmed.to_string();\n    }\n    format!("{}…", &trimmed[..600])''',
+              '''    let trimmed = body.trim();\n    if trimmed.chars().count() <= 600 {\n        return trimmed.to_string();\n    }\n    format!("{}…", trimmed.chars().take(600).collect::<String>())''',
+              1,
+          )
+          text = text.replace(
+              '''    apply_codex_headers(client.post(url), auth, true)\n        .json(&body)''',
+              '''    apply_codex_headers(client.post(url), auth, true)\n        .timeout(Duration::from_secs(300))\n        .json(&body)''',
+              1,
+          )
+          p.write_text(text)
+
+          # Native provider dispatch.
+          llm = 'frontend/src-tauri/src/summary/llm_client.rs'
+          replace_once(llm, '    OpenAI,\n    Claude,', '    OpenAI,\n    OpenAICodex,\n    Claude,')
+          replace_once(
+              llm,
+              '            "openai" => Ok(Self::OpenAI),\n            "claude" => Ok(Self::Claude),',
+              '            "openai" => Ok(Self::OpenAI),\n            "openai-codex" | "codex" | "chatgpt" => Ok(Self::OpenAICodex),\n            "claude" => Ok(Self::Claude),',
+          )
+          replace_once(
+              llm,
+              '''    // Handle BuiltInAI provider separately (uses local sidecar, no HTTP API)\n    if provider == &LLMProvider::BuiltInAI {''',
+              '''    if provider == &LLMProvider::OpenAICodex {\n        let app_data_dir = app_data_dir\n            .ok_or_else(|| "app_data_dir is required for OpenAI Codex provider".to_string())?;\n        return crate::openai_codex::generate_codex_summary(\n            client,\n            app_data_dir,\n            model_name,\n            system_prompt,\n            user_prompt,\n            cancellation_token,\n        )\n        .await;\n    }\n\n    // Handle BuiltInAI provider separately (uses local sidecar, no HTTP API)\n    if provider == &LLMProvider::BuiltInAI {''',
+          )
+          replace_once(
+              llm,
+              '''        LLMProvider::BuiltInAI => {\n            // This case is handled earlier with early returns\n            unreachable!("BuiltInAI is handled before this match statement")\n        }''',
+              '''        LLMProvider::BuiltInAI => {\n            unreachable!("BuiltInAI is handled before this match statement")\n        }\n        LLMProvider::OpenAICodex => {\n            unreachable!("OpenAICodex is handled before this match statement")\n        }''',
+          )
+          replace_once(
+              llm,
+              '        LLMProvider::OpenAI => "OpenAI",\n        LLMProvider::Claude => "Claude",',
+              '        LLMProvider::OpenAI => "OpenAI",\n        LLMProvider::OpenAICodex => "OpenAI Codex (ChatGPT subscription)",\n        LLMProvider::Claude => "Claude",',
+          )
+
+          replace_once(
+              'frontend/src-tauri/src/summary/service.rs',
+              '        let api_key = if provider == LLMProvider::Ollama || provider == LLMProvider::BuiltInAI || provider == LLMProvider::CustomOpenAI {',
+              '''        let api_key = if provider == LLMProvider::Ollama\n            || provider == LLMProvider::BuiltInAI\n            || provider == LLMProvider::CustomOpenAI\n            || provider == LLMProvider::OpenAICodex\n        {''',
+          )
+
+          settings = Path('frontend/src-tauri/src/database/repositories/setting.rs')
+          text = settings.read_text()
+          text = text.replace(
+              '            "builtin-ai" => return Ok(()), // No API key needed\n            _ => {',
+              '            "builtin-ai" => return Ok(()), // No API key needed\n            "openai-codex" => return Ok(()), // MeetOdds-owned OAuth\n            _ => {',
+              1,
+          )
+          text = text.replace(
+              '            "builtin-ai" => return Ok(None), // No API key needed\n            _ => {',
+              '            "builtin-ai" => return Ok(None), // No API key needed\n            "openai-codex" => return Ok(None), // OAuth lives outside SQLite\n            _ => {',
+              1,
+          )
+          # delete_api_key has another builtin-ai arm.
+          text = text.replace(
+              '            "builtin-ai" => return Ok(()), // No API key needed\n            _ => {',
+              '            "builtin-ai" => return Ok(()), // No API key needed\n            "openai-codex" => return Ok(()), // OAuth lives outside SQLite\n            _ => {',
+              1,
+          )
+          settings.write_text(text)
+
+          replace_once(
+              'frontend/src-tauri/src/lib.rs',
+              'pub mod openai;\npub mod anthropic;',
+              'pub mod openai;\npub mod openai_codex;\npub mod anthropic;',
+          )
+          replace_once(
+              'frontend/src-tauri/src/lib.rs',
+              '            openai::openai::get_openai_models,\n            anthropic::anthropic::get_anthropic_models,',
+              '''            openai::openai::get_openai_models,\n            openai_codex::openai_codex_start_device_auth,\n            openai_codex::openai_codex_poll_device_auth,\n            openai_codex::openai_codex_get_auth_status,\n            openai_codex::openai_codex_logout,\n            openai_codex::openai_codex_get_models,\n            anthropic::anthropic::get_anthropic_models,''',
+          )
+
+          # Frontend provider types.
+          p = Path('frontend/src/services/configService.ts')
+          text = p.read_text()
+          old = "provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';"
+          new = "provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'openai-codex' | 'builtin-ai' | 'custom-openai';"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('configService provider union changed after main sync')
+          p.write_text(text)
+
+          p = Path('frontend/src/components/ModelSettingsModal.tsx')
+          text = p.read_text()
+          old = "provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';"
+          new = "provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openai-codex' | 'openrouter' | 'builtin-ai' | 'custom-openai';"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('ModelSettings provider union changed after main sync')
+          if "OpenAICodexSettings" not in text:
+              text = text.replace(
+                  "import { toast } from 'sonner';",
+                  "import { toast } from 'sonner';\nimport { OpenAICodexSettings } from '@/components/OpenAICodexSettings';",
+                  1,
+              )
+          if 'const CODEX_FALLBACK_MODELS' not in text:
+              text = text.replace(
+                  'const CLAUDE_FALLBACK_MODELS = [',
+                  "const CODEX_FALLBACK_MODELS = [\n  'gpt-5.6-sol',\n  'gpt-5.6-terra',\n  'gpt-5.6-luna',\n  'gpt-5.5',\n  'gpt-5.4-mini',\n  'gpt-5.4',\n  'gpt-5.3-codex',\n  'gpt-5.3-codex-spark',\n];\n\nconst CLAUDE_FALLBACK_MODELS = [",
+                  1,
+              )
+          if 'const [codexModels' not in text:
+              text = text.replace(
+                  "  const [openaiModels, setOpenaiModels] = useState<string[]>([]);\n  const [claudeModels, setClaudeModels] = useState<string[]>([]);",
+                  "  const [openaiModels, setOpenaiModels] = useState<string[]>([]);\n  const [codexModels, setCodexModels] = useState<string[]>([]);\n  const [codexConnected, setCodexConnected] = useState<boolean>(false);\n  const [claudeModels, setClaudeModels] = useState<string[]>([]);",
+                  1,
+              )
+          if "'openai-codex': codexModels" not in text:
+              text = text.replace(
+                  '    openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,\n    openrouter:',
+                  "    openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,\n    'openai-codex': codexModels.length > 0 ? codexModels : CODEX_FALLBACK_MODELS,\n    openrouter:",
+                  1,
+              )
+          text = text.replace(
+              '    (requiresApiKey && (!apiKey || (typeof apiKey === \'string\' && !apiKey.trim()))) ||\n    (modelConfig.provider === \'ollama\' && ollamaEndpointChanged) ||',
+              '    (requiresApiKey && (!apiKey || (typeof apiKey === \'string\' && !apiKey.trim()))) ||\n    (modelConfig.provider === \'openai-codex\' && !codexConnected) ||\n    (modelConfig.provider === \'ollama\' && ollamaEndpointChanged) ||',
+              1,
+          )
+          text = text.replace(
+              "          if (data.provider !== 'ollama' && !data.apiKey) {",
+              "          if (data.provider !== 'ollama' && data.provider !== 'openai-codex' && !data.apiKey) {",
+              1,
+          )
+          text = text.replace(
+              '  }, [models, openRouterModels, builtinAiModels, openaiModels, claudeModels, groqModels, modelConfig.provider]);',
+              '  }, [models, openRouterModels, builtinAiModels, openaiModels, codexModels, claudeModels, groqModels, modelConfig.provider]);',
+              1,
+          )
+          text = text.replace(
+              "      apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null,",
+              "      apiKey: modelConfig.provider === 'openai-codex' ? null : (typeof apiKey === 'string' ? apiKey.trim() || null : null),",
+              1,
+          )
+          if '<SelectItem value="openai-codex">' not in text:
+              text = text.replace(
+                  '                <SelectItem value="openai">OpenAI Cloud API</SelectItem>',
+                  '                <SelectItem value="openai-codex">OpenAI Codex (ChatGPT subscription)</SelectItem>\n                <SelectItem value="openai">OpenAI Cloud API</SelectItem>',
+                  1,
+              )
+          # Replace the earlier API-only caveat now that the subscription flow exists.
+          start = text.find("        {modelConfig.provider === 'openai' && (")
+          end_anchor = '        {/* Custom OpenAI Configuration Section */}'
+          end = text.find(end_anchor, start)
+          if start == -1 or end == -1:
+              raise SystemExit('OpenAI settings block moved after main sync')
+          replacement = '''        {modelConfig.provider === 'openai' && (\n          <Alert className="border-blue-200 bg-blue-50">\n            <AlertDescription className="space-y-2 text-sm text-blue-950">\n              <p>\n                <strong>OpenAI Cloud API</strong> uses an OpenAI API key and separate API billing.\n                To use your ChatGPT Plus/Pro Codex allowance, choose\n                <strong> OpenAI Codex (ChatGPT subscription)</strong>.\n              </p>\n              <Button\n                type="button"\n                variant="link"\n                size="sm"\n                className="h-auto p-0 text-blue-700"\n                onClick={() => invoke('open_external_url', { url: 'https://platform.openai.com/api-keys' })}\n              >\n                Create or manage an OpenAI API key\n                <ExternalLink className="ml-1 h-3.5 w-3.5" />\n              </Button>\n            </AlertDescription>\n          </Alert>\n        )}\n\n        {modelConfig.provider === 'openai-codex' && (\n          <OpenAICodexSettings\n            onConnectionChange={setCodexConnected}\n            onModelsChange={(nextModels) => {\n              setCodexModels(nextModels);\n              if (nextModels.length > 0 && !nextModels.includes(modelConfig.model)) {\n                setModelConfig((prev: ModelConfig) => ({ ...prev, model: nextModels[0] }));\n              }\n            }}\n          />\n        )}\n\n'''
+          text = text[:start] + replacement + text[end:]
+          p.write_text(text)
+
+          # Context has a Record keyed by the provider union, so add Codex explicitly.
+          p = Path('frontend/src/contexts/ConfigContext.tsx')
+          text = p.read_text()
+          if "'openai-codex':" not in text:
+              text = text.replace(
+                  "    openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],",
+                  "    openai: ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna'],\n    'openai-codex': ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4'],",
+                  1,
+              )
+          p.write_text(text)
+
+          p = Path('frontend/src/hooks/meeting-details/useModelConfiguration.ts')
+          text = p.read_text()
+          text = text.replace(
+              "          if (data.provider !== 'ollama' && data.provider !== 'custom-openai' && !data.apiKey) {",
+              "          if (data.provider !== 'ollama' && data.provider !== 'custom-openai' && data.provider !== 'openai-codex' && !data.apiKey) {",
+              1,
+          )
+          p.write_text(text)
+
+          Path('docs/OPENAI_CLOUD.md').write_text('''# OpenAI in MeetOdds\n\nMeetOdds supports two separate OpenAI summary providers. Recording and transcription stay local unless you explicitly choose a cloud summary provider.\n\n## OpenAI Codex — ChatGPT subscription\n\nChoose **OpenAI Codex (ChatGPT subscription)** to use the Codex allowance available to your ChatGPT Plus/Pro account. MeetOdds follows the same pattern used by Hermes Agent: OpenAI's Codex device-code OAuth flow and the ChatGPT Codex Responses backend. No OpenAI API key is required.\n\nMeetOdds opens OpenAI's device-login page, stores its own rotating access/refresh token pair in the app-data directory, refreshes it when needed, discovers models from the signed-in Codex account, and sends summary requests to `https://chatgpt.com/backend-api/codex/responses`.\n\nMeetOdds deliberately does **not** import or overwrite `~/.codex/auth.json`; refresh tokens rotate, so MeetOdds owns only the OAuth session it created. On Unix, the credential file is owner-readable only. A subscription usage-limit response is surfaced as a Codex allowance condition instead of an API-key error.\n\n## OpenAI Cloud API — API billing\n\nChoose **OpenAI Cloud API** for the normal OpenAI Platform API-key path. This calls `api.openai.com` and uses API billing separately from ChatGPT subscriptions.\n\n## Privacy\n\nLocal Built-in AI and Ollama remain available for fully local summaries. When either OpenAI provider is selected, transcript text needed for summary generation or translation is sent to that OpenAI service.\n\n## Upgrade compatibility\n\nThe visible app name is **MeetOdds**, while the existing `com.meetily.ai` bundle identifier and internal Rust package name remain unchanged so existing settings, recordings, model files, and database data survive the rename.\n''')
+          PY
+
+          rustfmt --edition 2021 \
+            frontend/src-tauri/src/openai_codex.rs \
+            frontend/src-tauri/src/summary/llm_client.rs \
+            frontend/src-tauri/src/summary/service.rs \
+            frontend/src-tauri/src/database/repositories/setting.rs \
+            frontend/src-tauri/src/lib.rs
+
+          git add frontend/src-tauri/src/openai_codex.rs \
+                  frontend/src-tauri/src/summary/llm_client.rs \
+                  frontend/src-tauri/src/summary/service.rs \
+                  frontend/src-tauri/src/database/repositories/setting.rs \
+                  frontend/src-tauri/src/lib.rs \
+                  frontend/src/services/configService.ts \
+                  frontend/src/contexts/ConfigContext.tsx \
+                  frontend/src/hooks/meeting-details/useModelConfiguration.ts \
+                  frontend/src/components/ModelSettingsModal.tsx \
+                  frontend/src/components/OpenAICodexSettings.tsx \
+                  docs/OPENAI_CLOUD.md
+          git commit -m "feat(llm): use ChatGPT subscription through Codex OAuth"
+          git push origin HEAD:feature/meetodds-openai-cloud
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential cmake clang libclang-dev pkg-config \
+            libasound2-dev libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf >/dev/null
+
+      - name: Validate Codex unit tests
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/src-tauri/binaries
+          : > frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          WHISPER_DONT_GENERATE_BINDINGS=1 cargo test -q -p meetily openai_codex --lib
+
+      - name: Frozen frontend install and production build
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Full native compile check
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/src-tauri/binaries
+          : > frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          WHISPER_DONT_GENERATE_BINDINGS=1 cargo check -q -p meetily --lib --message-format short
+
+      - name: Verify latest-main ancestry and provider separation
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          grep -q 'OpenAI Codex (ChatGPT subscription)' frontend/src/components/ModelSettingsModal.tsx
+          grep -q 'OpenAI Cloud API' frontend/src/components/ModelSettingsModal.tsx
+          grep -q 'deviceauth/usercode' frontend/src-tauri/src/openai_codex.rs
+          grep -q 'chatgpt.com/backend-api/codex' frontend/src-tauri/src/openai_codex.rs
+          grep -q 'OpenAICodex' frontend/src-tauri/src/summary/llm_client.rs
+          grep -q '"identifier": "com.meetily.ai"' frontend/src-tauri/tauri.conf.json
+
+      - name: Remove temporary OAuth validation workflows
+        if: success()
+        run: |
+          set -euo pipefail
+          git rm -f .github/workflows/meetodds-codex-oauth.yml .github/workflows/meetodds-codex-oauth-v2.yml
+          git commit -m "chore(ci): remove Codex OAuth validation harnesses"
+          git push origin HEAD:feature/meetodds-openai-cloud
