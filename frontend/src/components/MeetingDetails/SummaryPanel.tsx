@@ -16,6 +16,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
+import { exportMeetingSummary, type MeetingExportFormat } from '@/lib/meeting-export';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
@@ -100,6 +101,7 @@ export function SummaryPanel({
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<MeetingExportFormat | null>(null);
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -222,6 +224,40 @@ export function SummaryPanel({
     void persistLatestLanguageSelection();
   };
 
+  const handleExport = async (format: MeetingExportFormat) => {
+  if (exportingFormat) return;
+  setExportingFormat(format);
+
+  try {
+    const editorMarkdown = await summaryRef.current?.getMarkdown();
+    const rawPersistedMarkdown = (aiSummary as unknown as { markdown?: unknown } | null)?.markdown;
+    const persistedMarkdown = typeof rawPersistedMarkdown === 'string' ? rawPersistedMarkdown : '';
+    const markdown = (editorMarkdown || persistedMarkdown).trim();
+
+    if (!markdown) {
+      throw new Error('No summary content is available to export.');
+    }
+
+    const result = await exportMeetingSummary({
+      format,
+      title: meetingTitle,
+      createdAt: meeting.created_at,
+      markdown,
+    });
+
+    toast.success(`Exported ${result.filename}`, {
+      description: result.path ?? `Saved through ${result.destination}.`,
+    });
+  } catch (error) {
+    console.error(`Failed to export ${format}:`, error);
+    toast.error(`Failed to export ${format.toUpperCase()}`, {
+      description: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    setExportingFormat(null);
+  }
+};
+
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   const languageSlot = (
@@ -300,6 +336,8 @@ export function SummaryPanel({
                   console.log('Find in summary clicked');
                 }}
                 onOpenFolder={onOpenFolder}
+                onExport={handleExport}
+                exportingFormat={exportingFormat}
                 hasSummary={!!aiSummary}
               />
             </div>
