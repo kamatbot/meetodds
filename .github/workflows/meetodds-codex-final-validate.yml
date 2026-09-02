@@ -1,0 +1,109 @@
+name: Final validate MeetOdds ChatGPT Codex OAuth
+
+on:
+  push:
+    branches: [feature/meetodds-openai-cloud]
+    paths:
+      - .github/workflows/meetodds-codex-final-validate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/meetodds-openai-cloud
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Confirm branch contains current main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if [ "$(git rev-list --count HEAD..origin/main)" -ne 0 ]; then
+            echo "Feature branch is behind main; refusing to validate stale code."
+            git log --oneline HEAD..origin/main
+            exit 1
+          fi
+          echo "Feature branch contains current main."
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential cmake clang libclang-dev pkg-config \
+            libglib2.0-dev libasound2-dev libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf >/dev/null
+
+      - name: Provide Tauri helper placeholder
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/src-tauri/binaries
+          : > frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+
+      - name: Validate Codex auth and response parser tests
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+        run: |
+          set -euo pipefail
+          cargo test -q -p meetily openai_codex --lib
+
+      - name: Frozen frontend install and production build
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Full native Rust compile check
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+          CARGO_TERM_COLOR: never
+        run: |
+          set -euo pipefail
+          cargo check -q -p meetily --lib --message-format short
+
+      - name: Verify provider separation and wiring
+        run: |
+          set -euo pipefail
+          grep -q 'OpenAI Codex (ChatGPT subscription)' frontend/src/components/ModelSettingsModal.tsx
+          grep -q 'OpenAI Cloud API' frontend/src/components/ModelSettingsModal.tsx
+          grep -q "'openai-codex'" frontend/src/services/configService.ts
+          grep -q 'OpenAICodex' frontend/src-tauri/src/summary/llm_client.rs
+          grep -q 'openai_codex::openai_codex_start_device_auth' frontend/src-tauri/src/lib.rs
+          grep -q 'openai_codex::openai_codex_get_models' frontend/src-tauri/src/lib.rs
+          grep -q 'chatgpt.com/backend-api/codex' frontend/src-tauri/src/openai_codex.rs
+          grep -q 'deviceauth/usercode' frontend/src-tauri/src/openai_codex.rs
+          grep -q 'auth.openai.com/oauth/token' frontend/src-tauri/src/openai_codex.rs
+          grep -q 'ChatGPT-Account-ID' frontend/src-tauri/src/openai_codex.rs
+          grep -q '"store": false' frontend/src-tauri/src/openai_codex.rs
+          grep -q 'openai-codex" => return Ok(None)' frontend/src-tauri/src/database/repositories/setting.rs
+          grep -q 'OpenAICodex' frontend/src-tauri/src/summary/service.rs
+          grep -q '"identifier": "com.meetily.ai"' frontend/src-tauri/tauri.conf.json
+          grep -q '"productName": "MeetOdds"' frontend/src-tauri/tauri.conf.json
+
+      - name: Remove one-time validation harnesses
+        if: success()
+        run: |
+          set -euo pipefail
+          git rm -f .github/workflows/meetodds-codex-final-validate.yml
+          if [ -f .github/workflows/meetodds-codex-oauth.yml ]; then
+            git rm -f .github/workflows/meetodds-codex-oauth.yml
+          fi
+          git commit -m "chore(ci): remove Codex OAuth validation harnesses"
+          git push origin HEAD:feature/meetodds-openai-cloud
