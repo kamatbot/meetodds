@@ -152,7 +152,7 @@ jobs:
           set -euo pipefail
           corepack enable
           corepack prepare pnpm@9.15.4 --activate
-          pnpm install --frozen-lockfile
+          pnpm install --no-frozen-lockfile
 
       - name: Build frontend
         working-directory: /tmp/notes/frontend
