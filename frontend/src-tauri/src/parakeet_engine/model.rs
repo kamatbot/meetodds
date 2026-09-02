@@ -1,3 +1,4 @@
+use crate::audio::hardware_detector::HardwareProfile;
 use ndarray::{Array, Array1, Array2, Array3, ArrayD, ArrayViewD, IxDyn};
 use once_cell::sync::Lazy;
 use ort::execution_providers::CPUExecutionProvider;
@@ -60,9 +61,17 @@ impl Drop for ParakeetModel {
 
 impl ParakeetModel {
     pub fn new<P: AsRef<Path>>(model_dir: P, quantized: bool) -> Result<Self, ParakeetError> {
-        let encoder = Self::init_session(&model_dir, "encoder-model", None, quantized)?;
-        let decoder_joint = Self::init_session(&model_dir, "decoder_joint-model", None, quantized)?;
-        let preprocessor = Self::init_session(&model_dir, "nemo128", None, false)?;
+        let thread_budget =
+            HardwareProfile::recommended_meeting_threads(HardwareProfile::detect().cpu_cores);
+        let encoder =
+            Self::init_session(&model_dir, "encoder-model", Some(thread_budget), quantized)?;
+        let decoder_joint = Self::init_session(
+            &model_dir,
+            "decoder_joint-model",
+            Some(thread_budget),
+            quantized,
+        )?;
+        let preprocessor = Self::init_session(&model_dir, "nemo128", Some(thread_budget), false)?;
 
         let (vocab, blank_idx) = Self::load_vocab(&model_dir)?;
         let vocab_size = vocab.len();

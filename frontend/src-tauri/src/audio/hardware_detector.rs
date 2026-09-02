@@ -164,6 +164,10 @@ impl HardwareProfile {
         cpu_cores.saturating_sub(reserve_for_ui).clamp(2, cap) as usize
     }
 
+    pub(crate) fn recommended_meeting_threads(cpu_cores: u8) -> usize {
+        Self::recommended_decoder_threads(cpu_cores, 4, 6)
+    }
+
     #[cfg(target_os = "macos")]
     fn has_metal_support() -> bool {
         std::env::consts::ARCH == "aarch64"
@@ -231,8 +235,8 @@ impl HardwareProfile {
         #[cfg(not(target_os = "windows"))]
         {
             // M-series Macs already use Metal and Core ML at compile time. The
-            // remaining decoder work is CPU-bound, so use the available cores
-            // while preserving two cores for capture, rendering, and the OS.
+            // remaining decoder work is CPU-bound, so reserve four cores for
+            // capture, rendering, and the OS while keeping inference bounded.
             // Beam 3 retains meeting-quality output without the expensive beam
             // 5 setting previously selected for high-memory Apple Silicon.
             if apple_silicon && self.gpu_type == GpuType::Metal {
@@ -240,7 +244,7 @@ impl HardwareProfile {
                     beam_size: if self.memory_gb >= 16 { 3 } else { 2 },
                     temperature: 0.2,
                     use_gpu: true,
-                    max_threads: Some(Self::recommended_decoder_threads(self.cpu_cores, 2, 10)),
+                    max_threads: Some(Self::recommended_meeting_threads(self.cpu_cores)),
                     chunk_size_preference: ChunkSizePreference::Balanced,
                 };
             }
@@ -365,16 +369,25 @@ mod tests {
         let config = m_series.whisper_config_for_platform(true);
 
         assert_eq!(config.beam_size, 3);
-        assert_eq!(config.max_threads, Some(10));
+        assert_eq!(config.max_threads, Some(6));
         assert!(config.use_gpu);
         assert_eq!(config.chunk_size_preference, ChunkSizePreference::Balanced);
+
+        for (cpu_cores, expected_threads) in [(8, 4), (10, 6), (12, 6)] {
+            let m_series = profile(cpu_cores, 24, GpuType::Metal, PerformanceTier::Ultra);
+            assert_eq!(
+                m_series.whisper_config_for_platform(true).max_threads,
+                Some(expected_threads)
+            );
+        }
     }
 
     #[test]
     fn decoder_threads_keep_headroom() {
-        assert_eq!(HardwareProfile::recommended_decoder_threads(12, 2, 10), 10);
-        assert_eq!(HardwareProfile::recommended_decoder_threads(8, 2, 10), 6);
-        assert_eq!(HardwareProfile::recommended_decoder_threads(2, 2, 10), 2);
+        assert_eq!(HardwareProfile::recommended_meeting_threads(8), 4);
+        assert_eq!(HardwareProfile::recommended_meeting_threads(10), 6);
+        assert_eq!(HardwareProfile::recommended_meeting_threads(12), 6);
+        assert_eq!(HardwareProfile::recommended_meeting_threads(2), 2);
     }
 
     #[test]
