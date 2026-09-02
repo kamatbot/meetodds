@@ -1,4 +1,4 @@
-name: Import Meetily upstream
+name: Apply and validate export milestone
 
 on:
   push:
@@ -11,40 +11,202 @@ permissions:
   contents: write
 
 jobs:
-  import:
+  export-milestone:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Clone Meetily and publish baseline branches
+      - name: Apply export implementation to feature branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          rm -rf /tmp/meetily
-          git clone --no-tags https://github.com/Zackriya-Solutions/meetily.git /tmp/meetily
-          cd /tmp/meetily
-          git checkout main
+          rm -rf /tmp/notes
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/notes
+          cd /tmp/notes
+          git checkout feature/mayur-notes
 
-          # Preserve upstream CI definitions without activating or paying for the
-          # copied workflow matrix in this private repository.
-          if [ -d .github/workflows ]; then
-            git mv .github/workflows .github/upstream-workflows-disabled
-          fi
+          mkdir -p frontend/src/lib frontend/src/components/MeetingDetails docs
+          git show origin/main:.github/payloads/meeting-export-formats.ts.gz | gzip -dc > frontend/src/lib/meeting-export-formats.ts
+          git show origin/main:.github/payloads/meeting-export.ts.gz | gzip -dc > frontend/src/lib/meeting-export.ts
+          git show origin/main:.github/payloads/SummaryUpdaterButtonGroup.tsx.gz | gzip -dc > frontend/src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx
 
-          cat > .github/UPSTREAM_IMPORT.md <<'EOF'
-          # Upstream import
+          python3 <<'PY'
+          from pathlib import Path
 
-          This repository was imported from `Zackriya-Solutions/meetily`.
-          The original GitHub Actions files are preserved in
-          `.github/upstream-workflows-disabled/` so the copied repository does
-          not automatically run the upstream release/build matrix.
+          path = Path('frontend/src/components/MeetingDetails/SummaryPanel.tsx')
+          text = path.read_text()
+
+          def replace_once(source: str, replacement: str) -> None:
+              global text
+              if source not in text:
+                  raise SystemExit(f'Could not find SummaryPanel patch anchor:\n{source}')
+              text = text.replace(source, replacement, 1)
+
+          if "@/lib/meeting-export" not in text:
+              replace_once(
+                  "import { labelForCode } from '@/lib/summary-languages';\n",
+                  "import { labelForCode } from '@/lib/summary-languages';\n"
+                  "import { exportMeetingSummary, type MeetingExportFormat } from '@/lib/meeting-export';\n",
+              )
+
+          if 'const [exportingFormat, setExportingFormat]' not in text:
+              replace_once(
+                  "  const [langPickerOpen, setLangPickerOpen] = useState(false);\n",
+                  "  const [langPickerOpen, setLangPickerOpen] = useState(false);\n"
+                  "  const [exportingFormat, setExportingFormat] = useState<MeetingExportFormat | null>(null);\n",
+              )
+
+          if 'const handleExport = async (format: MeetingExportFormat)' not in text:
+              handler = """  const handleExport = async (format: MeetingExportFormat) => {
+            if (exportingFormat) return;
+            setExportingFormat(format);
+
+            try {
+              const editorMarkdown = await summaryRef.current?.getMarkdown();
+              const rawPersistedMarkdown = (aiSummary as unknown as { markdown?: unknown } | null)?.markdown;
+              const persistedMarkdown = typeof rawPersistedMarkdown === 'string' ? rawPersistedMarkdown : '';
+              const markdown = (editorMarkdown || persistedMarkdown).trim();
+
+              if (!markdown) {
+                throw new Error('No summary content is available to export.');
+              }
+
+              const result = await exportMeetingSummary({
+                format,
+                title: meetingTitle,
+                createdAt: meeting.created_at,
+                markdown,
+              });
+
+              toast.success(`Exported ${result.filename}`, {
+                description: result.path ?? `Saved through ${result.destination}.`,
+              });
+            } catch (error) {
+              console.error(`Failed to export ${format}:`, error);
+              toast.error(`Failed to export ${format.toUpperCase()}`, {
+                description: error instanceof Error ? error.message : String(error),
+              });
+            } finally {
+              setExportingFormat(null);
+            }
+          };
+
+          """
+              replace_once(
+                  "  const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';\n",
+                  handler + "  const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';\n",
+              )
+
+          if 'onExport={handleExport}' not in text:
+              replace_once(
+                  "                onOpenFolder={onOpenFolder}\n                hasSummary={!!aiSummary}\n",
+                  "                onOpenFolder={onOpenFolder}\n"
+                  "                onExport={handleExport}\n"
+                  "                exportingFormat={exportingFormat}\n"
+                  "                hasSummary={!!aiSummary}\n",
+              )
+
+          path.write_text(text)
+          PY
+
+          cat > docs/EXPORTS.md <<'EOF'
+          # Formatted meeting exports
+
+          Notes exports the current edited summary—not merely the last persisted copy—through the summary toolbar.
+
+          ## Formats
+
+          | Format | Output |
+          | --- | --- |
+          | PDF | Paginated A4 report with document metadata, heading hierarchy, lists, quotes, code blocks, table grids, and page footers |
+          | DOCX | Editable Word document with named paragraph styles, inline emphasis, lists, quotes, code blocks, tables, and document properties |
+          | Markdown | Portable UTF-8 source with the meeting title and formatted meeting date |
+
+          ## Save behavior
+
+          The desktop app writes to the user's Downloads directory through Tauri's filesystem and path APIs. Existing files are never overwritten: subsequent exports add ` (1)`, ` (2)`, and so on. When desktop filesystem APIs are unavailable, the same data is sent through the browser download mechanism.
+
+          Export filenames are sanitized for macOS, Windows, and Linux and include the meeting date. The implementation has no additional runtime package dependency; PDF and DOCX serialization are kept in the client export module so opening a meeting does not load an export library.
+
+          ## Supported Markdown
+
+          The formatted serializers support headings, paragraphs, ordered and unordered lists, nested list indentation, block quotes, fenced code, dividers, GFM-style tables, bold, italic, inline code, and links. Unsupported Markdown remains readable as text rather than being silently discarded.
           EOF
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github
-          git commit -m "chore: import Meetily and archive upstream workflows"
+          git add frontend/src/lib/meeting-export-formats.ts \
+                  frontend/src/lib/meeting-export.ts \
+                  frontend/src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx \
+                  frontend/src/components/MeetingDetails/SummaryPanel.tsx \
+                  docs/EXPORTS.md
 
-          git remote remove origin
-          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin HEAD:refs/heads/upstream/meetily-main --force
-          git push origin HEAD:refs/heads/feature/mayur-notes --force
+          if ! git diff --cached --quiet; then
+            git commit -m "feat(export): add formatted PDF DOCX and Markdown exports"
+            git push origin HEAD:feature/mayur-notes
+          fi
+
+      - name: Install frontend dependencies
+        working-directory: /tmp/notes/frontend
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: /tmp/notes/frontend
+        run: pnpm build
+
+      - name: Validate generated PDF and DOCX
+        working-directory: /tmp/notes/frontend
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/export-smoke
+          pnpm exec tsc src/lib/meeting-export-formats.ts \
+            --target ES2020 \
+            --module commonjs \
+            --outDir /tmp/export-smoke \
+            --strict \
+            --skipLibCheck
+
+          node <<'NODE'
+          const fs = require('fs');
+          const { buildDocx, buildPdf } = require('/tmp/export-smoke/meeting-export-formats.js');
+          const markdown = `# Product Review
+
+          **Meeting date:** September 2, 2026
+
+          ---
+
+          ## Executive diagnosis
+
+          The team made **one reversible decision** and left a trust guardrail unresolved.
+
+          - Ship the thin slice
+          - Protect strategic capacity
+
+          > Strongest dissent: comprehension was not measured.
+
+          | Decision | Owner | Date |
+          | --- | --- | --- |
+          | Test onboarding | Mayur | 2026-09-09 |
+
+          \`\`\`text
+          rollback if complaints > 1%
+          \`\`\`
+          `;
+
+          fs.writeFileSync(
+            '/tmp/notes-export-smoke.docx',
+            Buffer.from(buildDocx(markdown, { title: 'Product Review', createdAt: '2026-09-02T06:00:00Z' })),
+          );
+          fs.writeFileSync(
+            '/tmp/notes-export-smoke.pdf',
+            Buffer.from(buildPdf(markdown, { title: 'Product Review', createdAt: '2026-09-02T06:00:00Z' })),
+          );
+          NODE
+
+          unzip -t /tmp/notes-export-smoke.docx
+          file /tmp/notes-export-smoke.docx /tmp/notes-export-smoke.pdf
+          head -c 8 /tmp/notes-export-smoke.pdf | grep -a '%PDF-1.4'
