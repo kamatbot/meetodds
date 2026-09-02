@@ -49,23 +49,23 @@ jobs:
               '    let mut frame_features: Vec<Vec<f32>> = Vec::new();\n'
               '    let mut last_pitch = (0.0f32, 0.0f32);\n',
           )
-          replace_once(
-              speaker,
-              '''        let (pitch_hz, pitch_strength) = if frame_number % 4 == 0 {
-            estimate_pitch(frame, sample_rate)
-        } else {
-            (0.0, 0.0)
-        };
-''',
-              '''        // Pitch autocorrelation is the most expensive frame feature. Sample it
-        // every fourth frame, then carry the latest observation through the
-        // intervening frames so the segment-level mean remains discriminative.
-        if frame_number % 4 == 0 {
-            last_pitch = estimate_pitch(frame, sample_rate);
-        }
-        let (pitch_hz, pitch_strength) = last_pitch;
-''',
+          pitch_old = (
+              '        let (pitch_hz, pitch_strength) = if frame_number % 4 == 0 {\n'
+              '            estimate_pitch(frame, sample_rate)\n'
+              '        } else {\n'
+              '            (0.0, 0.0)\n'
+              '        };\n'
           )
+          pitch_new = (
+              '        // Pitch autocorrelation is the most expensive frame feature. Sample it\n'
+              '        // every fourth frame, then carry the latest observation through the\n'
+              '        // intervening frames so the segment-level mean remains discriminative.\n'
+              '        if frame_number % 4 == 0 {\n'
+              '            last_pitch = estimate_pitch(frame, sample_rate);\n'
+              '        }\n'
+              '        let (pitch_hz, pitch_strength) = last_pitch;\n'
+          )
+          replace_once(speaker, pitch_old, pitch_new)
           replace_once(
               speaker,
               '            normalized_pitch,\n',
