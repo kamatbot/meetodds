@@ -12,8 +12,7 @@ use tokio_util::sync::CancellationToken;
 const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-const CODEX_DEVICE_USER_CODE_URL: &str =
-    "https://auth.openai.com/api/accounts/deviceauth/usercode";
+const CODEX_DEVICE_USER_CODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
 const CODEX_DEVICE_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/token";
 const CODEX_DEVICE_VERIFY_URL: &str = "https://auth.openai.com/codex/device";
 const CODEX_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
@@ -105,8 +104,8 @@ fn read_auth(path: &Path) -> Result<Option<CodexAuthState>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("Unable to read OpenAI Codex credentials: {e}"))?;
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("Unable to read OpenAI Codex credentials: {e}"))?;
     let auth = serde_json::from_slice::<CodexAuthState>(&bytes)
         .map_err(|e| format!("OpenAI Codex credential file is invalid: {e}"))?;
     if auth.access_token.trim().is_empty() || auth.refresh_token.trim().is_empty() {
@@ -241,7 +240,10 @@ async fn refresh_auth_with_client(
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err("ChatGPT/Codex session expired or was revoked. Sign in again in MeetOdds.".to_string());
+            return Err(
+                "ChatGPT/Codex session expired or was revoked. Sign in again in MeetOdds."
+                    .to_string(),
+            );
         }
         return Err(format!(
             "Unable to refresh ChatGPT/Codex session (HTTP {status}): {}",
@@ -253,7 +255,8 @@ async fn refresh_auth_with_client(
         .json::<OAuthTokenResponse>()
         .await
         .map_err(|e| format!("OpenAI returned an invalid refresh response: {e}"))?;
-    let account_id = account_id_from_token(&token.access_token).or_else(|| current.account_id.clone());
+    let account_id =
+        account_id_from_token(&token.access_token).or_else(|| current.account_id.clone());
     let refreshed = CodexAuthState {
         access_token: token.access_token,
         refresh_token: token.refresh_token,
@@ -297,10 +300,10 @@ async fn force_refresh<R: Runtime>(
 
 fn compact_error(body: &str) -> String {
     let trimmed = body.trim();
-    if trimmed.len() <= 600 {
+    if trimmed.chars().count() <= 600 {
         return trimmed.to_string();
     }
-    format!("{}…", &trimmed[..600])
+    format!("{}…", trimmed.chars().take(600).collect::<String>())
 }
 
 fn apply_codex_headers(
@@ -486,6 +489,35 @@ pub async fn openai_codex_logout<R: Runtime>(app: AppHandle<R>) -> Result<(), St
     remove_auth(&path)
 }
 
+async fn load_valid_auth_from_dir(
+    app_data_dir: &Path,
+    client: &Client,
+) -> Result<CodexAuthState, String> {
+    let _guard = AUTH_LOCK.lock().await;
+    let path = app_data_dir.join(AUTH_FILE_NAME);
+    let auth = read_auth(&path)?.ok_or_else(|| {
+        "OpenAI Codex is not connected. Sign in with your ChatGPT subscription in MeetOdds settings."
+            .to_string()
+    })?;
+    if token_needs_refresh(&auth) {
+        refresh_auth_with_client(client, &path, &auth).await
+    } else {
+        Ok(auth)
+    }
+}
+
+async fn force_refresh_from_dir(
+    app_data_dir: &Path,
+    client: &Client,
+) -> Result<CodexAuthState, String> {
+    let _guard = AUTH_LOCK.lock().await;
+    let path = app_data_dir.join(AUTH_FILE_NAME);
+    let auth = read_auth(&path)?.ok_or_else(|| {
+        "OpenAI Codex is not connected. Sign in again in MeetOdds settings.".to_string()
+    })?;
+    refresh_auth_with_client(client, &path, &auth).await
+}
+
 async fn request_models(
     client: &Client,
     auth: &CodexAuthState,
@@ -535,13 +567,13 @@ pub async fn openai_codex_get_models<R: Runtime>(
     models.sort();
     models.dedup();
     if models.is_empty() {
-        models = CODEX_FALLBACK_MODELS.iter().map(|model| (*model).to_string()).collect();
+        models = CODEX_FALLBACK_MODELS
+            .iter()
+            .map(|model| (*model).to_string())
+            .collect();
     }
 
-    Ok(models
-        .into_iter()
-        .map(|id| CodexModel { id })
-        .collect())
+    Ok(models.into_iter().map(|id| CodexModel { id }).collect())
 }
 
 async fn send_codex_response_request(
@@ -563,6 +595,7 @@ async fn send_codex_response_request(
         "store": false,
     });
     apply_codex_headers(client.post(url), auth, true)
+        .timeout(Duration::from_secs(300))
         .json(&body)
         .send()
         .await
@@ -667,9 +700,9 @@ fn parse_codex_sse(body: &str) -> Result<String, String> {
     }
 }
 
-pub async fn generate_codex_summary<R: Runtime>(
+pub async fn generate_codex_summary(
     client: &Client,
-    app: &AppHandle<R>,
+    app_data_dir: &Path,
     model_name: &str,
     system_prompt: &str,
     user_prompt: &str,
@@ -681,26 +714,15 @@ pub async fn generate_codex_summary<R: Runtime>(
         }
     }
 
-    let mut auth = load_valid_auth(app, client).await?;
-    let mut response = send_codex_response_request(
-        client,
-        &auth,
-        model_name,
-        system_prompt,
-        user_prompt,
-    )
-    .await?;
+    let mut auth = load_valid_auth_from_dir(app_data_dir, client).await?;
+    let mut response =
+        send_codex_response_request(client, &auth, model_name, system_prompt, user_prompt).await?;
 
     if response.status() == StatusCode::UNAUTHORIZED {
-        auth = force_refresh(app, client).await?;
-        response = send_codex_response_request(
-            client,
-            &auth,
-            model_name,
-            system_prompt,
-            user_prompt,
-        )
-        .await?;
+        auth = force_refresh_from_dir(app_data_dir, client).await?;
+        response =
+            send_codex_response_request(client, &auth, model_name, system_prompt, user_prompt)
+                .await?;
     }
 
     if !response.status().is_success() {
@@ -741,7 +763,8 @@ mod tests {
     fn decodes_chatgpt_account_id_from_jwt() {
         let claims = r#"{"exp":4102444800,"https://api.openai.com/auth":{"chatgpt_account_id":"acct_test"}}"#;
         fn encode(data: &[u8]) -> String {
-            const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            const TABLE: &[u8; 64] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
             let mut out = String::new();
             let mut acc = 0u32;
             let mut bits = 0u8;

@@ -1,26 +1,27 @@
-# OpenAI Cloud in MeetOdds
+# OpenAI in MeetOdds
 
-MeetOdds supports OpenAI as an optional cloud summarization provider. Recording and transcription can remain local; when OpenAI is selected, the transcript content needed for the summary request is sent to the OpenAI API.
+MeetOdds offers two distinct OpenAI providers for meeting summaries. Recording and transcription remain local unless you explicitly choose a cloud summary provider.
 
-## Authentication
+## 1. OpenAI Codex — ChatGPT subscription
 
-MeetOdds uses the supported OpenAI API authentication mechanism: an OpenAI API key sent as a Bearer token from the native Tauri backend. The key is stored through MeetOdds' existing provider-key settings path and is not exposed in the rendered transcript UI.
+Choose **OpenAI Codex (ChatGPT subscription)** to use the Codex allowance available to your ChatGPT Plus/Pro account. MeetOdds follows the same architecture used by Hermes Agent: OpenAI's Codex device-code OAuth flow, followed by the ChatGPT Codex Responses backend. No OpenAI API key is needed for this mode.
 
-## Why there is no “Use my ChatGPT subscription” OAuth button
+The sign-in flow opens `https://auth.openai.com/codex/device`, stores MeetOdds' own rotating access/refresh token pair in the application's data directory, and sends summary requests to the Codex backend. Tokens are never written to the meeting database or rendered in the UI. On Unix, the token file is created with owner-only permissions.
 
-As of September 2, 2026, OpenAI documents ChatGPT and API billing as separate systems. “Sign in with ChatGPT” is an identity-provider login for participating applications; it does not independently grant an external application access to ChatGPT subscription usage or API entitlement. Codex is a product-specific exception that OpenAI explicitly supports with ChatGPT-plan sign-in.
+MeetOdds deliberately does **not** import `~/.codex/auth.json`. Refresh tokens rotate, so sharing the same refresh credential between MeetOdds and Codex CLI/VS Code could invalidate one of the sessions. MeetOdds owns and refreshes only the session it created.
 
-MeetOdds therefore does not imitate Codex OAuth or capture ChatGPT session tokens. Doing so would be unsupported, brittle, and misleading.
+Available Codex models are loaded from your signed-in account. The fallback catalog includes `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4-mini`, `gpt-5.4`, `gpt-5.3-codex`, and `gpt-5.3-codex-spark`; the live account response is authoritative. `-pro` model variants are excluded because consumer ChatGPT Codex accounts may reject them.
 
-## Setup
+Subscription usage and limits are enforced by OpenAI. A 429 response is presented as a Codex usage-limit condition rather than as an API-key authentication failure.
 
-1. Open **Settings → Model Settings**.
-2. Select **OpenAI Cloud API**.
-3. Use the link in MeetOdds to create/manage an OpenAI API key.
-4. Paste the key, choose a model, and save.
+## 2. OpenAI Cloud API — API billing
 
-The preferred summary model is `gpt-5.6-terra` for a strong quality/cost balance. `gpt-5.6` and `gpt-5.6-luna` are also offered as fallbacks; the app dynamically loads the models available to the supplied API key.
+Choose **OpenAI Cloud API** when you want to use an OpenAI Platform API key. This mode calls `api.openai.com` and is billed separately from ChatGPT subscriptions. MeetOdds dynamically loads the API models available to your key and currently prefers the GPT-5.6 family.
 
-## Compatibility note
+## Privacy boundary
 
-The visible product name is MeetOdds, but the existing `com.meetily.ai` Tauri identifier and internal Rust package name are intentionally retained so upgrades continue to use the same application data, settings, database, and recordings.
+Audio capture and transcription can remain entirely on-device. When either OpenAI cloud provider is selected, the transcript text needed to generate or translate a meeting summary is sent to the selected OpenAI service. Local Built-in AI and Ollama remain available when no cloud processing is desired.
+
+## Compatibility
+
+The visible application name is **MeetOdds**, while the existing `com.meetily.ai` Tauri identifier and internal Rust package name remain unchanged so upgrades continue using the existing settings, database, recordings, and model files.

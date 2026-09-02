@@ -29,9 +29,10 @@ import {
 } from '@/components/ui/command';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
+import { OpenAICodexSettings } from '@/components/OpenAICodexSettings';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
+  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openai-codex' | 'openrouter' | 'builtin-ai' | 'custom-openai';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
@@ -83,6 +84,17 @@ const OPENAI_FALLBACK_MODELS = [
   'gpt-5.4',
   'gpt-4.1',
   'gpt-4o',
+];
+
+const CODEX_FALLBACK_MODELS = [
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+  'gpt-5.5',
+  'gpt-5.4-mini',
+  'gpt-5.4',
+  'gpt-5.3-codex',
+  'gpt-5.3-codex-spark',
 ];
 
 const CLAUDE_FALLBACK_MODELS = [
@@ -158,6 +170,8 @@ export function ModelSettingsModal({
 
   // Dynamic model fetching state for OpenAI, Claude, and Groq
   const [openaiModels, setOpenaiModels] = useState<string[]>([]);
+  const [codexModels, setCodexModels] = useState<string[]>([]);
+  const [codexConnected, setCodexConnected] = useState<boolean>(false);
   const [claudeModels, setClaudeModels] = useState<string[]>([]);
   const [groqModels, setGroqModels] = useState<string[]>([]);
   const [isLoadingOpenAI, setIsLoadingOpenAI] = useState<boolean>(false);
@@ -226,6 +240,7 @@ export function ModelSettingsModal({
     claude: claudeModels.length > 0 ? claudeModels : CLAUDE_FALLBACK_MODELS,
     groq: groqModels.length > 0 ? groqModels : GROQ_FALLBACK_MODELS,
     openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,
+    'openai-codex': codexModels.length > 0 ? codexModels : CODEX_FALLBACK_MODELS,
     openrouter: openRouterModels.map((m) => m.id),
     'builtin-ai': builtinAiModels.map((m) => m.name),
     'custom-openai': customOpenAIModel ? [customOpenAIModel] : [], // User specifies model manually
@@ -249,6 +264,7 @@ export function ModelSettingsModal({
 
   const isDoneDisabled =
     (requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))) ||
+    (modelConfig.provider === 'openai-codex' && !codexConnected) ||
     (modelConfig.provider === 'ollama' && ollamaEndpointChanged) ||
     isCustomOpenAIInvalid;
 
@@ -266,7 +282,7 @@ export function ModelSettingsModal({
           setModelConfig(data);
 
           // Fetch API key if not included in response and provider requires it
-          if (data.provider !== 'ollama' && !data.apiKey) {
+          if (data.provider !== 'ollama' && data.provider !== 'openai-codex' && !data.apiKey) {
             try {
               const apiKeyData = await invoke('api_get_api_key', {
                 provider: data.provider
@@ -610,7 +626,7 @@ export function ModelSettingsModal({
     if (cachedModel && providerModels.includes(cachedModel)) {
       setModelConfig((prev: ModelConfig) => ({ ...prev, model: cachedModel }));
     }
-  }, [models, openRouterModels, builtinAiModels, openaiModels, claudeModels, groqModels, modelConfig.provider]);
+  }, [models, openRouterModels, builtinAiModels, openaiModels, codexModels, claudeModels, groqModels, modelConfig.provider]);
 
   const handleSave = async () => {
     // For custom-openai provider, save the custom config first
@@ -634,7 +650,7 @@ export function ModelSettingsModal({
 
     const updatedConfig = {
       ...modelConfig,
-      apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null,
+      apiKey: modelConfig.provider === 'openai-codex' ? null : (typeof apiKey === 'string' ? apiKey.trim() || null : null),
       ollamaEndpoint: modelConfig.provider === 'ollama'
         ? (ollamaEndpoint.trim() || null)
         : (modelConfig.ollamaEndpoint || null),
@@ -877,6 +893,7 @@ export function ModelSettingsModal({
                 <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
+                <SelectItem value="openai-codex">OpenAI Codex (ChatGPT subscription)</SelectItem>
                 <SelectItem value="openai">OpenAI Cloud API</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
               </SelectContent>
@@ -946,12 +963,9 @@ export function ModelSettingsModal({
           <Alert className="border-blue-200 bg-blue-50">
             <AlertDescription className="space-y-2 text-sm text-blue-950">
               <p>
-                <strong>OpenAI Cloud</strong> sends summary requests to OpenAI using the API key you provide.
-                ChatGPT Plus/Pro subscriptions and OpenAI API billing are separate.
-              </p>
-              <p className="text-xs text-blue-800">
-                OpenAI's "Sign in with ChatGPT" is an identity sign-in and does not grant third-party apps
-                ChatGPT subscription usage for API calls, so MeetOdds does not offer a misleading OAuth button.
+                <strong>OpenAI Cloud API</strong> uses an OpenAI API key and separate API billing.
+                To use the Codex allowance included with your ChatGPT Plus/Pro subscription instead, choose
+                <strong> OpenAI Codex (ChatGPT subscription)</strong>.
               </p>
               <Button
                 type="button"
@@ -965,6 +979,18 @@ export function ModelSettingsModal({
               </Button>
             </AlertDescription>
           </Alert>
+        )}
+
+        {modelConfig.provider === 'openai-codex' && (
+          <OpenAICodexSettings
+            onConnectionChange={setCodexConnected}
+            onModelsChange={(nextModels) => {
+              setCodexModels(nextModels);
+              if (nextModels.length > 0 && !nextModels.includes(modelConfig.model)) {
+                setModelConfig((prev: ModelConfig) => ({ ...prev, model: nextModels[0] }));
+              }
+            }}
+          />
         )}
 
         {/* Custom OpenAI Configuration Section */}
