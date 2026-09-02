@@ -211,11 +211,3 @@ tracing-subscriber = "0.3.16"
 cpal = { git = "https://github.com/RustAudio/cpal", rev = "51c3b43" }
 esaxx-rs = { git = "https://github.com/thewh1teagle/esaxx-rs.git", branch = "feat/dynamic-msvc-link" }
 
-# Optimize the shipped desktop binary while keeping local debug builds fast.
-# M5-local builds add `target-cpu=native` through scripts/build-macos-m5.sh.
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
-panic = "abort"
-strip = "symbols"
