@@ -19,9 +19,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          rm -rf /tmp/meetily
           git clone --no-tags https://github.com/Zackriya-Solutions/meetily.git /tmp/meetily
           cd /tmp/meetily
           git checkout main
+
+          # Preserve upstream CI definitions without activating or paying for the
+          # copied workflow matrix in this private repository.
+          if [ -d .github/workflows ]; then
+            git mv .github/workflows .github/upstream-workflows-disabled
+          fi
+
+          cat > .github/UPSTREAM_IMPORT.md <<'EOF'
+          # Upstream import
+
+          This repository was imported from `Zackriya-Solutions/meetily`.
+          The original GitHub Actions files are preserved in
+          `.github/upstream-workflows-disabled/` so the copied repository does
+          not automatically run the upstream release/build matrix.
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github
+          git commit -m "chore: import Meetily and archive upstream workflows"
+
           git remote remove origin
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin HEAD:refs/heads/upstream/meetily-main --force
