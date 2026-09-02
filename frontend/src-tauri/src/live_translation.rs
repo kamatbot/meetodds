@@ -31,37 +31,130 @@ struct LanguageSpec {
 }
 
 const SUPPORTED_LANGUAGES: &[LanguageSpec] = &[
-    LanguageSpec { code: "en", name: "English" },
-    LanguageSpec { code: "es", name: "Spanish" },
-    LanguageSpec { code: "fr", name: "French" },
-    LanguageSpec { code: "de", name: "German" },
-    LanguageSpec { code: "it", name: "Italian" },
-    LanguageSpec { code: "pt", name: "Portuguese" },
-    LanguageSpec { code: "nl", name: "Dutch" },
-    LanguageSpec { code: "sv", name: "Swedish" },
-    LanguageSpec { code: "no", name: "Norwegian" },
-    LanguageSpec { code: "da", name: "Danish" },
-    LanguageSpec { code: "fi", name: "Finnish" },
-    LanguageSpec { code: "pl", name: "Polish" },
-    LanguageSpec { code: "cs", name: "Czech" },
-    LanguageSpec { code: "ro", name: "Romanian" },
-    LanguageSpec { code: "hu", name: "Hungarian" },
-    LanguageSpec { code: "tr", name: "Turkish" },
-    LanguageSpec { code: "ru", name: "Russian" },
-    LanguageSpec { code: "uk", name: "Ukrainian" },
-    LanguageSpec { code: "ar", name: "Arabic" },
-    LanguageSpec { code: "he", name: "Hebrew" },
-    LanguageSpec { code: "hi", name: "Hindi" },
-    LanguageSpec { code: "bn", name: "Bengali" },
-    LanguageSpec { code: "ur", name: "Urdu" },
-    LanguageSpec { code: "th", name: "Thai" },
-    LanguageSpec { code: "vi", name: "Vietnamese" },
-    LanguageSpec { code: "id", name: "Indonesian" },
-    LanguageSpec { code: "ms", name: "Malay" },
-    LanguageSpec { code: "zh-CN", name: "Chinese (Simplified)" },
-    LanguageSpec { code: "zh-TW", name: "Chinese (Traditional)" },
-    LanguageSpec { code: "ja", name: "Japanese" },
-    LanguageSpec { code: "ko", name: "Korean" },
+    LanguageSpec {
+        code: "en",
+        name: "English",
+    },
+    LanguageSpec {
+        code: "es",
+        name: "Spanish",
+    },
+    LanguageSpec {
+        code: "fr",
+        name: "French",
+    },
+    LanguageSpec {
+        code: "de",
+        name: "German",
+    },
+    LanguageSpec {
+        code: "it",
+        name: "Italian",
+    },
+    LanguageSpec {
+        code: "pt",
+        name: "Portuguese",
+    },
+    LanguageSpec {
+        code: "nl",
+        name: "Dutch",
+    },
+    LanguageSpec {
+        code: "sv",
+        name: "Swedish",
+    },
+    LanguageSpec {
+        code: "no",
+        name: "Norwegian",
+    },
+    LanguageSpec {
+        code: "da",
+        name: "Danish",
+    },
+    LanguageSpec {
+        code: "fi",
+        name: "Finnish",
+    },
+    LanguageSpec {
+        code: "pl",
+        name: "Polish",
+    },
+    LanguageSpec {
+        code: "cs",
+        name: "Czech",
+    },
+    LanguageSpec {
+        code: "ro",
+        name: "Romanian",
+    },
+    LanguageSpec {
+        code: "hu",
+        name: "Hungarian",
+    },
+    LanguageSpec {
+        code: "tr",
+        name: "Turkish",
+    },
+    LanguageSpec {
+        code: "ru",
+        name: "Russian",
+    },
+    LanguageSpec {
+        code: "uk",
+        name: "Ukrainian",
+    },
+    LanguageSpec {
+        code: "ar",
+        name: "Arabic",
+    },
+    LanguageSpec {
+        code: "he",
+        name: "Hebrew",
+    },
+    LanguageSpec {
+        code: "hi",
+        name: "Hindi",
+    },
+    LanguageSpec {
+        code: "bn",
+        name: "Bengali",
+    },
+    LanguageSpec {
+        code: "ur",
+        name: "Urdu",
+    },
+    LanguageSpec {
+        code: "th",
+        name: "Thai",
+    },
+    LanguageSpec {
+        code: "vi",
+        name: "Vietnamese",
+    },
+    LanguageSpec {
+        code: "id",
+        name: "Indonesian",
+    },
+    LanguageSpec {
+        code: "ms",
+        name: "Malay",
+    },
+    LanguageSpec {
+        code: "zh-CN",
+        name: "Chinese (Simplified)",
+    },
+    LanguageSpec {
+        code: "zh-TW",
+        name: "Chinese (Traditional)",
+    },
+    LanguageSpec {
+        code: "ja",
+        name: "Japanese",
+    },
+    LanguageSpec {
+        code: "ko",
+        name: "Korean",
+    },
 ];
 
 #[derive(Debug, Clone)]
@@ -173,11 +266,7 @@ fn clean_translation_output(raw: &str) -> String {
     let mut output = raw.trim().to_string();
 
     if output.starts_with("```") {
-        output = output
-            .lines()
-            .skip(1)
-            .collect::<Vec<_>>()
-            .join("\n");
+        output = output.lines().skip(1).collect::<Vec<_>>().join("\n");
         if output.trim_end().ends_with("```") {
             let trimmed = output.trim_end();
             output = trimmed[..trimmed.len().saturating_sub(3)].to_string();
@@ -214,7 +303,9 @@ fn cache_key(
     let mut hasher = DefaultHasher::new();
     provider.hash(&mut hasher);
     model.hash(&mut hasher);
-    source_language.map(|language| language.code).hash(&mut hasher);
+    source_language
+        .map(|language| language.code)
+        .hash(&mut hasher);
     target_language.code.hash(&mut hasher);
     text.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
@@ -260,7 +351,7 @@ async fn resolve_provider_config(pool: &SqlitePool) -> Result<TranslationProvide
     let mut temperature = None;
     let mut top_p = None;
 
-    match provider {
+    match &provider {
         LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::OpenAICodex => {}
         LLMProvider::CustomOpenAI => {
             let config = SettingsRepository::get_custom_openai_config(pool)
@@ -270,7 +361,9 @@ async fn resolve_provider_config(pool: &SqlitePool) -> Result<TranslationProvide
             model_name = config.model.trim().to_string();
             api_key = config.api_key.unwrap_or_default();
             custom_openai_endpoint = Some(config.endpoint);
-            max_tokens = config.max_tokens.and_then(|value| u32::try_from(value).ok());
+            max_tokens = config
+                .max_tokens
+                .and_then(|value| u32::try_from(value).ok());
             temperature = config.temperature;
             top_p = config.top_p;
         }
@@ -384,8 +477,9 @@ pub async fn api_translate_live_text<R: Runtime>(
 
     let (system_prompt, user_prompt) = build_translation_prompts(text, source, target);
     let app_data_dir = app.path().app_data_dir().ok();
+    let client = reqwest::Client::new();
     let translation_future = generate_summary(
-        &reqwest::Client::new(),
+        &client,
         &config.provider,
         &config.model_name,
         &config.api_key,
@@ -445,7 +539,10 @@ mod tests {
     #[test]
     fn resolves_codes_and_names() {
         assert_eq!(resolve_language("TH").unwrap().name, "Thai");
-        assert_eq!(resolve_language("Chinese (Simplified)").unwrap().code, "zh-CN");
+        assert_eq!(
+            resolve_language("Chinese (Simplified)").unwrap().code,
+            "zh-CN"
+        );
         assert!(resolve_language("Klingon").is_err());
     }
 
@@ -453,7 +550,10 @@ mod tests {
     fn auto_source_is_none() {
         assert!(resolve_source_language(Some("auto")).unwrap().is_none());
         assert_eq!(
-            resolve_source_language(Some("Spanish")).unwrap().unwrap().code,
+            resolve_source_language(Some("Spanish"))
+                .unwrap()
+                .unwrap()
+                .code,
             "es"
         );
     }

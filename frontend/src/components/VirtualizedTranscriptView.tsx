@@ -8,7 +8,8 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
-import { TranscriptSegmentData } from "@/types";
+import { TranscriptSegmentData, TranscriptTranslationStatus } from "@/types";
+import { TranslationDisplayMode } from "@/lib/live-translation";
 import {
     describeSpeakerSource,
     getSpeakerPresentation,
@@ -29,6 +30,12 @@ export interface VirtualizedTranscriptViewProps {
     enableStreaming?: boolean;
     /** Show confidence indicators */
     showConfidence?: boolean;
+    /** Render translated text supplied by the non-blocking live translation hook */
+    translationEnabled?: boolean;
+    /** Show original plus translation, or replace original once translation arrives */
+    translationDisplayMode?: TranslationDisplayMode;
+    /** BCP-47 target language code for accessibility */
+    translationTargetLanguage?: string;
     /** Completely disable auto-scroll behavior (for meeting details page) */
     disableAutoScroll?: boolean;
 
@@ -77,6 +84,12 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerLabel,
     speakerSource,
     speakerConfidence,
+    translatedText,
+    translationStatus,
+    translationError,
+    translationEnabled,
+    translationDisplayMode,
+    translationTargetLanguage,
     isStreaming,
     showConfidence,
 }: {
@@ -88,10 +101,19 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerLabel?: string;
     speakerSource?: string;
     speakerConfidence?: number;
+    translatedText?: string;
+    translationStatus?: TranscriptTranslationStatus;
+    translationError?: string;
+    translationEnabled: boolean;
+    translationDisplayMode: TranslationDisplayMode;
+    translationTargetLanguage?: string;
     isStreaming: boolean;
     showConfidence: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const showOriginal = !translationEnabled || translationDisplayMode === 'bilingual' || !translatedText;
+    const isTranslationPending = translationEnabled && !translatedText &&
+        (translationStatus === 'queued' || translationStatus === 'translating');
     const speaker = getSpeakerPresentation({
         speaker: speakerId,
         speaker_label: speakerLabel,
@@ -104,7 +126,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
         <div
             id={`segment-${id}`}
             className="mb-3"
-            aria-label={speaker ? `${speaker.label}: ${displayText}` : displayText}
+            aria-label={`${speaker ? `${speaker.label}: ` : ''}${displayText}${translatedText ? `. Translation: ${translatedText}` : ''}`}
         >
             <div className="flex items-start gap-2">
                 <Tooltip>
@@ -142,12 +164,39 @@ const TranscriptSegment = memo(function TranscriptSegment({
                             )}
                         </div>
                     )}
-                    {isStreaming ? (
-                        <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
+                    {showOriginal && (
+                        isStreaming ? (
+                            <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
+                                <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                            </div>
+                        ) : (
                             <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                        )
+                    )}
+
+                    {isTranslationPending && (
+                        <div className={`${showOriginal ? 'mt-2' : ''} flex items-center gap-2 text-xs text-gray-400`}>
+                            <span className="h-2 w-2 animate-pulse rounded-full bg-gray-300" />
+                            Translating…
                         </div>
-                    ) : (
-                        <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                    )}
+
+                    {translationEnabled && translatedText && (
+                        <div
+                            lang={translationTargetLanguage}
+                            dir="auto"
+                            className={`${showOriginal ? 'mt-2 border-t border-gray-100 pt-2' : ''}`}
+                        >
+                            <p className="text-base font-medium leading-relaxed text-gray-900">
+                                {translatedText}
+                            </p>
+                        </div>
+                    )}
+
+                    {translationEnabled && translationStatus === 'error' && !translatedText && (
+                        <p className="mt-2 text-xs text-gray-400" title={translationError}>
+                            Translation unavailable
+                        </p>
                     )}
                 </div>
             </div>
@@ -163,6 +212,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     isStopping = false,
     enableStreaming = false,
     showConfidence = true,
+    translationEnabled = false,
+    translationDisplayMode = 'bilingual',
+    translationTargetLanguage,
     disableAutoScroll = false,
     hasMore = false,
     isLoadingMore = false,
@@ -182,7 +234,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const virtualizer = useVirtualizer({
         count: segments.length,
         getScrollElement: () => scrollRef.current,
-        estimateSize: () => 88, // Speaker badge plus transcript text
+        estimateSize: () => translationEnabled ? 136 : 88, // Translation adds a second text row
         overscan: 10, // Render extra items above/below viewport
         onChange: () => {
             startTransition(() => {
@@ -343,6 +395,12 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         speakerLabel={segment.speaker_label}
                                         speakerSource={segment.speaker_source}
                                         speakerConfidence={segment.speaker_confidence}
+                                        translatedText={segment.translated_text}
+                                        translationStatus={segment.translation_status}
+                                        translationError={segment.translation_error}
+                                        translationEnabled={translationEnabled}
+                                        translationDisplayMode={translationDisplayMode}
+                                        translationTargetLanguage={translationTargetLanguage}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />
@@ -403,6 +461,12 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         speakerLabel={segment.speaker_label}
                                         speakerSource={segment.speaker_source}
                                         speakerConfidence={segment.speaker_confidence}
+                                        translatedText={segment.translated_text}
+                                        translationStatus={segment.translation_status}
+                                        translationError={segment.translation_error}
+                                        translationEnabled={translationEnabled}
+                                        translationDisplayMode={translationDisplayMode}
+                                        translationTargetLanguage={translationTargetLanguage}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />
