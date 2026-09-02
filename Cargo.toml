@@ -16,3 +16,12 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.32.0", features = ["full"] }
+
+# Optimize the shipped desktop binary while keeping local debug builds fast.
+# M5-local builds add `target-cpu=native` through frontend/scripts/build-macos-m5.sh.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
