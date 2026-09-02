@@ -38,6 +38,31 @@ jobs:
           fi
           echo "Feature branch contains current main."
 
+      - name: Fix stale speaker transcript test fixtures
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src-tauri/src/audio/import.rs')
+          text = path.read_text()
+          fixture_anchor = '''                duration: Some(1.5),\n            },'''
+          fixed = '''                duration: Some(1.5),\n                speaker: None,\n                speaker_label: None,\n                speaker_source: None,\n                speaker_confidence: None,\n            },'''
+          count = text.count(fixture_anchor)
+          if count:
+              if count != 2:
+                  raise SystemExit(f'Expected exactly 2 stale TranscriptSegment fixtures, found {count}')
+              path.write_text(text.replace(fixture_anchor, fixed))
+          elif text.count(fixed) < 2:
+              raise SystemExit('Speaker transcript fixture anchors changed unexpectedly')
+          PY
+          rustfmt --edition 2021 frontend/src-tauri/src/audio/import.rs
+          git add frontend/src-tauri/src/audio/import.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(speakers): update import transcript test fixtures"
+            git push origin HEAD:feature/meetodds-openai-cloud
+          fi
+
       - name: Install Linux dependencies
         run: |
           sudo apt-get update -qq
@@ -81,6 +106,8 @@ jobs:
       - name: Verify provider separation and wiring
         run: |
           set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
           grep -q 'OpenAI Codex (ChatGPT subscription)' frontend/src/components/ModelSettingsModal.tsx
           grep -q 'OpenAI Cloud API' frontend/src/components/ModelSettingsModal.tsx
           grep -q "'openai-codex'" frontend/src/services/configService.ts
@@ -97,13 +124,15 @@ jobs:
           grep -q '"identifier": "com.meetily.ai"' frontend/src-tauri/tauri.conf.json
           grep -q '"productName": "MeetOdds"' frontend/src-tauri/tauri.conf.json
 
-      - name: Remove one-time validation harnesses
+      - name: Remove one-time validation and migration helpers
         if: success()
         run: |
           set -euo pipefail
-          git rm -f .github/workflows/meetodds-codex-final-validate.yml
-          if [ -f .github/workflows/meetodds-codex-oauth.yml ]; then
-            git rm -f .github/workflows/meetodds-codex-oauth.yml
-          fi
-          git commit -m "chore(ci): remove Codex OAuth validation harnesses"
+          git rm -f \
+            .github/workflows/meetodds-codex-final-validate.yml \
+            .github/workflows/meetodds-codex-oauth.yml \
+            .github/workflows/meetodds-codex-oauth-v2.yml \
+            .github/workflows/meetodds-codex-oauth-v3.yml \
+            frontend/scripts/apply-meetodds-codex.py
+          git commit -m "chore(ci): remove MeetOdds Codex OAuth migration helpers"
           git push origin HEAD:feature/meetodds-openai-cloud
