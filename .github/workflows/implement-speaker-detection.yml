@@ -1,4 +1,4 @@
-name: Diagnose speaker attribution Rust integration
+name: Fix and validate speaker attribution Rust integration
 
 on:
   push:
@@ -8,10 +8,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -24,6 +24,32 @@ jobs:
           git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/notes
           cd /tmp/notes
           git checkout feature/speaker-detection
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fix recording DeviceType import and check in
+        working-directory: /tmp/notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src-tauri/src/audio/transcription/speaker_detection.rs')
+          text = path.read_text()
+          old = 'use crate::audio::DeviceType;\n'
+          new = 'use crate::audio::recording_state::DeviceType;\n'
+          if old in text:
+              path.write_text(text.replace(old, new, 1))
+          elif new not in text:
+              raise SystemExit('Expected DeviceType import not found')
+          PY
+          rustfmt --edition 2021 frontend/src-tauri/src/audio/transcription/speaker_detection.rs
+          git add frontend/src-tauri/src/audio/transcription/speaker_detection.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(speakers): use recording pipeline DeviceType"
+            git push origin HEAD:feature/speaker-detection
+          fi
 
       - name: Install Linux dependencies
         run: |
@@ -42,7 +68,7 @@ jobs:
           : > frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
           chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
 
-      - name: Emit concise application compiler diagnostics
+      - name: Compile-check Tauri library
         working-directory: /tmp/notes
         env:
           WHISPER_DONT_GENERATE_BINDINGS: "1"
