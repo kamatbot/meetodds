@@ -714,21 +714,16 @@ fn parse_codex_sse(body: &str) -> Result<String, String> {
     }
 }
 
-pub async fn generate_codex_summary(
+/// Send a streaming Responses request and return the open SSE response,
+/// refreshing the ChatGPT session once on 401.
+pub async fn open_codex_stream(
     client: &Client,
     app_data_dir: &Path,
     model_name: &str,
     system_prompt: &str,
     user_prompt: &str,
     max_output_tokens: Option<u32>,
-    cancellation_token: Option<&CancellationToken>,
-) -> Result<String, String> {
-    if let Some(token) = cancellation_token {
-        if token.is_cancelled() {
-            return Err("Summary generation was cancelled".to_string());
-        }
-    }
-
+) -> Result<reqwest::Response, String> {
     let mut auth = load_valid_auth_from_dir(app_data_dir, client).await?;
     let mut response = send_codex_response_request(
         client,
@@ -767,6 +762,34 @@ pub async fn generate_codex_summary(
             compact_error(&body)
         ));
     }
+
+    Ok(response)
+}
+
+pub async fn generate_codex_summary(
+    client: &Client,
+    app_data_dir: &Path,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_output_tokens: Option<u32>,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<String, String> {
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            return Err("Summary generation was cancelled".to_string());
+        }
+    }
+
+    let response = open_codex_stream(
+        client,
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        max_output_tokens,
+    )
+    .await?;
 
     let body_future = response.text();
     let body = if let Some(token) = cancellation_token {

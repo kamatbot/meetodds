@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Transcript } from '@/types';
 import {
   DEFAULT_LIVE_TRANSLATION_SETTINGS,
@@ -77,6 +78,7 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
   const requestCounterRef = useRef(0);
   const latestRevisionRef = useRef(new Map<string, string>());
   const activeRequestIdsRef = useRef(new Map<string, string>());
+  const activeJobsRef = useRef(new Map<string, TranslationJob>());
   const resultCacheRef = useRef(new Map<string, LiveTranslationResponse>());
   const drainQueueRef = useRef<() => void>(() => undefined);
 
@@ -109,6 +111,7 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
 
       activeCountRef.current += 1;
       activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
+      activeJobsRef.current.set(job.requestId, job);
       updateCounts();
 
       setTranslations((previous) => {
@@ -196,6 +199,7 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
           }));
           setLastError(message);
         } finally {
+          activeJobsRef.current.delete(job.requestId);
           if (activeRequestIdsRef.current.get(job.segmentKey) === job.requestId) {
             activeRequestIdsRef.current.delete(job.segmentKey);
           }
@@ -262,6 +266,37 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
       return next;
     });
   }, []);
+
+  // Streamed partial translations. The view renders translatedText whenever it
+  // is present, so first words appear at time-to-first-token.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<{ requestId: string; text: string }>('live-translation-delta', (event) => {
+      const job = activeJobsRef.current.get(event.payload.requestId);
+      if (!job || !event.payload.text || !isCurrentJob(job)) return;
+      setTranslations((previous) => {
+        if (previous[job.segmentKey]?.status === 'translated') return previous;
+        return {
+          ...previous,
+          [job.segmentKey]: {
+            segmentKey: job.segmentKey,
+            sourceText: job.text,
+            targetLanguage: job.targetLanguage,
+            status: 'translating',
+            translatedText: event.payload.text,
+          },
+        };
+      });
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlisten = dispose;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [isCurrentJob]);
 
   useEffect(() => {
     mountedRef.current = true;
