@@ -34,6 +34,14 @@ jobs:
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
             librsvg2-dev patchelf >/dev/null
 
+      - name: Provide Tauri helper resource placeholder
+        working-directory: /tmp/notes
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/src-tauri/binaries
+          : > frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+
       - name: Emit concise application compiler diagnostics
         working-directory: /tmp/notes
         env:
