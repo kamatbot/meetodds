@@ -1,0 +1,209 @@
+name: Integrate and validate live translation
+
+on:
+  push:
+    branches: [feature/live-translation]
+    paths:
+      - .github/workflows/live-translation-integration.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out live translation branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/live-translation
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git and verify latest main ancestry
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main feature/live-translation
+          git merge --no-edit origin/feature/live-translation
+          git merge --no-edit origin/main
+          git merge-base --is-ancestor origin/main HEAD
+
+      - name: Wire native commands and translated transcript rendering
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              if old in text:
+                  p.write_text(text.replace(old, new, 1))
+                  return
+              if new in text:
+                  return
+              raise SystemExit(f"Missing anchor in {path}: {old[:180]!r}")
+
+          def replace_all(path: str, old: str, new: str, minimum: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count >= minimum:
+                  p.write_text(text.replace(old, new))
+                  return
+              if text.count(new) >= minimum:
+                  return
+              raise SystemExit(f"Missing repeated anchor in {path}: {old[:180]!r}")
+
+          rust = 'frontend/src-tauri/src/live_translation.rs'
+          replace_once(
+              rust,
+              '    match provider {\n        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::OpenAICodex => {}',
+              '    match &provider {\n        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::OpenAICodex => {}',
+          )
+          replace_once(
+              rust,
+              '    let translation_future = generate_summary(\n        &reqwest::Client::new(),',
+              '    let client = reqwest::Client::new();\n    let translation_future = generate_summary(\n        &client,',
+          )
+
+          lib = 'frontend/src-tauri/src/lib.rs'
+          replace_once(
+              lib,
+              'pub mod groq;\npub mod notifications;',
+              'pub mod groq;\npub mod live_translation;\npub mod notifications;',
+          )
+          replace_once(
+              lib,
+              '            openai_codex::openai_codex_get_models,\n            anthropic::anthropic::get_anthropic_models,',
+              '            openai_codex::openai_codex_get_models,\n            live_translation::api_translate_live_text,\n            live_translation::api_cancel_live_translation,\n            anthropic::anthropic::get_anthropic_models,',
+          )
+
+          view = 'frontend/src/components/VirtualizedTranscriptView.tsx'
+          replace_once(
+              view,
+              'import { TranscriptSegmentData } from "@/types";',
+              'import { TranscriptSegmentData, TranscriptTranslationStatus } from "@/types";\nimport { TranslationDisplayMode } from "@/lib/live-translation";',
+          )
+          replace_once(
+              view,
+              '''    /** Show confidence indicators */\n    showConfidence?: boolean;\n    /** Completely disable auto-scroll behavior (for meeting details page) */''',
+              '''    /** Show confidence indicators */\n    showConfidence?: boolean;\n    /** Render translated text supplied by the non-blocking live translation hook */\n    translationEnabled?: boolean;\n    /** Show original plus translation, or replace original once translation arrives */\n    translationDisplayMode?: TranslationDisplayMode;\n    /** BCP-47 target language code for accessibility */\n    translationTargetLanguage?: string;\n    /** Completely disable auto-scroll behavior (for meeting details page) */''',
+          )
+          replace_once(
+              view,
+              '''    speakerConfidence,\n    isStreaming,\n    showConfidence,''',
+              '''    speakerConfidence,\n    translatedText,\n    translationStatus,\n    translationError,\n    translationEnabled,\n    translationDisplayMode,\n    translationTargetLanguage,\n    isStreaming,\n    showConfidence,''',
+          )
+          replace_once(
+              view,
+              '''    speakerConfidence?: number;\n    isStreaming: boolean;\n    showConfidence: boolean;''',
+              '''    speakerConfidence?: number;\n    translatedText?: string;\n    translationStatus?: TranscriptTranslationStatus;\n    translationError?: string;\n    translationEnabled: boolean;\n    translationDisplayMode: TranslationDisplayMode;\n    translationTargetLanguage?: string;\n    isStreaming: boolean;\n    showConfidence: boolean;''',
+          )
+          replace_once(
+              view,
+              '''    const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);\n    const speaker = getSpeakerPresentation({''',
+              '''    const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);\n    const showOriginal = !translationEnabled || translationDisplayMode === 'bilingual' || !translatedText;\n    const isTranslationPending = translationEnabled && !translatedText &&\n        (translationStatus === 'queued' || translationStatus === 'translating');\n    const speaker = getSpeakerPresentation({''',
+          )
+          replace_once(
+              view,
+              '''            aria-label={speaker ? `${speaker.label}: ${displayText}` : displayText}''',
+              '''            aria-label={`${speaker ? `${speaker.label}: ` : ''}${displayText}${translatedText ? `. Translation: ${translatedText}` : ''}`}''',
+          )
+          replace_once(
+              view,
+              '''                    {isStreaming ? (\n                        <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">\n                            <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>\n                        </div>\n                    ) : (\n                        <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>\n                    )}''',
+              '''                    {showOriginal && (\n                        isStreaming ? (\n                            <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">\n                                <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>\n                            </div>\n                        ) : (\n                            <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>\n                        )\n                    )}\n\n                    {isTranslationPending && (\n                        <div className={`${showOriginal ? 'mt-2' : ''} flex items-center gap-2 text-xs text-gray-400`}>\n                            <span className="h-2 w-2 animate-pulse rounded-full bg-gray-300" />\n                            Translating…\n                        </div>\n                    )}\n\n                    {translationEnabled && translatedText && (\n                        <div\n                            lang={translationTargetLanguage}\n                            dir="auto"\n                            className={`${showOriginal ? 'mt-2 border-t border-gray-100 pt-2' : ''}`}\n                        >\n                            <p className="text-base font-medium leading-relaxed text-gray-900">\n                                {translatedText}\n                            </p>\n                        </div>\n                    )}\n\n                    {translationEnabled && translationStatus === 'error' && !translatedText && (\n                        <p className="mt-2 text-xs text-gray-400" title={translationError}>\n                            Translation unavailable\n                        </p>\n                    )}''',
+          )
+          replace_once(
+              view,
+              '''    enableStreaming = false,\n    showConfidence = true,\n    disableAutoScroll = false,''',
+              '''    enableStreaming = false,\n    showConfidence = true,\n    translationEnabled = false,\n    translationDisplayMode = 'bilingual',\n    translationTargetLanguage,\n    disableAutoScroll = false,''',
+          )
+          replace_once(
+              view,
+              '''        estimateSize: () => 88, // Speaker badge plus transcript text''',
+              '''        estimateSize: () => translationEnabled ? 136 : 88, // Translation adds a second text row''',
+          )
+          replace_all(
+              view,
+              '''                                        speakerConfidence={segment.speaker_confidence}\n                                        isStreaming={isStreaming}''',
+              '''                                        speakerConfidence={segment.speaker_confidence}\n                                        translatedText={segment.translated_text}\n                                        translationStatus={segment.translation_status}\n                                        translationError={segment.translation_error}\n                                        translationEnabled={translationEnabled}\n                                        translationDisplayMode={translationDisplayMode}\n                                        translationTargetLanguage={translationTargetLanguage}\n                                        isStreaming={isStreaming}''',
+              minimum=2,
+          )
+          PY
+
+          rustfmt --edition 2021 \
+            frontend/src-tauri/src/live_translation.rs \
+            frontend/src-tauri/src/lib.rs
+
+          git add \
+            frontend/src-tauri/src/live_translation.rs \
+            frontend/src-tauri/src/lib.rs \
+            frontend/src/components/VirtualizedTranscriptView.tsx
+          git commit -m "feat(translation): wire native service and bilingual transcript rendering"
+          git fetch origin feature/live-translation main
+          git merge --no-edit origin/feature/live-translation
+          git merge --no-edit origin/main
+          git push origin HEAD:feature/live-translation
+
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential cmake clang libclang-dev pkg-config \
+            libglib2.0-dev libasound2-dev libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf >/dev/null
+
+      - name: Provide Tauri helper placeholder
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/src-tauri/binaries
+          : > frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+
+      - name: Test native live translation helpers
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+        run: cargo test -q -p meetily live_translation --lib
+
+      - name: Frozen frontend install and production build
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Full native Rust compile check
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+          CARGO_TERM_COLOR: never
+        run: cargo check -q -p meetily --lib --message-format short
+
+      - name: Verify low-latency isolation and UI wiring
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          grep -q 'Semaphore::new(2)' frontend/src-tauri/src/live_translation.rs
+          grep -q 'LIVE_TRANSLATION_TIMEOUT' frontend/src-tauri/src/live_translation.rs
+          grep -q 'api_cancel_live_translation' frontend/src-tauri/src/lib.rs
+          grep -q 'MAX_CONCURRENT_TRANSLATIONS = 2' frontend/src/hooks/useLiveTranslation.ts
+          grep -q 'PARTIAL_TRANSLATION_DEBOUNCE_MS = 220' frontend/src/hooks/useLiveTranslation.ts
+          grep -q 'translationDisplayMode' frontend/src/components/VirtualizedTranscriptView.tsx
+          grep -q 'LiveTranslationControl' frontend/src/app/_components/TranscriptPanel.tsx
+
+      - name: Remove one-time integration workflow
+        if: success()
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/live-translation-integration.yml
+          git commit -m "chore(ci): remove live translation integration harness"
+          git push origin HEAD:feature/live-translation
