@@ -56,9 +56,8 @@ lazy_static::lazy_static! {
 }
 
 // Model path cache to avoid repeated filesystem I/O and model lookups
-static MODEL_PATH_CACHE: Lazy<RwLock<HashMap<String, PathBuf>>> = Lazy::new(|| {
-    RwLock::new(HashMap::new())
-});
+static MODEL_PATH_CACHE: Lazy<RwLock<HashMap<String, PathBuf>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Initialize the global sidecar manager
 pub async fn init_sidecar_manager(app_data_dir: PathBuf) -> Result<()> {
@@ -135,6 +134,7 @@ pub async fn generate_with_builtin(
     model_name: &str,
     system_prompt: &str,
     user_prompt: &str,
+    max_tokens: Option<u32>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String> {
     // Check cancellation at start
@@ -155,8 +155,7 @@ pub async fn generate_with_builtin(
     let model_path = get_cached_model_path(app_data_dir, model_name)?;
 
     // Apply model-specific chat template
-    let formatted_prompt =
-        models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
+    let formatted_prompt = models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
     // Get or initialize sidecar manager
     let manager = {
         let mut global_manager = SIDECAR_MANAGER.lock().await;
@@ -182,7 +181,7 @@ pub async fn generate_with_builtin(
     let sampling = model_def.sampling.sanitize_for_llama_helper();
     let request = Request::Generate {
         prompt: formatted_prompt,
-        max_tokens: Some(models::DEFAULT_MAX_TOKENS),
+        max_tokens: Some(max_tokens.map_or(models::DEFAULT_MAX_TOKENS, |value| value as i32)),
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
         temperature: Some(sampling.temperature),

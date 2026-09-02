@@ -16,8 +16,6 @@ import {
 const MAX_CONCURRENT_TRANSLATIONS = 2;
 const MAX_QUEUED_TRANSLATIONS = 48;
 const BACKFILL_SEGMENT_LIMIT = 8;
-const PARTIAL_TRANSLATION_DEBOUNCE_MS = 220;
-const MIN_PARTIAL_CHARACTERS = 12;
 const RESULT_CACHE_LIMIT = 300;
 
 interface TranslationJob {
@@ -28,7 +26,6 @@ interface TranslationJob {
   sourceLanguage: 'auto';
   targetLanguage: string;
   generation: number;
-  isPartial: boolean;
 }
 
 interface LiveTranslationState {
@@ -79,7 +76,6 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
   const generationRef = useRef(0);
   const requestCounterRef = useRef(0);
   const latestRevisionRef = useRef(new Map<string, string>());
-  const partialTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const activeRequestIdsRef = useRef(new Map<string, string>());
   const resultCacheRef = useRef(new Map<string, LiveTranslationResponse>());
   const drainQueueRef = useRef<() => void>(() => undefined);
@@ -223,33 +219,21 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     );
 
     if (queueRef.current.length >= MAX_QUEUED_TRANSLATIONS) {
-      const oldestPartialIndex = queueRef.current.findIndex((queued) => queued.isPartial);
-      if (oldestPartialIndex >= 0) {
-        queueRef.current.splice(oldestPartialIndex, 1);
-      } else {
-        queueRef.current.shift();
-      }
+      queueRef.current.pop();
     }
 
-    if (job.isPartial) {
-      queueRef.current.push(job);
-    } else {
-      // Current finalized speech must beat historical catch-up work. Older
-      // final turns remain queued and are translated after the live edge.
-      queueRef.current.unshift(job);
-    }
+    // Newest speech first: the queue is ordered newest -> oldest so the live
+    // edge always beats historical catch-up work.
+    queueRef.current.unshift(job);
 
     updateCounts();
-    drainQueueRef.current();
+    // Let a synchronous backfill enqueue all candidates before taking worker
+    // slots; otherwise its oldest two items start before newer ones are added.
+    queueMicrotask(() => drainQueueRef.current());
   }, [isCurrentJob, updateCounts]);
 
   const clearPendingWork = useCallback(() => {
     generationRef.current += 1;
-
-    for (const timer of partialTimersRef.current.values()) {
-      clearTimeout(timer);
-    }
-    partialTimersRef.current.clear();
     queueRef.current = [];
 
     for (const requestId of activeRequestIdsRef.current.values()) {
@@ -292,48 +276,35 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     clearPendingWork();
     setTranslations({});
     setLastError(null);
+    if (settings.enabled) {
+      // Load the local model (Ollama) before the first segment needs it.
+      void invoke('api_warm_live_translation').catch(() => undefined);
+    }
   }, [settings.enabled, settings.sourceLanguage, settings.targetLanguage, clearPendingWork]);
 
   useEffect(() => {
     if (!settings.enabled || transcripts.length === 0) return;
 
-    // Start at the live edge. This lets the current speaker occupy the
-    // available workers before optional recent-history catch-up begins.
-    const candidates = transcripts.slice(-BACKFILL_SEGMENT_LIMIT).reverse();
+    // Every transcript segment is final: `is_partial` only means the chunk was
+    // shorter than 15s, and segments are never revised (unique sequence_id).
+    // So there is nothing to debounce; translate each segment immediately.
+    // Iterate oldest -> newest; enqueueJob unshifts, so the queue ends newest-first.
+    const candidates = transcripts.slice(-BACKFILL_SEGMENT_LIMIT);
 
     for (const transcript of candidates) {
       const text = transcript.text.trim();
       if (!text) continue;
-
-      const isPartial = transcript.is_partial === true;
-      if (isPartial && text.length < MIN_PARTIAL_CHARACTERS) continue;
 
       const segmentKey = liveTranslationSegmentKey(transcript);
       const revision = [
         generationRef.current,
         settings.sourceLanguage,
         settings.targetLanguage,
-        isPartial ? 'partial' : 'final',
         text,
       ].join('\u0001');
 
       if (latestRevisionRef.current.get(segmentKey) === revision) continue;
       latestRevisionRef.current.set(segmentKey, revision);
-
-      const existingTimer = partialTimersRef.current.get(segmentKey);
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-        partialTimersRef.current.delete(segmentKey);
-      }
-
-      const activeRequestId = activeRequestIdsRef.current.get(segmentKey);
-      if (activeRequestId) {
-        cancelNativeRequest(activeRequestId);
-      }
-
-      queueRef.current = queueRef.current.filter(
-        (queued) => queued.segmentKey !== segmentKey
-      );
 
       const job: TranslationJob = {
         segmentKey,
@@ -343,7 +314,6 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
         sourceLanguage: settings.sourceLanguage,
         targetLanguage: settings.targetLanguage,
         generation: generationRef.current,
-        isPartial,
       };
 
       setTranslations((previous) => {
@@ -368,22 +338,13 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
         };
       });
 
-      if (isPartial) {
-        const timer = setTimeout(() => {
-          partialTimersRef.current.delete(segmentKey);
-          enqueueJob(job);
-        }, PARTIAL_TRANSLATION_DEBOUNCE_MS);
-        partialTimersRef.current.set(segmentKey, timer);
-      } else {
-        enqueueJob(job);
-      }
+      enqueueJob(job);
     }
   }, [
     transcripts,
     settings.enabled,
     settings.sourceLanguage,
     settings.targetLanguage,
-    cancelNativeRequest,
     enqueueJob,
   ]);
 

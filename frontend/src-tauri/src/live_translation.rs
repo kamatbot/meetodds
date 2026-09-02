@@ -15,6 +15,8 @@ use tokio_util::sync::CancellationToken;
 
 const MAX_LIVE_TEXT_CHARS: usize = 6_000;
 const LIVE_TRANSLATION_TIMEOUT: Duration = Duration::from_secs(30);
+// A translation is roughly the input length; this only bounds runaway output.
+const LIVE_TRANSLATION_MAX_TOKENS: u32 = 512;
 const TRANSLATION_CACHE_CAPACITY: usize = 256;
 
 static CLOUD_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(2));
@@ -409,6 +411,38 @@ pub async fn api_cancel_live_translation(request_id: String) -> Result<bool, Str
     Ok(false)
 }
 
+/// Pre-load the local model so the first live segment is not served cold.
+/// Ollama unloads idle models after ~5 minutes; a request with an empty prompt
+/// loads it and returns immediately. Cloud providers need nothing.
+#[tauri::command]
+pub async fn api_warm_live_translation(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let config = resolve_provider_config(state.db_manager.pool()).await?;
+    if config.provider != LLMProvider::Ollama {
+        return Ok(false);
+    }
+    let host = config
+        .ollama_endpoint
+        .unwrap_or_else(|| "http://localhost:11434".to_string());
+    let response = TRANSLATION_HTTP_CLIENT
+        .post(format!("{}/api/generate", host.trim_end_matches('/')))
+        .json(&serde_json::json!({
+            "model": config.model_name,
+            "keep_alive": "10m",
+            "stream": false
+        }))
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|error| format!("Failed to warm Ollama model: {error}"))?;
+    response
+        .error_for_status()
+        .map_err(|error| format!("Failed to warm Ollama model: {error}"))?
+        .bytes()
+        .await
+        .map_err(|error| format!("Failed to finish warming Ollama model: {error}"))?;
+    Ok(true)
+}
+
 #[tauri::command]
 pub async fn api_translate_live_text<R: Runtime>(
     app: AppHandle<R>,
@@ -492,6 +526,13 @@ pub async fn api_translate_live_text<R: Runtime>(
 
     let (system_prompt, user_prompt) = build_translation_prompts(text, source, target);
     let app_data_dir = app.path().app_data_dir().ok();
+    let max_tokens = Some(
+        config
+            .max_tokens
+            .map_or(LIVE_TRANSLATION_MAX_TOKENS, |value| {
+                value.min(LIVE_TRANSLATION_MAX_TOKENS)
+            }),
+    );
     let translation_future = generate_summary(
         &TRANSLATION_HTTP_CLIENT,
         &config.provider,
@@ -501,7 +542,7 @@ pub async fn api_translate_live_text<R: Runtime>(
         &user_prompt,
         config.ollama_endpoint.as_deref(),
         config.custom_openai_endpoint.as_deref(),
-        config.max_tokens,
+        max_tokens,
         config.temperature,
         config.top_p,
         app_data_dir.as_ref(),

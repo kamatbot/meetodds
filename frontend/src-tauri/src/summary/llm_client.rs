@@ -104,7 +104,7 @@ impl LLMProvider {
 /// * `user_prompt` - User query/content to process
 /// * `ollama_endpoint` - Optional custom Ollama endpoint (defaults to localhost:11434)
 /// * `custom_openai_endpoint` - Optional custom OpenAI-compatible endpoint
-/// * `max_tokens` - Optional max tokens (for CustomOpenAI provider)
+/// * `max_tokens` - Optional max output tokens (all providers except Codex)
 /// * `temperature` - Optional temperature (for CustomOpenAI provider)
 /// * `top_p` - Optional top_p (for CustomOpenAI provider)
 /// * `app_data_dir` - Optional app data directory (for BuiltInAI provider)
@@ -145,6 +145,7 @@ pub async fn generate_summary(
             model_name,
             system_prompt,
             user_prompt,
+            max_tokens,
             cancellation_token,
         )
         .await;
@@ -160,6 +161,7 @@ pub async fn generate_summary(
             model_name,
             system_prompt,
             user_prompt,
+            max_tokens,
             cancellation_token,
         )
         .await
@@ -241,13 +243,13 @@ pub async fn generate_summary(
 
     // Build request body based on provider
     let request_body = if provider != &LLMProvider::Claude {
-        // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI
-        {
-            (max_tokens, temperature, top_p)
+        // Sampling overrides are CustomOpenAI-only; max_tokens applies everywhere.
+        let (temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
+            (temperature, top_p)
         } else {
-            (None, None, None)
+            (None, None)
         };
+        let max_tokens_val = max_tokens;
 
         serde_json::json!(ChatRequest {
             model: model_name.to_string(),
@@ -269,7 +271,7 @@ pub async fn generate_summary(
         serde_json::json!(ClaudeRequest {
             system: system_prompt.to_string(),
             model: model_name.to_string(),
-            max_tokens: 2048,
+            max_tokens: max_tokens.unwrap_or(2048),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: user_prompt.to_string(),
