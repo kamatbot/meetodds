@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
+import { withSpeakerPrefix } from '@/lib/speaker-labels';
 import { indexedDBService } from '@/services/indexedDBService';
 
 interface TranscriptContextType {
@@ -311,6 +312,14 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             chunk_start_time: update.chunk_start_time,
             is_partial: update.is_partial,
             confidence: update.confidence,
+      speaker: update.speaker,
+      speaker_label: update.speaker_label,
+      speaker_source: update.speaker_source,
+      speaker_confidence: update.speaker_confidence,
+            speaker: update.speaker,
+            speaker_label: update.speaker_label,
+            speaker_source: update.speaker_source,
+            speaker_confidence: update.speaker_confidence,
             // NEW: Recording-relative timestamps for playback sync
             audio_start_time: update.audio_start_time,
             audio_end_time: update.audio_end_time,
@@ -380,6 +389,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             chunk_start_time: segment.audio_start_time,
             is_partial: false, // History segments are always final
             confidence: segment.confidence,
+            speaker: segment.speaker,
+            speaker_label: segment.speaker_label,
+            speaker_source: segment.speaker_source,
+            speaker_confidence: segment.speaker_confidence,
             audio_start_time: segment.audio_start_time,
             audio_end_time: segment.audio_end_time,
             duration: segment.duration,
@@ -465,7 +478,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
 
     const fullTranscript = transcripts
-      .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
+      .map(t => `${formatTime(t.audio_start_time)} ${withSpeakerPrefix(t, t.text)}`)
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
 

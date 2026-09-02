@@ -26,6 +26,10 @@ export interface StoredTranscript {
   audio_start_time?: number;  // Recording-relative start time in seconds
   audio_end_time?: number;    // Recording-relative end time in seconds
   duration?: number;          // Duration in seconds
+  speaker?: string;
+  speaker_label?: string;
+  speaker_source?: string;
+  speaker_confidence?: number;
   [key: string]: any;         // Allow additional fields from TranscriptUpdate
 }
 

@@ -9,6 +9,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
+import {
+    describeSpeakerSource,
+    getSpeakerPresentation,
+} from "@/lib/speaker-labels";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -69,6 +73,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     timestamp,
     text,
     confidence,
+    speaker: speakerId,
+    speakerLabel,
+    speakerSource,
+    speakerConfidence,
     isStreaming,
     showConfidence,
 }: {
@@ -76,13 +84,28 @@ const TranscriptSegment = memo(function TranscriptSegment({
     timestamp: number;
     text: string;
     confidence?: number;
+    speaker?: string;
+    speakerLabel?: string;
+    speakerSource?: string;
+    speakerConfidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const speaker = getSpeakerPresentation({
+        speaker: speakerId,
+        speaker_label: speakerLabel,
+        speaker_source: speakerSource,
+        speaker_confidence: speakerConfidence,
+    });
+    const sourceDescription = speaker ? describeSpeakerSource(speaker.source) : null;
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div
+            id={`segment-${id}`}
+            className="mb-3"
+            aria-label={speaker ? `${speaker.label}: ${displayText}` : displayText}
+        >
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger>
@@ -90,13 +113,35 @@ const TranscriptSegment = memo(function TranscriptSegment({
                             {formatRecordingTime(timestamp)}
                         </span>
                     </TooltipTrigger>
-                    <TooltipContent>
+                    <TooltipContent className="space-y-1">
                         {confidence !== undefined && showConfidence && (
                             <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
                         )}
+                        {speaker && sourceDescription && (
+                            <div className="text-xs">
+                                <div>{sourceDescription}</div>
+                                {speaker.confidence !== null && (
+                                    <div>Speaker confidence: {Math.round(speaker.confidence * 100)}%</div>
+                                )}
+                            </div>
+                        )}
                     </TooltipContent>
                 </Tooltip>
-                <div className="flex-1">
+                <div
+                    className={`flex-1 border-l-2 pl-3 ${speaker?.accentClassName ?? 'border-l-transparent'}`}
+                >
+                    {speaker && (
+                        <div className="mb-1 flex items-center gap-2">
+                            <span
+                                className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${speaker.badgeClassName}`}
+                            >
+                                {speaker.label}
+                            </span>
+                            {speaker.isEstimate && (
+                                <span className="text-[11px] text-gray-400">best estimate</span>
+                            )}
+                        </div>
+                    )}
                     {isStreaming ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
                             <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
@@ -137,7 +182,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const virtualizer = useVirtualizer({
         count: segments.length,
         getScrollElement: () => scrollRef.current,
-        estimateSize: () => 60, // Estimated height per segment
+        estimateSize: () => 88, // Speaker badge plus transcript text
         overscan: 10, // Render extra items above/below viewport
         onChange: () => {
             startTransition(() => {
@@ -294,6 +339,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
+                                        speaker={segment.speaker}
+                                        speakerLabel={segment.speaker_label}
+                                        speakerSource={segment.speaker_source}
+                                        speakerConfidence={segment.speaker_confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />
@@ -350,6 +399,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
+                                        speaker={segment.speaker}
+                                        speakerLabel={segment.speaker_label}
+                                        speakerSource={segment.speaker_source}
+                                        speakerConfidence={segment.speaker_confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />
