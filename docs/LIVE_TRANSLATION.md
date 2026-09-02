@@ -30,6 +30,7 @@ When a cloud provider is selected, only the transcript text needed for the curre
 The transcript UI renders the original turn first. Translation begins afterward through a cancellation-aware queue:
 
 - Final transcript turns enter the queue immediately.
+- When enabled mid-meeting, only the eight most recent turns are considered and the newest finalized speech is processed first.
 - Partial turns wait for a short debounce window so rapidly changing fragments do not create a request storm.
 - A newer revision cancels the older in-flight request for that turn.
 - Final turns are prioritized ahead of queued partial turns.

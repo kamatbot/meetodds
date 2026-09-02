@@ -15,7 +15,7 @@ import {
 
 const MAX_CONCURRENT_TRANSLATIONS = 2;
 const MAX_QUEUED_TRANSLATIONS = 48;
-const BACKFILL_SEGMENT_LIMIT = 24;
+const BACKFILL_SEGMENT_LIMIT = 8;
 const PARTIAL_TRANSLATION_DEBOUNCE_MS = 220;
 const MIN_PARTIAL_CHARACTERS = 12;
 const RESULT_CACHE_LIMIT = 300;
@@ -62,10 +62,8 @@ function trimResultCache(cache: Map<string, LiveTranslationResponse>): void {
 }
 
 export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationState {
-  const [settings, setSettings] = useState<LiveTranslationSettings>(() =>
-    typeof window === 'undefined'
-      ? DEFAULT_LIVE_TRANSLATION_SETTINGS
-      : loadLiveTranslationSettings()
+  const [settings, setSettings] = useState<LiveTranslationSettings>(
+    DEFAULT_LIVE_TRANSLATION_SETTINGS
   );
   const [translations, setTranslations] = useState<Record<string, LiveTranslationEntry>>({});
   const [queuedCount, setQueuedCount] = useState(0);
@@ -162,6 +160,7 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
             trimResultCache(resultCacheRef.current);
           }
 
+          const latencyMs = cached ? 0 : response.latencyMs;
           if (!isCurrentJob(job)) return;
 
           setTranslations((previous) => ({
@@ -174,14 +173,14 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
               status: 'translated',
               provider: response.provider,
               model: response.model,
-              latencyMs: response.latencyMs,
+              latencyMs,
               cached: response.cached || Boolean(cached),
             },
           }));
           setLastError(null);
           setLastProvider(response.provider);
           setLastModel(response.model);
-          setLastLatencyMs(response.latencyMs);
+          setLastLatencyMs(latencyMs);
         } catch (error) {
           if (!isCurrentJob(job)) return;
 
@@ -235,12 +234,9 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     if (job.isPartial) {
       queueRef.current.push(job);
     } else {
-      const firstPartialIndex = queueRef.current.findIndex((queued) => queued.isPartial);
-      if (firstPartialIndex >= 0) {
-        queueRef.current.splice(firstPartialIndex, 0, job);
-      } else {
-        queueRef.current.push(job);
-      }
+      // Current finalized speech must beat historical catch-up work. Older
+      // final turns remain queued and are translated after the live edge.
+      queueRef.current.unshift(job);
     }
 
     updateCounts();
@@ -285,6 +281,7 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
 
   useEffect(() => {
     mountedRef.current = true;
+    setSettings(loadLiveTranslationSettings());
     return () => {
       mountedRef.current = false;
       clearPendingWork();
@@ -300,7 +297,9 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
   useEffect(() => {
     if (!settings.enabled || transcripts.length === 0) return;
 
-    const candidates = transcripts.slice(-BACKFILL_SEGMENT_LIMIT);
+    // Start at the live edge. This lets the current speaker occupy the
+    // available workers before optional recent-history catch-up begins.
+    const candidates = transcripts.slice(-BACKFILL_SEGMENT_LIMIT).reverse();
 
     for (const transcript of candidates) {
       const text = transcript.text.trim();
