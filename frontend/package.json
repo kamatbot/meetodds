@@ -25,7 +25,8 @@
         "tauri:build:coreml": "tauri build -- --features coreml",
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
-        "lint": "next lint"
+        "lint": "next lint",
+        "tauri:build:m5": "bash scripts/build-macos-m5.sh"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",
