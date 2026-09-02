@@ -88,9 +88,8 @@ impl SpeakerClusterer {
 
         let Some(features) = extract_voice_features(audio, sample_rate) else {
             if let Some(last_index) = self.last_cluster {
-                let recently_seen = timestamp_seconds
-                    - self.clusters[last_index].last_seen_seconds
-                    <= 15.0;
+                let recently_seen =
+                    timestamp_seconds - self.clusters[last_index].last_seen_seconds <= 15.0;
                 if recently_seen {
                     self.clusters[last_index].last_seen_seconds = timestamp_seconds;
                     return self.assignment_for(last_index, speaker_source, 0.4);
@@ -128,10 +127,7 @@ impl SpeakerClusterer {
         if let Some(last_index) = self.last_cluster {
             let last_similarity = similarities[last_index];
             let gap = timestamp_seconds - self.clusters[last_index].last_seen_seconds;
-            if gap <= 8.0
-                && last_similarity >= 0.74
-                && last_similarity + 0.045 >= best_similarity
-            {
+            if gap <= 8.0 && last_similarity >= 0.74 && last_similarity + 0.045 >= best_similarity {
                 best_index = last_index;
                 best_similarity = last_similarity;
             }
@@ -328,7 +324,10 @@ fn estimate_pitch(frame: &[f32], sample_rate: u32) -> (f32, f32) {
         return (0.0, best_correlation.max(0.0));
     }
 
-    (sample_rate as f32 / best_lag as f32, best_correlation.clamp(0.0, 1.0))
+    (
+        sample_rate as f32 / best_lag as f32,
+        best_correlation.clamp(0.0, 1.0),
+    )
 }
 
 /// Extract a compact, content-tolerant voice signature from one VAD segment.
@@ -426,8 +425,7 @@ fn extract_voice_features(audio: &[f32], sample_rate: u32) -> Option<Vec<f32>> {
                 .enumerate()
                 .map(|(band, energy)| {
                     energy
-                        * (PI * coefficient as f32 * (band as f32 + 0.5) / MEL_BANDS as f32)
-                            .cos()
+                        * (PI * coefficient as f32 * (band as f32 + 0.5) / MEL_BANDS as f32).cos()
                 })
                 .sum::<f32>()
                 / MEL_BANDS as f32;
@@ -443,9 +441,8 @@ fn extract_voice_features(audio: &[f32], sample_rate: u32) -> Option<Vec<f32>> {
             / total_power
             / power.len().saturating_sub(1).max(1) as f32;
         let arithmetic_mean = total_power / power.len() as f32;
-        let geometric_mean = (power.iter().map(|value| value.ln()).sum::<f32>()
-            / power.len() as f32)
-            .exp();
+        let geometric_mean =
+            (power.iter().map(|value| value.ln()).sum::<f32>() / power.len() as f32).exp();
         let flatness = (geometric_mean / arithmetic_mean.max(1e-12)).clamp(0.0, 1.0);
         let zero_crossing_rate = frame
             .windows(2)
