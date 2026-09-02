@@ -1,4 +1,4 @@
-name: Implement and validate speaker attribution
+name: Finalize and validate speaker attribution
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  implement:
+  validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Clone speaker feature branch
         env:
@@ -27,95 +27,71 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Integrate source-separated Rust pipeline
+      - name: Strengthen voice separation and fix channel ownership
         working-directory: /tmp/notes
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
-          patch = Path('frontend/scripts/apply-speaker-detection.py')
-          text = patch.read_text()
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text()
+              if old not in text:
+                  if new in text:
+                      return
+                  raise SystemExit(f'Missing patch anchor in {path}: {old[:140]!r}')
+              path.write_text(text.replace(old, new, 1))
 
-          model_old = '        "    #[sqlx(default)]\\n    pub duration: Option<f64>,\\n}\\n",'
-          model_new = '        "    pub duration: Option<f64>,\\n}\\n",'
-          if model_old not in text:
-              raise SystemExit('Transcript model patch anchor was not found in integration script')
-          text = text.replace(model_old, model_new, 1)
+          speaker = Path('frontend/src-tauri/src/audio/transcription/speaker_detection.rs')
+          replace_once(
+              speaker,
+              '    let mut frame_features: Vec<Vec<f32>> = Vec::new();\n',
+              '    let mut frame_features: Vec<Vec<f32>> = Vec::new();\n'
+              '    let mut last_pitch = (0.0f32, 0.0f32);\n',
+          )
+          replace_once(
+              speaker,
+              '''        let (pitch_hz, pitch_strength) = if frame_number % 4 == 0 {
+            estimate_pitch(frame, sample_rate)
+        } else {
+            (0.0, 0.0)
+        };
+''',
+              '''        // Pitch autocorrelation is the most expensive frame feature. Sample it
+        // every fourth frame, then carry the latest observation through the
+        // intervening frames so the segment-level mean remains discriminative.
+        if frame_number % 4 == 0 {
+            last_pitch = estimate_pitch(frame, sample_rate);
+        }
+        let (pitch_hz, pitch_strength) = last_pitch;
+''',
+          )
+          replace_once(
+              speaker,
+              '            normalized_pitch,\n',
+              '            normalized_pitch * 1.75,\n',
+          )
 
-          # The repository uses a two-line SQL literal, while the staged helper
-          # expected a single-line insert. Remove that helper block and patch the
-          # real source below using its exact current structure.
-          text, removed = re.subn(
-              r'\n    transcript_repo = "frontend/src-tauri/src/database/repositories/transcript\.rs".*?\n\n    common = ',
-              '\n    common = ',
-              text,
-              count=1,
-              flags=re.S,
+          pipeline = Path('frontend/src-tauri/src/audio/pipeline.rs')
+          replace_once(
+              pipeline,
+              '        let segments = match device_type {\n',
+              '        let segments = match &device_type {\n',
           )
-          if removed != 1:
-              raise SystemExit('Could not isolate transcript repository patch block')
-          patch.write_text(text)
-
-          repository = Path('frontend/src-tauri/src/database/repositories/transcript.rs')
-          repository_text = repository.read_text()
-          old_query = (
-              '            let result = sqlx::query(\n'
-              '                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)\n'
-              '                 VALUES (?, ?, ?, ?, ?, ?, ?)"\n'
-              '            )\n'
+          replace_once(
+              pipeline,
+              '        let source_name = match device_type {\n',
+              '        let source_name = match &device_type {\n',
           )
-          new_query = (
-              '            let result = sqlx::query(\n'
-              '                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker, speaker_label, speaker_source, speaker_confidence)\n'
-              '                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"\n'
-              '            )\n'
-          )
-          if old_query not in repository_text:
-              raise SystemExit('Current multiline transcript INSERT was not found')
-          repository_text = repository_text.replace(old_query, new_query, 1)
-
-          old_bind = (
-              '            .bind(segment.duration)\n'
-              '            .execute(&mut *transaction)\n'
-          )
-          new_bind = (
-              '            .bind(segment.duration)\n'
-              '            .bind(&segment.speaker)\n'
-              '            .bind(&segment.speaker_label)\n'
-              '            .bind(&segment.speaker_source)\n'
-              '            .bind(segment.speaker_confidence)\n'
-              '            .execute(&mut *transaction)\n'
-          )
-          if old_bind not in repository_text:
-              raise SystemExit('Transcript INSERT bind chain was not found')
-          repository.write_text(repository_text.replace(old_bind, new_bind, 1))
           PY
-          python3 frontend/scripts/apply-speaker-detection.py rust
+
           rustfmt --edition 2021 \
             frontend/src-tauri/src/audio/transcription/speaker_detection.rs \
-            frontend/src-tauri/src/audio/transcription/mod.rs \
-            frontend/src-tauri/src/audio/transcription/worker.rs \
-            frontend/src-tauri/src/audio/pipeline.rs \
-            frontend/src-tauri/src/audio/recording_commands.rs \
-            frontend/src-tauri/src/audio/recording_saver.rs \
-            frontend/src-tauri/src/audio/common.rs \
-            frontend/src-tauri/src/database/models.rs \
-            frontend/src-tauri/src/database/repositories/transcript.rs \
-            frontend/src-tauri/src/database/repositories/meeting.rs \
-            frontend/src-tauri/src/api/api.rs
-          git add frontend/src-tauri
-          git commit -m "feat(speakers): preserve source channels and persist attribution"
-          git push origin HEAD:feature/speaker-detection
+            frontend/src-tauri/src/audio/pipeline.rs
 
-      - name: Integrate speaker-aware transcript experience
-        working-directory: /tmp/notes
-        run: |
-          set -euo pipefail
-          python3 frontend/scripts/apply-speaker-detection.py frontend
-          git add frontend/src docs/SPEAKER_DETECTION.md
-          git commit -m "feat(speakers): render attributed turns and inform summaries"
+          git add frontend/src-tauri/src/audio/transcription/speaker_detection.rs \
+                  frontend/src-tauri/src/audio/pipeline.rs
+          git commit -m "fix(speakers): strengthen clustering and channel ownership"
           git push origin HEAD:feature/speaker-detection
 
       - name: Validate acoustic clustering and database migration
@@ -178,3 +154,18 @@ jobs:
           corepack prepare pnpm@9.15.4 --activate
           pnpm install --frozen-lockfile
           pnpm build
+
+      - name: Install Linux dependencies for Rust check
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake clang libclang-dev pkg-config \
+            libasound2-dev libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf
+
+      - name: Compile-check the Tauri library
+        working-directory: /tmp/notes
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+        run: cargo check -p meetily --lib
