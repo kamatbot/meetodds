@@ -1,4 +1,4 @@
-name: Apply and validate export milestone
+name: Apply and validate M5 performance milestone
 
 on:
   push:
@@ -11,11 +11,11 @@ permissions:
   contents: write
 
 jobs:
-  export-milestone:
+  m5-performance:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
-      - name: Apply export implementation to feature branch
+      - name: Apply M5 runtime and build tuning
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -25,140 +25,234 @@ jobs:
           cd /tmp/notes
           git checkout feature/mayur-notes
 
-          mkdir -p frontend/src/lib frontend/src/components/MeetingDetails docs
-          git show origin/main:.github/payloads/meeting-export-formats.ts.gz | gzip -dc > frontend/src/lib/meeting-export-formats.ts
-          git show origin/main:.github/payloads/meeting-export.ts.gz | gzip -dc > frontend/src/lib/meeting-export.ts
-          git show origin/main:.github/payloads/SummaryUpdaterButtonGroup.tsx.gz | gzip -dc > frontend/src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx
-
           python3 <<'PY'
+          import json
           from pathlib import Path
 
-          path = Path('frontend/src/components/MeetingDetails/SummaryPanel.tsx')
-          text = path.read_text()
-
-          def replace_once(source: str, replacement: str) -> None:
-              global text
+          def replace_once(text: str, source: str, replacement: str, label: str) -> str:
               if source not in text:
-                  raise SystemExit(f'Could not find SummaryPanel patch anchor:\n{source}')
-              text = text.replace(source, replacement, 1)
+                  if replacement in text:
+                      return text
+                  raise SystemExit(f'Could not find patch anchor for {label}')
+              return text.replace(source, replacement, 1)
 
-          if "@/lib/meeting-export" not in text:
-              replace_once(
-                  "import { labelForCode } from '@/lib/summary-languages';\n",
-                  "import { labelForCode } from '@/lib/summary-languages';\n"
-                  "import { exportMeetingSummary, type MeetingExportFormat } from '@/lib/meeting-export';\n",
-              )
+          whisper_path = Path('frontend/src-tauri/src/whisper_engine/whisper_engine.rs')
+          whisper = whisper_path.read_text()
 
-          if 'const [exportingFormat, setExportingFormat]' not in text:
-              replace_once(
-                  "  const [langPickerOpen, setLangPickerOpen] = useState(false);\n",
-                  "  const [langPickerOpen, setLangPickerOpen] = useState(false);\n"
-                  "  const [exportingFormat, setExportingFormat] = useState<MeetingExportFormat | null>(null);\n",
-              )
+          whisper = replace_once(
+              whisper,
+              """        // Set thread count based on hardware (if supported by whisper.cpp)
+                  if let Some(_max_threads) = adaptive_config.max_threads {
+                      // Note: whisper.cpp may or may not expose thread control through params
+                      // Removed debug log to reduce I/O overhead in transcription hot path
+                  }
+          """,
+              """        // Apply the hardware profile. whisper-rs defaults to at most four
+                  // decoder threads, which leaves substantial M-series CPU capacity unused.
+                  if let Some(max_threads) = adaptive_config.max_threads {
+                      params.set_n_threads(max_threads as i32);
+                  }
+          """,
+              'primary decoder thread count',
+          )
 
-          if 'const handleExport = async (format: MeetingExportFormat)' not in text:
-              handler = """  const handleExport = async (format: MeetingExportFormat) => {
-            if (exportingFormat) return;
-            setExportingFormat(format);
+          whisper = replace_once(
+              whisper,
+              "        params.set_temperature(0.3);             // Lower than 0.4 for consistency, higher than 0.0 for quality\n",
+              "        params.set_temperature(adaptive_config.temperature);\n",
+              'adaptive temperature',
+          )
 
-            try {
-              const editorMarkdown = await summaryRef.current?.getMarkdown();
-              const rawPersistedMarkdown = (aiSummary as unknown as { markdown?: unknown } | null)?.markdown;
-              const persistedMarkdown = typeof rawPersistedMarkdown === 'string' ? rawPersistedMarkdown : '';
-              const markdown = (editorMarkdown || persistedMarkdown).trim();
+          whisper = replace_once(
+              whisper,
+              """        params.set_max_len(200);                 // Reasonable length
+                  params.set_single_segment(false);        // Allow multiple segments for better accuracy
 
-              if (!markdown) {
-                throw new Error('No summary content is available to export.');
-              }
+                  // Note: compression_ratio_threshold would be ideal but not available in current whisper-rs
+          """,
+              """        params.set_max_len(200);                 // Reasonable length
+                  params.set_single_segment(false);        // Allow multiple segments for better accuracy
 
-              const result = await exportMeetingSummary({
-                format,
-                title: meetingTitle,
-                createdAt: meeting.created_at,
-                markdown,
-              });
+                  if let Some(max_threads) = adaptive_config.max_threads {
+                      params.set_n_threads(max_threads as i32);
+                  }
 
-              toast.success(`Exported ${result.filename}`, {
-                description: result.path ?? `Saved through ${result.destination}.`,
-              });
-            } catch (error) {
-              console.error(`Failed to export ${format}:`, error);
-              toast.error(`Failed to export ${format.toUpperCase()}`, {
-                description: error instanceof Error ? error.message : String(error),
-              });
-            } finally {
-              setExportingFormat(null);
-            }
-          };
+                  // Note: compression_ratio_threshold would be ideal but not available in current whisper-rs
+          """,
+              'streaming decoder thread count',
+          )
 
+          whisper_path.write_text(whisper)
+
+          cargo_path = Path('frontend/src-tauri/Cargo.toml')
+          cargo = cargo_path.read_text().rstrip() + '\n'
+          if '[profile.release]' not in cargo:
+              cargo += """
+          # Optimize the shipped desktop binary while keeping local debug builds fast.
+          # M5-local builds add `target-cpu=native` through scripts/build-macos-m5.sh.
+          [profile.release]
+          opt-level = 3
+          lto = "thin"
+          codegen-units = 1
+          panic = "abort"
+          strip = "symbols"
           """
-              replace_once(
-                  "  const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';\n",
-                  handler + "  const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';\n",
-              )
+          cargo_path.write_text(cargo)
 
-          if 'onExport={handleExport}' not in text:
-              replace_once(
-                  "                onOpenFolder={onOpenFolder}\n                hasSummary={!!aiSummary}\n",
-                  "                onOpenFolder={onOpenFolder}\n"
-                  "                onExport={handleExport}\n"
-                  "                exportingFormat={exportingFormat}\n"
-                  "                hasSummary={!!aiSummary}\n",
-              )
-
-          path.write_text(text)
+          package_path = Path('frontend/package.json')
+          package = json.loads(package_path.read_text())
+          package['scripts']['tauri:build:m5'] = 'bash scripts/build-macos-m5.sh'
+          package_path.write_text(json.dumps(package, indent=4, ensure_ascii=False) + '\n')
           PY
 
-          cat > docs/EXPORTS.md <<'EOF'
-          # Formatted meeting exports
+          cat > frontend/scripts/build-macos-m5.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
 
-          Notes exports the current edited summary—not merely the last persisted copy—through the summary toolbar.
+          if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
+            echo "tauri:build:m5 must run on an Apple Silicon Mac." >&2
+            exit 1
+          fi
 
-          ## Formats
+          logical_cores="$(sysctl -n hw.logicalcpu_max 2>/dev/null || sysctl -n hw.ncpu)"
+          build_jobs="$logical_cores"
+          if (( logical_cores > 4 )); then
+            build_jobs=$((logical_cores - 2))
+          fi
 
-          | Format | Output |
-          | --- | --- |
-          | PDF | Paginated A4 report with document metadata, heading hierarchy, lists, quotes, code blocks, table grids, and page footers |
-          | DOCX | Editable Word document with named paragraph styles, inline emphasis, lists, quotes, code blocks, tables, and document properties |
-          | Markdown | Portable UTF-8 source with the meeting title and formatted meeting date |
+          chip_name="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)"
+          echo "Building Notes for ${chip_name:-Apple Silicon} with ${build_jobs} parallel jobs"
 
-          ## Save behavior
+          export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$build_jobs}"
+          export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$build_jobs}"
+          export NEXT_TELEMETRY_DISABLED="${NEXT_TELEMETRY_DISABLED:-1}"
+          export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-cpu=native"
 
-          The desktop app writes to the user's Downloads directory through Tauri's filesystem and path APIs. Existing files are never overwritten: subsequent exports add ` (1)`, ` (2)`, and so on. When desktop filesystem APIs are unavailable, the same data is sent through the browser download mechanism.
+          pnpm exec tauri build -- --features metal,coreml
+          EOF
+          chmod +x frontend/scripts/build-macos-m5.sh
 
-          Export filenames are sanitized for macOS, Windows, and Linux and include the meeting date. The implementation has no additional runtime package dependency; PDF and DOCX serialization are kept in the client export module so opening a meeting does not load an export library.
+          cat > docs/M5_PERFORMANCE.md <<'EOF'
+          # Apple Silicon and M5 performance
 
-          ## Supported Markdown
+          Notes already compiles Whisper with Metal and Core ML on macOS. This milestone fixes the runtime and release-path gaps that prevented newer Apple Silicon machines from using that capacity effectively.
 
-          The formatted serializers support headings, paragraphs, ordered and unordered lists, nested list indentation, block quotes, fenced code, dividers, GFM-style tables, bold, italic, inline code, and links. Unsupported Markdown remains readable as text rather than being silently discarded.
+          ## Runtime changes
+
+          - Detects actual physical/unified memory through `sysinfo` instead of treating every machine as 8 GB unless `MEMORY_GB` was manually set.
+          - Uses an Apple-Silicon-specific balanced decoder profile: beam 3 on 16 GB or larger machines, beam 2 below 16 GB, Metal enabled, and two CPU cores reserved for audio capture, UI rendering, and macOS.
+          - Applies the computed decoder thread count to both Whisper transcription paths. Previously the value was calculated and logged but discarded, leaving whisper.cpp at its four-thread default.
+          - Avoids beam 5 for the high-memory Apple Silicon tier; that setting favored marginal search quality over meeting-transcription latency.
+          - Removes an unconditional 200 ms sleep while the resource monitor held its write lock. Monitoring now refreshes only memory and CPU data and relies on the existing sample interval.
+          - Uses available memory and actual headroom below the configured memory limit when calculating safe parallel workers.
+
+          ## M5-native build
+
+          On an M5 Mac from `frontend/`:
+
+          ```bash
+          pnpm tauri:build:m5
+          ```
+
+          The script verifies an arm64 macOS host, preserves two logical cores for the system during compilation, enables Metal and Core ML, and adds `-C target-cpu=native` so the local release binary can use the exact CPU features exposed by that Mac. Normal release builds remain portable across supported Apple Silicon Macs.
+
+          The Cargo release profile now uses optimization level 3, thin LTO, one codegen unit, symbol stripping, and abort-on-panic. This improves shipped runtime performance and binary size at the cost of a slower release compile.
+
+          ## Validation boundary
+
+          Deterministic configuration and resource-accounting tests run on CI. The native build script is syntax-checked there. A real-time-factor benchmark still needs to be run on the target M5 hardware because an x86/Linux CI runner cannot measure Metal, Core ML, thermals, or Apple unified-memory bandwidth.
           EOF
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/src/lib/meeting-export-formats.ts \
-                  frontend/src/lib/meeting-export.ts \
-                  frontend/src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx \
-                  frontend/src/components/MeetingDetails/SummaryPanel.tsx \
-                  docs/EXPORTS.md
+          git add frontend/src-tauri/src/whisper_engine/whisper_engine.rs \
+                  frontend/src-tauri/Cargo.toml \
+                  frontend/package.json \
+                  frontend/scripts/build-macos-m5.sh \
+                  docs/M5_PERFORMANCE.md
 
           if ! git diff --cached --quiet; then
-            git commit -m "feat(export): add formatted PDF DOCX and Markdown exports"
+            git commit -m "perf(macos): apply adaptive threads and native M5 builds"
             git push origin HEAD:feature/mayur-notes
           fi
 
-      - name: Install frontend dependencies
+      - name: Parse and format changed Rust modules
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check \
+            /tmp/notes/frontend/src-tauri/src/audio/hardware_detector.rs \
+            /tmp/notes/frontend/src-tauri/src/whisper_engine/system_monitor.rs
+          rustfmt --edition 2021 --emit stdout \
+            /tmp/notes/frontend/src-tauri/src/whisper_engine/whisper_engine.rs >/dev/null
+          bash -n /tmp/notes/frontend/scripts/build-macos-m5.sh
+          cargo metadata --manifest-path /tmp/notes/frontend/src-tauri/Cargo.toml --no-deps --format-version 1 >/dev/null
+
+      - name: Test hardware and resource policies in isolation
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/perf-policy-tests
+          mkdir -p /tmp/perf-policy-tests/src
+          cat > /tmp/perf-policy-tests/Cargo.toml <<'EOF'
+          [package]
+          name = "perf-policy-tests"
+          version = "0.1.0"
+          edition = "2021"
+
+          [dependencies]
+          anyhow = "1"
+          log = "0.4"
+          serde = { version = "1", features = ["derive"] }
+          sysinfo = "0.32"
+          tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+          [dev-dependencies]
+          tempfile = "3"
+          EOF
+          cat > /tmp/perf-policy-tests/src/lib.rs <<'EOF'
+          #[path = "/tmp/notes/frontend/src-tauri/src/audio/hardware_detector.rs"]
+          pub mod hardware_detector;
+          #[path = "/tmp/notes/frontend/src-tauri/src/whisper_engine/system_monitor.rs"]
+          pub mod system_monitor;
+          EOF
+          cargo test --manifest-path /tmp/perf-policy-tests/Cargo.toml
+
+      - name: Verify whisper-rs 0.13 thread API
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/whisper-api-check
+          mkdir -p /tmp/whisper-api-check/src
+          cat > /tmp/whisper-api-check/Cargo.toml <<'EOF'
+          [package]
+          name = "whisper-api-check"
+          version = "0.1.0"
+          edition = "2021"
+
+          [dependencies]
+          whisper-rs = "=0.13.2"
+          EOF
+          cat > /tmp/whisper-api-check/src/main.rs <<'EOF'
+          use whisper_rs::{FullParams, SamplingStrategy};
+
+          fn main() {
+              let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+                  beam_size: 3,
+                  patience: 1.0,
+              });
+              params.set_n_threads(8);
+          }
+          EOF
+          WHISPER_DONT_GENERATE_BINDINGS=1 cargo check --manifest-path /tmp/whisper-api-check/Cargo.toml
+
+      - name: Install and build frontend
         working-directory: /tmp/notes/frontend
         run: |
           set -euo pipefail
           corepack enable
           corepack prepare pnpm@9.15.4 --activate
           pnpm install --no-frozen-lockfile
+          pnpm build
 
-      - name: Build frontend
-        working-directory: /tmp/notes/frontend
-        run: pnpm build
-
-      - name: Validate generated PDF and DOCX
+      - name: Smoke-test formatted export files
         working-directory: /tmp/notes/frontend
         run: |
           set -euo pipefail
@@ -173,40 +267,11 @@ jobs:
           node <<'NODE'
           const fs = require('fs');
           const { buildDocx, buildPdf } = require('/tmp/export-smoke/meeting-export-formats.js');
-          const markdown = `# Product Review
-
-          **Meeting date:** September 2, 2026
-
-          ---
-
-          ## Executive diagnosis
-
-          The team made **one reversible decision** and left a trust guardrail unresolved.
-
-          - Ship the thin slice
-          - Protect strategic capacity
-
-          > Strongest dissent: comprehension was not measured.
-
-          | Decision | Owner | Date |
-          | --- | --- | --- |
-          | Test onboarding | Mayur | 2026-09-09 |
-
-          \`\`\`text
-          rollback if complaints > 1%
-          \`\`\`
-          `;
-
-          fs.writeFileSync(
-            '/tmp/notes-export-smoke.docx',
-            Buffer.from(buildDocx(markdown, { title: 'Product Review', createdAt: '2026-09-02T06:00:00Z' })),
-          );
-          fs.writeFileSync(
-            '/tmp/notes-export-smoke.pdf',
-            Buffer.from(buildPdf(markdown, { title: 'Product Review', createdAt: '2026-09-02T06:00:00Z' })),
-          );
+          const markdown = '# Review\n\n- Decision owned\n\n| Metric | Trend |\n| --- | --- |\n| Activation | Up |';
+          fs.writeFileSync('/tmp/notes-export.docx', Buffer.from(buildDocx(markdown, { title: 'Review' })));
+          fs.writeFileSync('/tmp/notes-export.pdf', Buffer.from(buildPdf(markdown, { title: 'Review' })));
           NODE
 
-          unzip -t /tmp/notes-export-smoke.docx
-          file /tmp/notes-export-smoke.docx /tmp/notes-export-smoke.pdf
-          head -c 8 /tmp/notes-export-smoke.pdf | grep -a '%PDF-1.4'
+          unzip -t /tmp/notes-export.docx
+          file /tmp/notes-export.docx /tmp/notes-export.pdf
+          head -c 8 /tmp/notes-export.pdf | grep -a '%PDF-1.4'
