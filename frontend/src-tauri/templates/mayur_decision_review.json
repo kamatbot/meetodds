@@ -1,0 +1,67 @@
+{
+  "name": "Mayur · Decision Review",
+  "description": "Turns a contentious or high-stakes discussion into a mission-linked decision with explicit evidence, risk, dissent, ownership, and follow-through.",
+  "sections": [
+    {
+      "title": "Decision Statement & Why Now",
+      "instruction": "Write the exact decision the group needed to make, why it matters now, the cost of delay, and who owns it. If multiple decisions were mixed together, separate them. If no decision was actually required, say so.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Mission as the Tie-breaker",
+      "instruction": "Translate the relevant mission into a concrete decision rule: target user, durable user outcome, durable company value, non-negotiable guardrail, and attractive option the rule rejects. Note when the mission is too broad to decide.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Options, Trade-offs & Opportunity Cost",
+      "instruction": "Capture every credible option, including doing nothing or delaying, with user benefit, company value, cost, downside, opportunity cost, and what must be true. Do not collapse dissenting options into straw men.",
+      "format": "list",
+      "item_format": "| **Option** | **User & Business Upside** | **Cost / Downside** | **Opportunity Cost** | **What Must Be True** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Facts, Assumptions & Unknowns",
+      "instruction": "Separate verified facts, interpretations, assumptions, and unknowns. Identify which uncertainty is decision-relevant and which is merely interesting. Include evidence sources and timestamps when available.",
+      "format": "list",
+      "item_format": "| **Type** | **Claim** | **Evidence / Source** | **Confidence** | **Decision Relevance** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Reversibility, Blast Radius & Delay Cost",
+      "instruction": "Classify the decision as reversible, company-critical, or user-safety/high-stakes. Explain rollback difficulty, blast radius, delay cost, affected users, and the appropriate evidence bar. Challenge both over-analysis of cheap-to-reverse choices and reckless speed on material harm.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Evidence & Experiment Plan",
+      "instruction": "State the preferred hypothesis, strongest competing explanation, evidence that would disprove the preferred view, smallest discriminating test, primary threshold, guardrails, staged exposure, and the decision each result would trigger.",
+      "format": "list",
+      "item_format": "| **Hypothesis / Question** | **Falsifier** | **Smallest Test** | **Threshold & Guardrail** | **Resulting Decision** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "User & Company Risk Controls",
+      "instruction": "For safety, legal, compliance, privacy, security, trust, or loss-of-funds risk, capture independent review, staged exposure, monitoring, rollback trigger, incident owner, and communication obligation. Write Not applicable only when the transcript supports that conclusion.",
+      "format": "list",
+      "item_format": "| **Risk** | **Potential Harm / Blast Radius** | **Control / Reviewer** | **Monitoring** | **Rollback or Escalation Trigger** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Decision, Rationale & Conditions",
+      "instruction": "State the decision actually made, rationale, trade-offs accepted, assumptions it depends on, conditions that would reopen it, and what is explicitly not being done. If the decision remained open, state the missing evidence, owner, and deadline.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Dissent & Strongest Counterargument",
+      "instruction": "Represent the strongest opposing view in terms its advocate would accept. Capture unresolved concerns, values conflicts, and whether participants listened and spoke plainly. Separate disagreement about facts, assumptions, risk tolerance, and priorities.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Ownership & Follow-through",
+      "instruction": "List decision owner, implementation owner, decision rights, constraints, guardrails, next action, due date, success evidence, checkpoint, and escalation trigger. Mark any missing accountability explicitly.",
+      "format": "list",
+      "item_format": "| **Owner** | **Action / Decision Right** | **Constraint or Guardrail** | **Due Date** | **Evidence / Checkpoint** | **Escalation Trigger** |\n| --- | --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Decision Quality Audit",
+      "instruction": "Rate Mission rule, Decision clarity, Speed calibration, Evidence quality, Experiment discrimination, Risk controls, Opportunity-cost clarity, Dissent quality, Ownership, and Communication as Strong, Mixed, Weak, or Not observed. Cite transcript evidence and one concrete correction for every Mixed or Weak rating.",
+      "format": "list",
+      "item_format": "| **Dimension** | **Rating** | **Evidence** | **Correction** |\n| --- | --- | --- | --- |"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "name": "Mayur · PM 1:1 & Coaching",
+  "description": "Creates a candid, evidence-led PM coaching record focused on outcomes, growth, delegation, feedback, mission, and trust rather than status theatre.",
+  "sections": [
+    {
+      "title": "Human Context & Meeting Intent",
+      "instruction": "Summarize the person’s current energy, context, concerns, and the purpose of the 1:1 using only what was actually said. Distinguish emotional context from performance evidence and preserve nuance without diagnosing.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Outcomes Since the Last Checkpoint",
+      "instruction": "Capture meaningful user, business, team, and learning outcomes rather than activity volume. Separate shipped output from changed outcomes and note the evidence or outside feedback supporting each claim.",
+      "format": "list",
+      "item_format": "| **Outcome** | **Evidence / Feedback** | **PM Contribution** | **What Remains Uncertain** |\n| --- | --- | --- | --- |"
+    },
+    {
+      "title": "Current Mission-linked Challenge",
+      "instruction": "State the most consequential current product or leadership challenge, the mission-linked user and business outcome, and the decision or behavior that would move it forward. Call out when the challenge is framed only as a task list.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Important vs Urgent",
+      "instruction": "Identify where urgent work is crowding out important work, whether repeated fires expose a system problem, and what capacity should be protected. Include explicit opportunity costs and what should stop, move, or be delegated.",
+      "format": "list",
+      "item_format": "| **Work** | **Important / Urgent** | **System Cause or Opportunity Cost** | **Change** |\n| --- | --- | --- | --- |"
+    },
+    {
+      "title": "Strengths with Evidence",
+      "instruction": "Identify two or three strengths demonstrated through observable behavior and outcomes. Link each to specific evidence and note the overuse risk. Avoid personality labels, generic praise, and unsupported claims.",
+      "format": "list",
+      "item_format": "| **Strength** | **Observed Behavior** | **Outcome / Outside Evidence** | **Overuse Risk** |\n| --- | --- | --- | --- |"
+    },
+    {
+      "title": "Deliberate Growth Edge",
+      "instruction": "Name one meaningful responsibility that is slightly beyond the PM’s current evidence and is energizing rather than merely prestigious or chronically overwhelming. Define the capability, support, feedback cadence, six-week evidence, and safe boundaries.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Decision Velocity & Execution",
+      "instruction": "Identify the most important open decision, its reversibility and blast radius, delay cost, owner, decision date, and evidence threshold. Also identify the thinnest end-to-end outcome that can ship and learn this cycle.",
+      "format": "list",
+      "item_format": "| **Decision / Outcome** | **Risk & Delay Cost** | **Smallest Safe Step** | **Owner & Date** | **Evidence / Stop Rule** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Context, Not Control",
+      "instruction": "Capture what mission, constraints, guardrails, decision rights, support, and escalation triggers the manager supplied. Identify where ownership is being rescued, withheld, or micromanaged and what context is still missing.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Feedback in Both Directions",
+      "instruction": "Record specific feedback given and requested using observed behavior, impact, and useful next action. Include feedback for the manager, how it was received, and what behavior will change. Mark feedback that was softened, postponed, or made into a personality judgment.",
+      "format": "list",
+      "item_format": "| **From → To** | **Observed Behavior** | **Impact** | **Requested Change** | **Follow-up Evidence** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Trust, Intent & System Diagnosis",
+      "instruction": "For frustrating interactions discussed, separate observed facts, assumed intent, system incentives, missing context, harmful impact, and the next clarifying question. Assume good intent without excusing repeated harmful patterns or avoiding accountability.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Career & Mission Alignment",
+      "instruction": "Capture whether the company mission still creates work the PM is uncomfortably excited to influence, what has become repetitive, and the next internal or external reversible experiment. Do not turn exploration into a recommendation to leave.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Commitments, Support & Checkpoint",
+      "instruction": "List no more than five concrete commitments across the PM and manager. Include owner, due date, evidence of completion, support required, and next checkpoint. Do not convert every discussion point into an action.",
+      "format": "list",
+      "item_format": "| **Owner** | **Commitment** | **Due Date** | **Evidence of Done** | **Support / Checkpoint** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "1:1 Quality Audit",
+      "instruction": "Assess whether the conversation created clarity, candor, useful feedback, supported ownership, a deliberate growth edge, and an actionable next checkpoint. Cite evidence, identify what was avoided, and recommend the single highest-leverage change for the next 1:1.",
+      "format": "paragraph"
+    }
+  ]
+}
