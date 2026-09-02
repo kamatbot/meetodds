@@ -1,0 +1,128 @@
+name: Validate speaker attribution integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/implement-speaker-detection.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Clone speaker feature branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/notes
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/notes
+          cd /tmp/notes
+          git checkout feature/speaker-detection
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Remove duplicate live transcript metadata
+        working-directory: /tmp/notes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src/contexts/TranscriptContext.tsx')
+          text = path.read_text()
+          duplicate = (
+              '            confidence: update.confidence,\n'
+              '      speaker: update.speaker,\n'
+              '      speaker_label: update.speaker_label,\n'
+              '      speaker_source: update.speaker_source,\n'
+              '      speaker_confidence: update.speaker_confidence,\n'
+              '            speaker: update.speaker,\n'
+              '            speaker_label: update.speaker_label,\n'
+              '            speaker_source: update.speaker_source,\n'
+              '            speaker_confidence: update.speaker_confidence,\n'
+          )
+          corrected = (
+              '            confidence: update.confidence,\n'
+              '            speaker: update.speaker,\n'
+              '            speaker_label: update.speaker_label,\n'
+              '            speaker_source: update.speaker_source,\n'
+              '            speaker_confidence: update.speaker_confidence,\n'
+          )
+          if duplicate not in text:
+              if corrected in text:
+                  raise SystemExit('Duplicate block already fixed; refusing an empty milestone commit')
+              raise SystemExit('Expected duplicate speaker block was not found')
+          path.write_text(text.replace(duplicate, corrected, 1))
+          PY
+
+          git add frontend/src/contexts/TranscriptContext.tsx
+          git commit -m "fix(speakers): deduplicate live transcript metadata"
+          git push origin HEAD:feature/speaker-detection
+
+      - name: Validate acoustic clustering and migration
+        working-directory: /tmp/notes
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/speaker-engine-tests
+          mkdir -p /tmp/speaker-engine-tests/src
+          printf '%s\n' \
+            '[package]' \
+            'name = "speaker-engine-tests"' \
+            'version = "0.1.0"' \
+            'edition = "2021"' \
+            '' \
+            '[dependencies]' \
+            'realfft = "=3.4.0"' \
+            > /tmp/speaker-engine-tests/Cargo.toml
+          printf '%s\n' \
+            'pub mod audio {' \
+            '    #[derive(Debug, Clone, PartialEq, Eq)]' \
+            '    pub enum DeviceType { Microphone, System }' \
+            '}' \
+            '' \
+            '#[path = "/tmp/notes/frontend/src-tauri/src/audio/transcription/speaker_detection.rs"]' \
+            'pub mod speaker_detection;' \
+            > /tmp/speaker-engine-tests/src/lib.rs
+          cargo test --manifest-path /tmp/speaker-engine-tests/Cargo.toml
+
+          python3 - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          db = sqlite3.connect(':memory:')
+          db.execute('CREATE TABLE transcripts (id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL, transcript TEXT NOT NULL, timestamp TEXT NOT NULL, speaker TEXT)')
+          db.executescript(Path('frontend/src-tauri/migrations/20260902090000_add_speaker_metadata.sql').read_text())
+          columns = {row[1] for row in db.execute('PRAGMA table_info(transcripts)')}
+          assert {'speaker', 'speaker_label', 'speaker_source', 'speaker_confidence'} <= columns
+          assert 'idx_transcripts_meeting_speaker' in {row[1] for row in db.execute('PRAGMA index_list(transcripts)')}
+          print('speaker migration validated')
+          PY
+
+      - name: Frozen install and production frontend build
+        working-directory: /tmp/notes/frontend
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install Linux dependencies for Rust check
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake clang libclang-dev pkg-config \
+            libasound2-dev libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf
+
+      - name: Compile-check the Tauri library
+        working-directory: /tmp/notes
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+        run: cargo check -p meetily --lib
