@@ -227,7 +227,9 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     queueRef.current.unshift(job);
 
     updateCounts();
-    drainQueueRef.current();
+    // Let a synchronous backfill enqueue all candidates before taking worker
+    // slots; otherwise its oldest two items start before newer ones are added.
+    queueMicrotask(() => drainQueueRef.current());
   }, [isCurrentJob, updateCounts]);
 
   const clearPendingWork = useCallback(() => {

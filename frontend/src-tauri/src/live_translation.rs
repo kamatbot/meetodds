@@ -423,13 +423,23 @@ pub async fn api_warm_live_translation(state: tauri::State<'_, AppState>) -> Res
     let host = config
         .ollama_endpoint
         .unwrap_or_else(|| "http://localhost:11434".to_string());
-    TRANSLATION_HTTP_CLIENT
-        .post(format!("{host}/api/generate"))
-        .json(&serde_json::json!({ "model": config.model_name, "keep_alive": "10m" }))
+    let response = TRANSLATION_HTTP_CLIENT
+        .post(format!("{}/api/generate", host.trim_end_matches('/')))
+        .json(&serde_json::json!({
+            "model": config.model_name,
+            "keep_alive": "10m",
+            "stream": false
+        }))
         .timeout(Duration::from_secs(120))
         .send()
         .await
         .map_err(|error| format!("Failed to warm Ollama model: {error}"))?;
+    response
+        .error_for_status()
+        .map_err(|error| format!("Failed to warm Ollama model: {error}"))?
+        .bytes()
+        .await
+        .map_err(|error| format!("Failed to finish warming Ollama model: {error}"))?;
     Ok(true)
 }
 
@@ -523,15 +533,6 @@ pub async fn api_translate_live_text<R: Runtime>(
                 value.min(LIVE_TRANSLATION_MAX_TOKENS)
             }),
     );
-    // The built-in sidecar handles cancellation by shutting itself down, which
-    // makes the next translation pay a full model reload. Let it finish instead;
-    // the outer select below still returns to the caller immediately on cancel,
-    // and max_tokens bounds how long the sidecar stays busy.
-    let generation_token = if config.provider == LLMProvider::BuiltInAI {
-        None
-    } else {
-        Some(&cancellation_token)
-    };
     let translation_future = generate_summary(
         &TRANSLATION_HTTP_CLIENT,
         &config.provider,
@@ -545,7 +546,7 @@ pub async fn api_translate_live_text<R: Runtime>(
         config.temperature,
         config.top_p,
         app_data_dir.as_ref(),
-        generation_token,
+        Some(&cancellation_token),
     );
 
     let result = tokio::select! {

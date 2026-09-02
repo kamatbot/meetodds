@@ -145,6 +145,7 @@ pub async fn generate_summary(
             model_name,
             system_prompt,
             user_prompt,
+            max_tokens,
             cancellation_token,
         )
         .await;

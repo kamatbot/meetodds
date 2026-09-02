@@ -576,15 +576,13 @@ pub async fn openai_codex_get_models<R: Runtime>(
     Ok(models.into_iter().map(|id| CodexModel { id }).collect())
 }
 
-async fn send_codex_response_request(
-    client: &Client,
-    auth: &CodexAuthState,
+fn build_codex_response_body(
     model_name: &str,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<reqwest::Response, String> {
-    let url = format!("{CODEX_BASE_URL}/responses");
-    let body = serde_json::json!({
+    max_output_tokens: Option<u32>,
+) -> Value {
+    let mut body = serde_json::json!({
         "model": model_name,
         "input": [{
             "role": "user",
@@ -594,6 +592,22 @@ async fn send_codex_response_request(
         "stream": true,
         "store": false,
     });
+    if let Some(limit) = max_output_tokens {
+        body["max_output_tokens"] = serde_json::json!(limit);
+    }
+    body
+}
+
+async fn send_codex_response_request(
+    client: &Client,
+    auth: &CodexAuthState,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_output_tokens: Option<u32>,
+) -> Result<reqwest::Response, String> {
+    let url = format!("{CODEX_BASE_URL}/responses");
+    let body = build_codex_response_body(model_name, system_prompt, user_prompt, max_output_tokens);
     apply_codex_headers(client.post(url), auth, true)
         .timeout(Duration::from_secs(300))
         .json(&body)
@@ -706,6 +720,7 @@ pub async fn generate_codex_summary(
     model_name: &str,
     system_prompt: &str,
     user_prompt: &str,
+    max_output_tokens: Option<u32>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String, String> {
     if let Some(token) = cancellation_token {
@@ -715,14 +730,27 @@ pub async fn generate_codex_summary(
     }
 
     let mut auth = load_valid_auth_from_dir(app_data_dir, client).await?;
-    let mut response =
-        send_codex_response_request(client, &auth, model_name, system_prompt, user_prompt).await?;
+    let mut response = send_codex_response_request(
+        client,
+        &auth,
+        model_name,
+        system_prompt,
+        user_prompt,
+        max_output_tokens,
+    )
+    .await?;
 
     if response.status() == StatusCode::UNAUTHORIZED {
         auth = force_refresh_from_dir(app_data_dir, client).await?;
-        response =
-            send_codex_response_request(client, &auth, model_name, system_prompt, user_prompt)
-                .await?;
+        response = send_codex_response_request(
+            client,
+            &auth,
+            model_name,
+            system_prompt,
+            user_prompt,
+            max_output_tokens,
+        )
+        .await?;
     }
 
     if !response.status().is_success() {
@@ -803,5 +831,14 @@ mod tests {
             "data: [DONE]\n\n"
         );
         assert_eq!(parse_codex_sse(body).unwrap(), "Fallback text");
+    }
+
+    #[test]
+    fn codex_response_body_only_sets_an_explicit_output_limit() {
+        let limited = build_codex_response_body("model", "system", "user", Some(512));
+        assert_eq!(limited["max_output_tokens"], 512);
+
+        let unlimited = build_codex_response_body("model", "system", "user", None);
+        assert!(unlimited.get("max_output_tokens").is_none());
     }
 }
