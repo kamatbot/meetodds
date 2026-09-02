@@ -961,7 +961,7 @@ impl AudioPipeline {
     }
 
     fn process_source_audio(&mut self, device_type: DeviceType, samples: &[f32]) -> Result<()> {
-        let segments = match device_type {
+        let segments = match &device_type {
             DeviceType::Microphone => self.mic_vad_processor.process_audio(samples)?,
             DeviceType::System => self.system_vad_processor.process_audio(samples)?,
         };
@@ -970,7 +970,7 @@ impl AudioPipeline {
     }
 
     fn send_speech_segments(&mut self, device_type: DeviceType, segments: Vec<SpeechSegment>) {
-        let source_name = match device_type {
+        let source_name = match &device_type {
             DeviceType::Microphone => "microphone",
             DeviceType::System => "system audio",
         };

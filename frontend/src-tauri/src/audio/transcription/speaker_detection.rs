@@ -354,6 +354,7 @@ fn extract_voice_features(audio: &[f32], sample_rate: u32) -> Option<Vec<f32>> {
     let mut spectrum = fft.make_output_vec();
     let mel_bins = mel_filter_bins(sample_rate, fft_size, spectrum.len());
     let mut frame_features: Vec<Vec<f32>> = Vec::new();
+    let mut last_pitch = (0.0f32, 0.0f32);
 
     for (frame_number, frame_start) in (0..=(samples.len() - frame_len))
         .step_by(hop_len)
@@ -450,11 +451,13 @@ fn extract_voice_features(audio: &[f32], sample_rate: u32) -> Option<Vec<f32>> {
             .count() as f32
             / frame_len.saturating_sub(1).max(1) as f32;
 
-        let (pitch_hz, pitch_strength) = if frame_number % 4 == 0 {
-            estimate_pitch(frame, sample_rate)
-        } else {
-            (0.0, 0.0)
-        };
+        // Pitch autocorrelation is the most expensive frame feature. Sample it
+        // every fourth frame, then carry the latest observation through the
+        // intervening frames so the segment-level mean remains discriminative.
+        if frame_number % 4 == 0 {
+            last_pitch = estimate_pitch(frame, sample_rate);
+        }
+        let (pitch_hz, pitch_strength) = last_pitch;
         let normalized_pitch = if pitch_hz > 0.0 {
             (pitch_hz / 160.0).ln().clamp(-1.5, 1.5)
         } else {
@@ -465,7 +468,7 @@ fn extract_voice_features(audio: &[f32], sample_rate: u32) -> Option<Vec<f32>> {
             centroid.clamp(0.0, 1.0),
             flatness,
             zero_crossing_rate.clamp(0.0, 1.0),
-            normalized_pitch,
+            normalized_pitch * 1.75,
             pitch_strength,
         ]);
         frame_features.push(mfcc);
