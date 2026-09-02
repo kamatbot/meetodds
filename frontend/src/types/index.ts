@@ -108,6 +108,8 @@ export interface PaginatedTranscriptsResponse {
   has_more: boolean;
 }
 
+export type TranscriptTranslationStatus = 'queued' | 'translating' | 'translated' | 'error';
+
 // Transcript segment data for virtualized display
 export interface TranscriptSegmentData {
   id: string;
@@ -119,4 +121,8 @@ export interface TranscriptSegmentData {
   speaker_label?: string;
   speaker_source?: string;
   speaker_confidence?: number;
+  translated_text?: string;
+  translation_status?: TranscriptTranslationStatus;
+  translation_error?: string;
+  translation_latency_ms?: number;
 }
