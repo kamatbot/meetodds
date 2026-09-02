@@ -33,13 +33,60 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           patch = Path('frontend/scripts/apply-speaker-detection.py')
           text = patch.read_text()
-          old = '        "    #[sqlx(default)]\\n    pub duration: Option<f64>,\\n}\\n",'
-          new = '        "    pub duration: Option<f64>,\\n}\\n",'
-          if old not in text:
+
+          model_old = '        "    #[sqlx(default)]\\n    pub duration: Option<f64>,\\n}\\n",'
+          model_new = '        "    pub duration: Option<f64>,\\n}\\n",'
+          if model_old not in text:
               raise SystemExit('Transcript model patch anchor was not found in integration script')
-          patch.write_text(text.replace(old, new, 1))
+          text = text.replace(model_old, model_new, 1)
+
+          # The repository uses a two-line SQL literal, while the staged helper
+          # expected a single-line insert. Remove that helper block and patch the
+          # real source below using its exact current structure.
+          text, removed = re.subn(
+              r'\n    transcript_repo = "frontend/src-tauri/src/database/repositories/transcript\.rs".*?\n\n    common = ',
+              '\n    common = ',
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if removed != 1:
+              raise SystemExit('Could not isolate transcript repository patch block')
+          patch.write_text(text)
+
+          repository = Path('frontend/src-tauri/src/database/repositories/transcript.rs')
+          repository_text = repository.read_text()
+          old_query = '''            let result = sqlx::query(
+                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
+'''
+          new_query = '''            let result = sqlx::query(
+                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker, speaker_label, speaker_source, speaker_confidence)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+'''
+          if old_query not in repository_text:
+              raise SystemExit('Current multiline transcript INSERT was not found')
+          repository_text = repository_text.replace(old_query, new_query, 1)
+
+          old_bind = '''            .bind(segment.duration)
+            .execute(&mut *transaction)
+'''
+          new_bind = '''            .bind(segment.duration)
+            .bind(&segment.speaker)
+            .bind(&segment.speaker_label)
+            .bind(&segment.speaker_source)
+            .bind(segment.speaker_confidence)
+            .execute(&mut *transaction)
+'''
+          if old_bind not in repository_text:
+              raise SystemExit('Transcript INSERT bind chain was not found')
+          repository.write_text(repository_text.replace(old_bind, new_bind, 1))
           PY
           python3 frontend/scripts/apply-speaker-detection.py rust
           rustfmt --edition 2021 \
