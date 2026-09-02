@@ -1,0 +1,139 @@
+name: Finalize and validate Notes feature branch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/finalize-feature.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Format performance modules and update feature branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/notes
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/notes
+          cd /tmp/notes
+          git checkout feature/mayur-notes
+
+          rustfmt --edition 2021 \
+            frontend/src-tauri/src/audio/hardware_detector.rs \
+            frontend/src-tauri/src/whisper_engine/system_monitor.rs
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src-tauri/src/audio/hardware_detector.rs \
+                  frontend/src-tauri/src/whisper_engine/system_monitor.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "style(perf): format Apple Silicon performance modules"
+            git push origin HEAD:feature/mayur-notes
+          fi
+
+      - name: Parse changed Rust and build configuration
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check \
+            /tmp/notes/frontend/src-tauri/src/audio/hardware_detector.rs \
+            /tmp/notes/frontend/src-tauri/src/whisper_engine/system_monitor.rs
+          rustfmt --edition 2021 --emit stdout \
+            /tmp/notes/frontend/src-tauri/src/whisper_engine/whisper_engine.rs >/dev/null
+          bash -n /tmp/notes/frontend/scripts/build-macos-m5.sh
+          cargo metadata --manifest-path /tmp/notes/frontend/src-tauri/Cargo.toml --no-deps --format-version 1 >/dev/null
+
+      - name: Test hardware and resource policies in isolation
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/perf-policy-tests
+          mkdir -p /tmp/perf-policy-tests/src
+          cat > /tmp/perf-policy-tests/Cargo.toml <<'EOF'
+          [package]
+          name = "perf-policy-tests"
+          version = "0.1.0"
+          edition = "2021"
+
+          [dependencies]
+          anyhow = "1"
+          log = "0.4"
+          serde = { version = "1", features = ["derive"] }
+          sysinfo = "0.32"
+          tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+          [dev-dependencies]
+          tempfile = "3"
+          EOF
+          cat > /tmp/perf-policy-tests/src/lib.rs <<'EOF'
+          #[path = "/tmp/notes/frontend/src-tauri/src/audio/hardware_detector.rs"]
+          pub mod hardware_detector;
+          #[path = "/tmp/notes/frontend/src-tauri/src/whisper_engine/system_monitor.rs"]
+          pub mod system_monitor;
+          EOF
+          cargo test --manifest-path /tmp/perf-policy-tests/Cargo.toml
+
+      - name: Verify whisper-rs 0.13 decoder thread API
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/whisper-api-check
+          mkdir -p /tmp/whisper-api-check/src
+          cat > /tmp/whisper-api-check/Cargo.toml <<'EOF'
+          [package]
+          name = "whisper-api-check"
+          version = "0.1.0"
+          edition = "2021"
+
+          [dependencies]
+          whisper-rs = "=0.13.2"
+          EOF
+          cat > /tmp/whisper-api-check/src/main.rs <<'EOF'
+          use whisper_rs::{FullParams, SamplingStrategy};
+
+          fn main() {
+              let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+                  beam_size: 3,
+                  patience: 1.0,
+              });
+              params.set_n_threads(8);
+          }
+          EOF
+          WHISPER_DONT_GENERATE_BINDINGS=1 cargo check --manifest-path /tmp/whisper-api-check/Cargo.toml
+
+      - name: Build frontend production bundle
+        working-directory: /tmp/notes/frontend
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
+          pnpm install --no-frozen-lockfile
+          pnpm build
+
+      - name: Smoke-test formatted DOCX and PDF exports
+        working-directory: /tmp/notes/frontend
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/export-smoke
+          pnpm exec tsc src/lib/meeting-export-formats.ts \
+            --target ES2020 \
+            --module commonjs \
+            --outDir /tmp/export-smoke \
+            --strict \
+            --skipLibCheck
+
+          node <<'NODE'
+          const fs = require('fs');
+          const { buildDocx, buildPdf } = require('/tmp/export-smoke/meeting-export-formats.js');
+          const markdown = '# Review\n\n- Decision owned\n\n| Metric | Trend |\n| --- | --- |\n| Activation | Up |';
+          fs.writeFileSync('/tmp/notes-export.docx', Buffer.from(buildDocx(markdown, { title: 'Review' })));
+          fs.writeFileSync('/tmp/notes-export.pdf', Buffer.from(buildPdf(markdown, { title: 'Review' })));
+          NODE
+
+          unzip -t /tmp/notes-export.docx
+          file /tmp/notes-export.docx /tmp/notes-export.pdf
+          head -c 8 /tmp/notes-export.pdf | grep -a '%PDF-1.4'
