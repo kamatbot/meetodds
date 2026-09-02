@@ -63,8 +63,7 @@ impl HardwareProfile {
         let cpu_cores = Self::detect_cpu_cores();
         let (has_gpu_acceleration, gpu_type) = Self::detect_gpu();
         let memory_gb = Self::detect_memory_gb();
-        let performance_tier =
-            Self::calculate_performance_tier(cpu_cores, &gpu_type, memory_gb);
+        let performance_tier = Self::calculate_performance_tier(cpu_cores, &gpu_type, memory_gb);
 
         HardwareProfile {
             cpu_cores,
@@ -162,9 +161,7 @@ impl HardwareProfile {
     }
 
     fn recommended_decoder_threads(cpu_cores: u8, reserve_for_ui: u8, cap: u8) -> usize {
-        cpu_cores
-            .saturating_sub(reserve_for_ui)
-            .clamp(2, cap) as usize
+        cpu_cores.saturating_sub(reserve_for_ui).clamp(2, cap) as usize
     }
 
     #[cfg(target_os = "macos")]
@@ -243,11 +240,7 @@ impl HardwareProfile {
                     beam_size: if self.memory_gb >= 16 { 3 } else { 2 },
                     temperature: 0.2,
                     use_gpu: true,
-                    max_threads: Some(Self::recommended_decoder_threads(
-                        self.cpu_cores,
-                        2,
-                        10,
-                    )),
+                    max_threads: Some(Self::recommended_decoder_threads(self.cpu_cores, 2, 10)),
                     chunk_size_preference: ChunkSizePreference::Balanced,
                 };
             }
@@ -257,33 +250,21 @@ impl HardwareProfile {
                     beam_size: 5,
                     temperature: 0.1,
                     use_gpu: self.has_gpu_acceleration,
-                    max_threads: Some(Self::recommended_decoder_threads(
-                        self.cpu_cores,
-                        1,
-                        8,
-                    )),
+                    max_threads: Some(Self::recommended_decoder_threads(self.cpu_cores, 1, 8)),
                     chunk_size_preference: ChunkSizePreference::Quality,
                 },
                 PerformanceTier::High => AdaptiveWhisperConfig {
                     beam_size: 3,
                     temperature: 0.2,
                     use_gpu: self.has_gpu_acceleration,
-                    max_threads: Some(Self::recommended_decoder_threads(
-                        self.cpu_cores,
-                        1,
-                        6,
-                    )),
+                    max_threads: Some(Self::recommended_decoder_threads(self.cpu_cores, 1, 6)),
                     chunk_size_preference: ChunkSizePreference::Balanced,
                 },
                 PerformanceTier::Medium => AdaptiveWhisperConfig {
                     beam_size: 2,
                     temperature: 0.3,
                     use_gpu: self.has_gpu_acceleration,
-                    max_threads: Some(Self::recommended_decoder_threads(
-                        self.cpu_cores,
-                        1,
-                        4,
-                    )),
+                    max_threads: Some(Self::recommended_decoder_threads(self.cpu_cores, 1, 4)),
                     chunk_size_preference: ChunkSizePreference::Balanced,
                 },
                 PerformanceTier::Low => AdaptiveWhisperConfig {

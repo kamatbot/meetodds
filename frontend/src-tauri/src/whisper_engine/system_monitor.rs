@@ -91,11 +91,7 @@ impl SystemMonitor {
         let cpu_usage_percent = if system.cpus().is_empty() {
             0.0
         } else {
-            system
-                .cpus()
-                .iter()
-                .map(|cpu| cpu.cpu_usage())
-                .sum::<f32>()
+            system.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>()
                 / system.cpus().len() as f32
         };
 
@@ -178,12 +174,9 @@ impl SystemMonitor {
         Ok(status)
     }
 
-    fn safe_worker_count_for(
-        resources: &SystemResources,
-        limits: &ResourceLimits,
-    ) -> usize {
-        let max_allowed_used_mb = (resources.total_memory_mb as f32
-            * (limits.max_memory_percent / 100.0)) as u64;
+    fn safe_worker_count_for(resources: &SystemResources, limits: &ResourceLimits) -> usize {
+        let max_allowed_used_mb =
+            (resources.total_memory_mb as f32 * (limits.max_memory_percent / 100.0)) as u64;
         let currently_used_mb = resources
             .total_memory_mb
             .saturating_sub(resources.available_memory_mb);
@@ -194,10 +187,7 @@ impl SystemMonitor {
             (memory_headroom_mb / limits.worker_memory_budget_mb) as usize
         };
 
-        memory_based_workers
-            .min(resources.cpu_cores)
-            .min(4)
-            .max(1)
+        memory_based_workers.min(resources.cpu_cores).min(4).max(1)
     }
 
     pub async fn calculate_safe_worker_count(&self) -> Result<usize> {
@@ -325,6 +315,9 @@ mod tests {
             available_memory_mb: 5_500,
             ..resources
         };
-        assert_eq!(SystemMonitor::safe_worker_count_for(&constrained, &limits), 1);
+        assert_eq!(
+            SystemMonitor::safe_worker_count_for(&constrained, &limits),
+            1
+        );
     }
 }
