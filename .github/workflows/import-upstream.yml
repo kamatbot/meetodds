@@ -1,0 +1,28 @@
+name: Import Meetily upstream
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/import-upstream.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Meetily and publish baseline branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --no-tags https://github.com/Zackriya-Solutions/meetily.git /tmp/meetily
+          cd /tmp/meetily
+          git checkout main
+          git remote remove origin
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:refs/heads/upstream/meetily-main --force
+          git push origin HEAD:refs/heads/feature/mayur-notes --force
