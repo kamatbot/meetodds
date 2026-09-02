@@ -25,6 +25,7 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    pub stream: bool,
 }
 
 // Generic structure for OpenAI-compatible API chat responses
@@ -50,6 +51,7 @@ pub struct ClaudeRequest {
     pub max_tokens: u32,
     pub system: String,
     pub messages: Vec<ChatMessage>,
+    pub stream: bool,
 }
 
 // Claude-specific response structure
@@ -91,6 +93,146 @@ impl LLMProvider {
             _ => Err(format!("Unsupported LLM provider: {}", s)),
         }
     }
+}
+
+/// Build the HTTP request for an OpenAI-compatible or Claude chat completion.
+/// `stream` asks the provider for server-sent events instead of one JSON body.
+#[allow(clippy::too_many_arguments)]
+pub fn build_chat_request(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    stream: bool,
+) -> Result<reqwest::RequestBuilder, String> {
+    let (api_url, mut headers) = match provider {
+        LLMProvider::OpenAI => (
+            "https://api.openai.com/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::Groq => (
+            "https://api.groq.com/openai/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::OpenRouter => (
+            "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::Ollama => {
+            let host = ollama_endpoint
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            (
+                format!("{}/v1/chat/completions", host),
+                header::HeaderMap::new(),
+            )
+        }
+        LLMProvider::CustomOpenAI => {
+            let endpoint = custom_openai_endpoint
+                .ok_or_else(|| "Custom OpenAI endpoint not configured".to_string())?;
+            (
+                format!("{}/chat/completions", endpoint.trim_end_matches('/')),
+                header::HeaderMap::new(),
+            )
+        }
+        LLMProvider::Claude => {
+            let mut header_map = header::HeaderMap::new();
+            header_map.insert(
+                "x-api-key",
+                api_key
+                    .parse()
+                    .map_err(|_| "Invalid API key format".to_string())?,
+            );
+            header_map.insert(
+                "anthropic-version",
+                "2023-06-01"
+                    .parse()
+                    .map_err(|_| "Invalid anthropic version".to_string())?,
+            );
+            (
+                "https://api.anthropic.com/v1/messages".to_string(),
+                header_map,
+            )
+        }
+        LLMProvider::BuiltInAI | LLMProvider::OpenAICodex => {
+            return Err("This provider does not use the chat completions API".to_string());
+        }
+    };
+
+    // Add authorization header for non-Claude providers
+    if provider != &LLMProvider::Claude {
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {}", api_key)
+                .parse()
+                .map_err(|_| "Invalid authorization header".to_string())?,
+        );
+    }
+    headers.insert(
+        header::CONTENT_TYPE,
+        "application/json"
+            .parse()
+            .map_err(|_| "Invalid content type".to_string())?,
+    );
+
+    // Build request body based on provider
+    let request_body = if provider != &LLMProvider::Claude {
+        // Sampling overrides are CustomOpenAI-only; max_tokens applies everywhere.
+        let (temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
+            (temperature, top_p)
+        } else {
+            (None, None)
+        };
+        let max_tokens_val = max_tokens;
+
+        serde_json::json!(ChatRequest {
+            model: model_name.to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt.to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: user_prompt.to_string(),
+                }
+            ],
+            max_tokens: max_tokens_val,
+            temperature: temperature_val,
+            top_p: top_p_val,
+            stream,
+        })
+    } else {
+        serde_json::json!(ClaudeRequest {
+            system: system_prompt.to_string(),
+            model: model_name.to_string(),
+            max_tokens: max_tokens.unwrap_or(2048),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: user_prompt.to_string(),
+            }],
+            stream,
+        })
+    };
+
+    info!(
+        "🐞 LLM Request to {}: model={}",
+        provider_name(provider),
+        model_name
+    );
+
+    Ok(client
+        .post(api_url)
+        .headers(headers)
+        .json(&request_body)
+        .timeout(REQUEST_TIMEOUT_DURATION))
 }
 
 /// Generates a summary using the specified LLM provider
@@ -167,130 +309,21 @@ pub async fn generate_summary(
         .map_err(|e| e.to_string());
     }
 
-    let (api_url, mut headers) = match provider {
-        LLMProvider::OpenAI => (
-            "https://api.openai.com/v1/chat/completions".to_string(),
-            header::HeaderMap::new(),
-        ),
-        LLMProvider::Groq => (
-            "https://api.groq.com/openai/v1/chat/completions".to_string(),
-            header::HeaderMap::new(),
-        ),
-        LLMProvider::OpenRouter => (
-            "https://openrouter.ai/api/v1/chat/completions".to_string(),
-            header::HeaderMap::new(),
-        ),
-        LLMProvider::Ollama => {
-            let host = ollama_endpoint
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "http://localhost:11434".to_string());
-            (
-                format!("{}/v1/chat/completions", host),
-                header::HeaderMap::new(),
-            )
-        }
-        LLMProvider::CustomOpenAI => {
-            let endpoint = custom_openai_endpoint
-                .ok_or_else(|| "Custom OpenAI endpoint not configured".to_string())?;
-            (
-                format!("{}/chat/completions", endpoint.trim_end_matches('/')),
-                header::HeaderMap::new(),
-            )
-        }
-        LLMProvider::Claude => {
-            let mut header_map = header::HeaderMap::new();
-            header_map.insert(
-                "x-api-key",
-                api_key
-                    .parse()
-                    .map_err(|_| "Invalid API key format".to_string())?,
-            );
-            header_map.insert(
-                "anthropic-version",
-                "2023-06-01"
-                    .parse()
-                    .map_err(|_| "Invalid anthropic version".to_string())?,
-            );
-            (
-                "https://api.anthropic.com/v1/messages".to_string(),
-                header_map,
-            )
-        }
-        LLMProvider::BuiltInAI => {
-            unreachable!("BuiltInAI is handled before this match statement")
-        }
-        LLMProvider::OpenAICodex => {
-            unreachable!("OpenAICodex is handled before this match statement")
-        }
-    };
-
-    // Add authorization header for non-Claude providers
-    if provider != &LLMProvider::Claude {
-        headers.insert(
-            header::AUTHORIZATION,
-            format!("Bearer {}", api_key)
-                .parse()
-                .map_err(|_| "Invalid authorization header".to_string())?,
-        );
-    }
-    headers.insert(
-        header::CONTENT_TYPE,
-        "application/json"
-            .parse()
-            .map_err(|_| "Invalid content type".to_string())?,
-    );
-
-    // Build request body based on provider
-    let request_body = if provider != &LLMProvider::Claude {
-        // Sampling overrides are CustomOpenAI-only; max_tokens applies everywhere.
-        let (temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
-            (temperature, top_p)
-        } else {
-            (None, None)
-        };
-        let max_tokens_val = max_tokens;
-
-        serde_json::json!(ChatRequest {
-            model: model_name.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_prompt.to_string(),
-                }
-            ],
-            max_tokens: max_tokens_val,
-            temperature: temperature_val,
-            top_p: top_p_val,
-        })
-    } else {
-        serde_json::json!(ClaudeRequest {
-            system: system_prompt.to_string(),
-            model: model_name.to_string(),
-            max_tokens: max_tokens.unwrap_or(2048),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: user_prompt.to_string(),
-            }]
-        })
-    };
-
-    info!(
-        "🐞 LLM Request to {}: model={}",
-        provider_name(provider),
-        model_name
-    );
-
-    // Send request with timeout and cancellation support
-    let request_future = client
-        .post(api_url)
-        .headers(headers)
-        .json(&request_body)
-        .timeout(REQUEST_TIMEOUT_DURATION)
-        .send();
+    let request_future = build_chat_request(
+        client,
+        provider,
+        model_name,
+        api_key,
+        system_prompt,
+        user_prompt,
+        ollama_endpoint,
+        custom_openai_endpoint,
+        max_tokens,
+        temperature,
+        top_p,
+        false,
+    )?
+    .send();
 
     // Use tokio::select to race between cancellation and request completion
     let response = if let Some(token) = cancellation_token {

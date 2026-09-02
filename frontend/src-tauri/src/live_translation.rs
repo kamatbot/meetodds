@@ -1,14 +1,16 @@
 use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
-use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::summary::llm_client::{build_chat_request, generate_summary, LLMProvider};
+use futures_util::StreamExt;
 use once_cell::sync::Lazy;
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::SqlitePool;
 use std::collections::{hash_map::DefaultHasher, HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
@@ -18,6 +20,8 @@ const LIVE_TRANSLATION_TIMEOUT: Duration = Duration::from_secs(30);
 // A translation is roughly the input length; this only bounds runaway output.
 const LIVE_TRANSLATION_MAX_TOKENS: u32 = 512;
 const TRANSLATION_CACHE_CAPACITY: usize = 256;
+// Coalesce streamed tokens so the UI re-renders at most ~25x/s per request.
+const DELTA_EMIT_INTERVAL: Duration = Duration::from_millis(40);
 
 static CLOUD_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(2));
 static LOCAL_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(1));
@@ -297,6 +301,86 @@ fn clean_translation_output(raw: &str) -> String {
     trimmed.to_string()
 }
 
+/// Read a server-sent-event body. `extract` pulls the text delta (if any) out of
+/// each JSON event; `on_text` receives the accumulated text after every delta.
+async fn stream_sse(
+    response: reqwest::Response,
+    mut extract: impl FnMut(&Value) -> Result<Option<String>, String>,
+    mut on_text: impl FnMut(&str),
+) -> Result<String, String> {
+    let mut stream = response.bytes_stream();
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut text = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("Translation stream failed: {error}"))?;
+        buffer.extend_from_slice(&chunk);
+        while let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = buffer.drain(..=newline).collect();
+            let line = String::from_utf8_lossy(&line);
+            let Some(data) = line.trim().strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            let Ok(event) = serde_json::from_str::<Value>(data) else {
+                continue;
+            };
+            if let Some(delta) = extract(&event)? {
+                if !delta.is_empty() {
+                    text.push_str(&delta);
+                    on_text(&text);
+                }
+            }
+        }
+    }
+
+    Ok(text)
+}
+
+fn chat_delta(event: &Value) -> Result<Option<String>, String> {
+    if let Some(message) = event.pointer("/error/message").and_then(Value::as_str) {
+        return Err(message.to_string());
+    }
+    Ok(event
+        .pointer("/choices/0/delta/content")
+        .and_then(Value::as_str)
+        .map(str::to_string))
+}
+
+fn claude_delta(event: &Value) -> Result<Option<String>, String> {
+    match event.get("type").and_then(Value::as_str) {
+        Some("error") => Err(event
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or("Claude stream error")
+            .to_string()),
+        Some("content_block_delta") => Ok(event
+            .pointer("/delta/text")
+            .and_then(Value::as_str)
+            .map(str::to_string)),
+        _ => Ok(None),
+    }
+}
+
+fn codex_delta(event: &Value) -> Result<Option<String>, String> {
+    match event.get("type").and_then(Value::as_str) {
+        Some("error") | Some("response.failed") => Err(event
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .or_else(|| event.get("message").and_then(Value::as_str))
+            .unwrap_or("ChatGPT/Codex returned an unknown error")
+            .to_string()),
+        Some("response.output_text.delta") => Ok(event
+            .get("delta")
+            .and_then(Value::as_str)
+            .map(str::to_string)),
+        _ => Ok(None),
+    }
+}
+
 fn uses_local_translation_worker(provider: &LLMProvider) -> bool {
     matches!(provider, LLMProvider::Ollama | LLMProvider::BuiltInAI)
 }
@@ -532,21 +616,94 @@ pub async fn api_translate_live_text<R: Runtime>(
     } else {
         Some(&cancellation_token)
     };
-    let translation_future = generate_summary(
-        &TRANSLATION_HTTP_CLIENT,
-        &config.provider,
-        &config.model_name,
-        &config.api_key,
-        &system_prompt,
-        &user_prompt,
-        config.ollama_endpoint.as_deref(),
-        config.custom_openai_endpoint.as_deref(),
-        max_tokens,
-        config.temperature,
-        config.top_p,
-        app_data_dir.as_ref(),
-        generation_token,
-    );
+    let mut last_emit: Option<Instant> = None;
+    let emit_request_id = request_id.clone();
+    let mut emit_text = |text: &str| {
+        if last_emit.is_some_and(|at| at.elapsed() < DELTA_EMIT_INTERVAL) {
+            return;
+        }
+        last_emit = Some(Instant::now());
+        let _ = app.emit(
+            "live-translation-delta",
+            serde_json::json!({
+                "requestId": emit_request_id,
+                "text": clean_translation_output(text),
+            }),
+        );
+    };
+
+    let translation_future = async {
+        match config.provider {
+            // The sidecar protocol is request/response; no streaming available.
+            LLMProvider::BuiltInAI => {
+                generate_summary(
+                    &TRANSLATION_HTTP_CLIENT,
+                    &config.provider,
+                    &config.model_name,
+                    &config.api_key,
+                    &system_prompt,
+                    &user_prompt,
+                    None,
+                    None,
+                    max_tokens,
+                    None,
+                    None,
+                    app_data_dir.as_ref(),
+                    generation_token,
+                )
+                .await
+            }
+            LLMProvider::OpenAICodex => {
+                let app_data_dir = app_data_dir.as_deref().ok_or_else(|| {
+                    "app_data_dir is required for OpenAI Codex provider".to_string()
+                })?;
+                let response = crate::openai_codex::open_codex_stream(
+                    &TRANSLATION_HTTP_CLIENT,
+                    app_data_dir,
+                    &config.model_name,
+                    &system_prompt,
+                    &user_prompt,
+                )
+                .await?;
+                stream_sse(response, codex_delta, &mut emit_text).await
+            }
+            _ => {
+                let response = build_chat_request(
+                    &TRANSLATION_HTTP_CLIENT,
+                    &config.provider,
+                    &config.model_name,
+                    &config.api_key,
+                    &system_prompt,
+                    &user_prompt,
+                    config.ollama_endpoint.as_deref(),
+                    config.custom_openai_endpoint.as_deref(),
+                    max_tokens,
+                    config.temperature,
+                    config.top_p,
+                    true,
+                )?
+                .send()
+                .await
+                .map_err(|error| format!("Failed to send request to LLM: {error}"))?;
+
+                if !response.status().is_success() {
+                    let body = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    return Err(format!("LLM API request failed: {body}"));
+                }
+
+                let extract: fn(&Value) -> Result<Option<String>, String> =
+                    if config.provider == LLMProvider::Claude {
+                        claude_delta
+                    } else {
+                        chat_delta
+                    };
+                stream_sse(response, extract, &mut emit_text).await
+            }
+        }
+    };
 
     let result = tokio::select! {
         _ = cancellation_token.cancelled() => Err("Live translation was cancelled.".to_string()),
@@ -631,6 +788,27 @@ mod tests {
         assert!(uses_local_translation_worker(&LLMProvider::BuiltInAI));
         assert!(!uses_local_translation_worker(&LLMProvider::OpenAICodex));
         assert!(!uses_local_translation_worker(&LLMProvider::OpenAI));
+    }
+
+    #[test]
+    fn extracts_stream_deltas_per_provider() {
+        let chat = serde_json::json!({"choices":[{"delta":{"content":"Hola"}}]});
+        assert_eq!(chat_delta(&chat).unwrap().as_deref(), Some("Hola"));
+        assert!(chat_delta(&serde_json::json!({"error":{"message":"quota"}})).is_err());
+
+        let claude = serde_json::json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"Bon"}});
+        assert_eq!(claude_delta(&claude).unwrap().as_deref(), Some("Bon"));
+        assert_eq!(
+            claude_delta(&serde_json::json!({"type":"message_start"})).unwrap(),
+            None
+        );
+
+        let codex = serde_json::json!({"type":"response.output_text.delta","delta":"Ciao"});
+        assert_eq!(codex_delta(&codex).unwrap().as_deref(), Some("Ciao"));
+        assert!(codex_delta(
+            &serde_json::json!({"type":"response.failed","error":{"message":"x"}})
+        )
+        .is_err());
     }
 
     #[test]
