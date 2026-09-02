@@ -39,29 +39,13 @@ const CACHE_TTL_SECS: u64 = 300;
 
 /// Fallback models when API fetch fails (matches frontend hardcoded values)
 const FALLBACK_MODELS: &[&str] = &[
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-4o",
+    "gpt-5.6-terra",
+    "gpt-5.6",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
     "gpt-4.1",
-    "gpt-4-turbo",
-    "gpt-3.5-turbo",
-    "gpt-4o-2024-11-20",
-    "gpt-4o-2024-08-06",
-    "gpt-4o-mini-2024-07-18",
-    "gpt-4.1-2025-04-14",
-    "gpt-4.1-nano-2025-04-14",
-    "gpt-4.1-mini-2025-04-14",
-    "o4-mini-2025-04-16",
-    "o3-2025-04-16",
-    "o3-mini-2025-01-31",
-    "o1-2024-12-17",
-    "o1-mini-2024-09-12",
-    "gpt-4-turbo-2024-04-09",
-    "gpt-4-0125-Preview",
-    "gpt-4-vision-preview",
-    "gpt-4-1106-Preview",
-    "gpt-3.5-turbo-0125",
-    "gpt-3.5-turbo-1106",
+    "gpt-4o",
 ];
 
 /// Get fallback models as OpenAIModel vec
@@ -116,7 +100,10 @@ pub async fn get_openai_models(api_key: Option<String>) -> Result<Vec<OpenAIMode
         let cache = MODELS_CACHE.read().map_err(|e| e.to_string())?;
         if let Some(entry) = cache.as_ref() {
             if entry.fetched_at.elapsed() < Duration::from_secs(CACHE_TTL_SECS) {
-                log::info!("Returning cached OpenAI models ({} models)", entry.models.len());
+                log::info!(
+                    "Returning cached OpenAI models ({} models)",
+                    entry.models.len()
+                );
                 return Ok(entry.models.clone());
             }
         }

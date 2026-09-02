@@ -76,15 +76,13 @@ interface GroqModel {
 
 // Fallback models for when API fetch fails or no API key provided
 const OPENAI_FALLBACK_MODELS = [
+  'gpt-5.6-terra',
+  'gpt-5.6',
+  'gpt-5.6-luna',
+  'gpt-5.5',
+  'gpt-5.4',
+  'gpt-4.1',
   'gpt-4o',
-  'gpt-4o-mini',
-  'gpt-4-turbo',
-  'gpt-4',
-  'gpt-3.5-turbo',
-  'o1',
-  'o1-mini',
-  'o3',
-  'o3-mini',
 ];
 
 const CLAUDE_FALLBACK_MODELS = [
@@ -879,7 +877,7 @@ export function ModelSettingsModal({
                 <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
-                <SelectItem value="openai">OpenAI</SelectItem>
+                <SelectItem value="openai">OpenAI Cloud API</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
               </SelectContent>
             </Select>
@@ -943,6 +941,31 @@ export function ModelSettingsModal({
             )}
           </div>
         </div>
+
+        {modelConfig.provider === 'openai' && (
+          <Alert className="border-blue-200 bg-blue-50">
+            <AlertDescription className="space-y-2 text-sm text-blue-950">
+              <p>
+                <strong>OpenAI Cloud</strong> sends summary requests to OpenAI using the API key you provide.
+                ChatGPT Plus/Pro subscriptions and OpenAI API billing are separate.
+              </p>
+              <p className="text-xs text-blue-800">
+                OpenAI's "Sign in with ChatGPT" is an identity sign-in and does not grant third-party apps
+                ChatGPT subscription usage for API calls, so MeetOdds does not offer a misleading OAuth button.
+              </p>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-blue-700"
+                onClick={() => invoke('open_external_url', { url: 'https://platform.openai.com/api-keys' })}
+              >
+                Create or manage an OpenAI API key
+                <ExternalLink className="ml-1 h-3.5 w-3.5" />
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Custom OpenAI Configuration Section */}
         {modelConfig.provider === 'custom-openai' && (
@@ -1072,14 +1095,14 @@ export function ModelSettingsModal({
 
         {requiresApiKey && (
           <div>
-            <Label>API Key</Label>
+            <Label>{modelConfig.provider === 'openai' ? 'OpenAI API Key' : 'API Key'}</Label>
             <div className="relative mt-1">
               <Input
                 type={showApiKey ? 'text' : 'password'}
                 value={apiKey || ''}
                 onChange={(e) => setApiKey(e.target.value)}
                 disabled={isApiKeyLocked}
-                placeholder="Enter your API key"
+                placeholder={modelConfig.provider === 'openai' ? 'sk-…' : 'Enter your API key'}
                 className="pr-24"
               />
               {isApiKeyLocked && apiKey?.trim() && (
