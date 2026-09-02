@@ -31,6 +31,16 @@ jobs:
         working-directory: /tmp/notes
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          patch = Path('frontend/scripts/apply-speaker-detection.py')
+          text = patch.read_text()
+          old = '        "    #[sqlx(default)]\\n    pub duration: Option<f64>,\\n}\\n",'
+          new = '        "    pub duration: Option<f64>,\\n}\\n",'
+          if old not in text:
+              raise SystemExit('Transcript model patch anchor was not found in integration script')
+          patch.write_text(text.replace(old, new, 1))
+          PY
           python3 frontend/scripts/apply-speaker-detection.py rust
           rustfmt --edition 2021 \
             frontend/src-tauri/src/audio/transcription/speaker_detection.rs \
