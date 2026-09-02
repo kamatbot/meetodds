@@ -99,7 +99,18 @@ function triggerBrowserDownload(filename: string, data: string | Uint8Array, mim
     throw new Error('File export requires a desktop or browser environment.');
   }
 
-  const blob = new Blob([data], { type: mimeType });
+  let blobPart: BlobPart;
+  if (typeof data === 'string') {
+    blobPart = data;
+  } else {
+    // TypeScript 5.9 preserves ArrayBufferLike on Uint8Array, which can include
+    // SharedArrayBuffer. Copy into a fresh ArrayBuffer-backed view for Blob.
+    const copy = new Uint8Array(data.byteLength);
+    copy.set(data);
+    blobPart = copy.buffer;
+  }
+
+  const blob = new Blob([blobPart], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
