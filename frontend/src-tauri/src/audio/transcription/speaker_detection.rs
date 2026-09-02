@@ -1,4 +1,4 @@
-use crate::audio::DeviceType;
+use crate::audio::recording_state::DeviceType;
 use realfft::RealFftPlanner;
 use std::f32::consts::PI;
 
