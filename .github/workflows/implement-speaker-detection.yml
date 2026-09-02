@@ -60,30 +60,34 @@ jobs:
 
           repository = Path('frontend/src-tauri/src/database/repositories/transcript.rs')
           repository_text = repository.read_text()
-          old_query = '''            let result = sqlx::query(
-                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)"
-            )
-'''
-          new_query = '''            let result = sqlx::query(
-                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker, speaker_label, speaker_source, speaker_confidence)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-'''
+          old_query = (
+              '            let result = sqlx::query(\n'
+              '                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)\n'
+              '                 VALUES (?, ?, ?, ?, ?, ?, ?)"\n'
+              '            )\n'
+          )
+          new_query = (
+              '            let result = sqlx::query(\n'
+              '                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker, speaker_label, speaker_source, speaker_confidence)\n'
+              '                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"\n'
+              '            )\n'
+          )
           if old_query not in repository_text:
               raise SystemExit('Current multiline transcript INSERT was not found')
           repository_text = repository_text.replace(old_query, new_query, 1)
 
-          old_bind = '''            .bind(segment.duration)
-            .execute(&mut *transaction)
-'''
-          new_bind = '''            .bind(segment.duration)
-            .bind(&segment.speaker)
-            .bind(&segment.speaker_label)
-            .bind(&segment.speaker_source)
-            .bind(segment.speaker_confidence)
-            .execute(&mut *transaction)
-'''
+          old_bind = (
+              '            .bind(segment.duration)\n'
+              '            .execute(&mut *transaction)\n'
+          )
+          new_bind = (
+              '            .bind(segment.duration)\n'
+              '            .bind(&segment.speaker)\n'
+              '            .bind(&segment.speaker_label)\n'
+              '            .bind(&segment.speaker_source)\n'
+              '            .bind(segment.speaker_confidence)\n'
+              '            .execute(&mut *transaction)\n'
+          )
           if old_bind not in repository_text:
               raise SystemExit('Transcript INSERT bind chain was not found')
           repository.write_text(repository_text.replace(old_bind, new_bind, 1))
