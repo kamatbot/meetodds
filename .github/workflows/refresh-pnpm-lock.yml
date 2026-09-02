@@ -1,0 +1,92 @@
+name: Refresh frontend lockfile and final build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/refresh-pnpm-lock.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lock-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Refresh imported pnpm lockfile
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/notes
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/notes
+          cd /tmp/notes
+          git checkout feature/mayur-notes
+
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
+          cd frontend
+          pnpm install --lockfile-only --no-frozen-lockfile
+          cd ..
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/pnpm-lock.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(frontend): synchronize pnpm lockfile"
+            git push origin HEAD:feature/mayur-notes
+          fi
+
+      - name: Validate Mayur template files
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          from pathlib import Path
+
+          template_dir = Path('/tmp/notes/frontend/src-tauri/templates')
+          expected = {
+              'mayur_product_review': 10,
+              'mayur_decision_review': 8,
+              'mayur_pm_one_on_one': 10,
+          }
+          defaults = Path('/tmp/notes/frontend/src-tauri/src/summary/templates/defaults.rs').read_text()
+
+          for template_id, minimum_sections in expected.items():
+              data = json.loads((template_dir / f'{template_id}.json').read_text())
+              assert data['name'].startswith('Mayur ·'), template_id
+              assert len(data['sections']) >= minimum_sections, template_id
+              assert all(section.get('title') and section.get('instruction') for section in data['sections'])
+              assert template_id in defaults, f'{template_id} is not registered'
+          PY
+
+      - name: Frozen install and production build
+        working-directory: /tmp/notes/frontend
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Recheck export artifacts
+        working-directory: /tmp/notes/frontend
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/export-smoke
+          pnpm exec tsc src/lib/meeting-export-formats.ts \
+            --target ES2020 \
+            --module commonjs \
+            --outDir /tmp/export-smoke \
+            --strict \
+            --skipLibCheck
+          node <<'NODE'
+          const fs = require('fs');
+          const { buildDocx, buildPdf } = require('/tmp/export-smoke/meeting-export-formats.js');
+          const markdown = '# Final Review\n\n**Decision:** ship\n\n| Owner | Date |\n| --- | --- |\n| Mayur | 2026-09-02 |';
+          fs.writeFileSync('/tmp/notes-final.docx', Buffer.from(buildDocx(markdown, { title: 'Final Review' })));
+          fs.writeFileSync('/tmp/notes-final.pdf', Buffer.from(buildPdf(markdown, { title: 'Final Review' })));
+          NODE
+          unzip -t /tmp/notes-final.docx
+          file /tmp/notes-final.docx /tmp/notes-final.pdf
+          head -c 8 /tmp/notes-final.pdf | grep -a '%PDF-1.4'
