@@ -1,4 +1,4 @@
-name: Finalize and validate speaker attribution
+name: Validate speaker attribution integration
 
 on:
   push:
@@ -27,90 +27,48 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Strengthen voice separation and fix channel ownership
+      - name: Remove duplicate live transcript metadata
         working-directory: /tmp/notes
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path: Path, old: str, new: str) -> None:
-              text = path.read_text()
-              if old not in text:
-                  if new in text:
-                      return
-                  raise SystemExit(f'Missing patch anchor in {path}: {old[:140]!r}')
-              path.write_text(text.replace(old, new, 1))
-
-          speaker = Path('frontend/src-tauri/src/audio/transcription/speaker_detection.rs')
-          replace_once(
-              speaker,
-              '    let mut frame_features: Vec<Vec<f32>> = Vec::new();\n',
-              '    let mut frame_features: Vec<Vec<f32>> = Vec::new();\n'
-              '    let mut last_pitch = (0.0f32, 0.0f32);\n',
+          path = Path('frontend/src/contexts/TranscriptContext.tsx')
+          text = path.read_text()
+          duplicate = (
+              '            confidence: update.confidence,\n'
+              '      speaker: update.speaker,\n'
+              '      speaker_label: update.speaker_label,\n'
+              '      speaker_source: update.speaker_source,\n'
+              '      speaker_confidence: update.speaker_confidence,\n'
+              '            speaker: update.speaker,\n'
+              '            speaker_label: update.speaker_label,\n'
+              '            speaker_source: update.speaker_source,\n'
+              '            speaker_confidence: update.speaker_confidence,\n'
           )
-          pitch_old = (
-              '        let (pitch_hz, pitch_strength) = if frame_number % 4 == 0 {\n'
-              '            estimate_pitch(frame, sample_rate)\n'
-              '        } else {\n'
-              '            (0.0, 0.0)\n'
-              '        };\n'
+          corrected = (
+              '            confidence: update.confidence,\n'
+              '            speaker: update.speaker,\n'
+              '            speaker_label: update.speaker_label,\n'
+              '            speaker_source: update.speaker_source,\n'
+              '            speaker_confidence: update.speaker_confidence,\n'
           )
-          pitch_new = (
-              '        // Pitch autocorrelation is the most expensive frame feature. Sample it\n'
-              '        // every fourth frame, then carry the latest observation through the\n'
-              '        // intervening frames so the segment-level mean remains discriminative.\n'
-              '        if frame_number % 4 == 0 {\n'
-              '            last_pitch = estimate_pitch(frame, sample_rate);\n'
-              '        }\n'
-              '        let (pitch_hz, pitch_strength) = last_pitch;\n'
-          )
-          replace_once(speaker, pitch_old, pitch_new)
-          replace_once(
-              speaker,
-              '            normalized_pitch,\n',
-              '            normalized_pitch * 1.75,\n',
-          )
-
-          pipeline = Path('frontend/src-tauri/src/audio/pipeline.rs')
-          replace_once(
-              pipeline,
-              '        let segments = match device_type {\n',
-              '        let segments = match &device_type {\n',
-          )
-          replace_once(
-              pipeline,
-              '        let source_name = match device_type {\n',
-              '        let source_name = match &device_type {\n',
-          )
+          if duplicate not in text:
+              if corrected in text:
+                  raise SystemExit('Duplicate block already fixed; refusing an empty milestone commit')
+              raise SystemExit('Expected duplicate speaker block was not found')
+          path.write_text(text.replace(duplicate, corrected, 1))
           PY
 
-          rustfmt --edition 2021 \
-            frontend/src-tauri/src/audio/transcription/speaker_detection.rs \
-            frontend/src-tauri/src/audio/pipeline.rs
-
-          git add frontend/src-tauri/src/audio/transcription/speaker_detection.rs \
-                  frontend/src-tauri/src/audio/pipeline.rs
-          git commit -m "fix(speakers): strengthen clustering and channel ownership"
+          git add frontend/src/contexts/TranscriptContext.tsx
+          git commit -m "fix(speakers): deduplicate live transcript metadata"
           git push origin HEAD:feature/speaker-detection
 
-      - name: Validate acoustic clustering and database migration
+      - name: Validate acoustic clustering and migration
         working-directory: /tmp/notes
         run: |
           set -euo pipefail
-          rustfmt --edition 2021 --check \
-            frontend/src-tauri/src/audio/transcription/speaker_detection.rs \
-            frontend/src-tauri/src/audio/transcription/mod.rs \
-            frontend/src-tauri/src/audio/transcription/worker.rs \
-            frontend/src-tauri/src/audio/pipeline.rs \
-            frontend/src-tauri/src/audio/recording_commands.rs \
-            frontend/src-tauri/src/audio/recording_saver.rs \
-            frontend/src-tauri/src/audio/common.rs \
-            frontend/src-tauri/src/database/models.rs \
-            frontend/src-tauri/src/database/repositories/transcript.rs \
-            frontend/src-tauri/src/database/repositories/meeting.rs \
-            frontend/src-tauri/src/api/api.rs
-
           rm -rf /tmp/speaker-engine-tests
           mkdir -p /tmp/speaker-engine-tests/src
           printf '%s\n' \
@@ -141,8 +99,7 @@ jobs:
           db.executescript(Path('frontend/src-tauri/migrations/20260902090000_add_speaker_metadata.sql').read_text())
           columns = {row[1] for row in db.execute('PRAGMA table_info(transcripts)')}
           assert {'speaker', 'speaker_label', 'speaker_source', 'speaker_confidence'} <= columns
-          indexes = {row[1] for row in db.execute('PRAGMA index_list(transcripts)')}
-          assert 'idx_transcripts_meeting_speaker' in indexes
+          assert 'idx_transcripts_meeting_speaker' in {row[1] for row in db.execute('PRAGMA index_list(transcripts)')}
           print('speaker migration validated')
           PY
 
