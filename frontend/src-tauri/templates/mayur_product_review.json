@@ -1,0 +1,84 @@
+{
+  "name": "Mayur · Product & KPI Review",
+  "description": "Analyzes a product operating review through mission, evidence, decision velocity, execution, prioritization, delegation, communication, feedback, and trust.",
+  "sections": [
+    {
+      "title": "Meeting Purpose & Decision Agenda",
+      "instruction": "State the intended outcome of the meeting, the decisions that needed to be made, and whether participants were aligned on that purpose. If the transcript never makes this clear, say so explicitly. Do not invent an agenda.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Mission Decision Rule",
+      "instruction": "Extract the company or product mission and translate how the meeting used it as a concrete tie-breaker: the user, durable user outcome, durable business value, and trade-off it resolves. If mission was used only as a slogan or was absent, identify the missing decision rule.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Executive Diagnosis",
+      "instruction": "Give a concise, evidence-grounded diagnosis of product health, commercial health, delivery health, and the most consequential unresolved question. Separate observed evidence from interpretation and avoid generic praise.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Customer, KPI & Economics Evidence",
+      "instruction": "Capture material user evidence, KPI trends, unit economics, commercial signals, and guardrails. Include the period or comparison where stated. Mark missing baselines, targets, segmentation, sample size, or causality limits instead of filling gaps.",
+      "format": "list",
+      "item_format": "| **Signal / Metric** | **Current & Trend** | **What It Suggests** | **Confidence** | **Missing Evidence** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Facts, Assumptions & Unknowns",
+      "instruction": "Separate what the group knows from hypotheses and unresolved unknowns. Include the source or transcript timestamp when available. Highlight assumptions that materially affect a decision.",
+      "format": "list",
+      "item_format": "| **Type** | **Statement** | **Evidence / Source** | **Decision Impact** |\n| --- | --- | --- | --- |"
+    },
+    {
+      "title": "Decisions & Decision Velocity",
+      "instruction": "List every actual decision and every material decision left open. For each, classify it as reversible, company-critical, or user-safety/high-stakes; capture blast radius, delay cost, evidence threshold, owner, and decision date. Do not label a discussion as a decision.",
+      "format": "list",
+      "item_format": "| **Decision** | **Status** | **Risk / Reversibility** | **Rationale & Evidence Threshold** | **Owner** | **Decision Date** |\n| --- | --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Experiments & Learning",
+      "instruction": "For each hypothesis or experiment, state the competing explanation, falsifier, success threshold, guardrail, smallest discriminating test, and the decision the result will change. Flag activity-shaped experiments that cannot change a decision.",
+      "format": "list",
+      "item_format": "| **Hypothesis** | **Competing Explanation / Falsifier** | **Smallest Test** | **Success & Guardrail** | **Decision Unlocked** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Execution, Thin Slices & Dependencies",
+      "instruction": "Identify the thinnest end-to-end user or internal-customer outcome discussed, its learning goal, dependencies, handoffs, owners, deadlines, escalation conditions, and stop rule. Call out planning that did not resolve into executable ownership.",
+      "format": "list",
+      "item_format": "| **Outcome / Thin Slice** | **Learning Goal** | **Dependency or Blocker** | **Owner & Deadline** | **Escalation / Stop Rule** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Important vs Urgent Trade-offs",
+      "instruction": "Classify major work or requests by strategic importance and urgency. Identify repeated fires that reveal a system problem, opportunity costs, what should be protected, and what should be stopped, delegated, or bounded.",
+      "format": "list",
+      "item_format": "| **Work / Request** | **Important?** | **Urgent?** | **Opportunity Cost / System Cause** | **Recommendation** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Context, Ownership & Talent",
+      "instruction": "Assess whether leaders supplied mission, constraints, guardrails, decision rights, and escalation triggers while leaving implementation control with the owner. Capture material staffing, hiring, capability, or succession issues only when supported by the transcript.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Dissent, Feedback & Trust",
+      "instruction": "State the strongest opposing view fairly, the central disagreement, feedback exchanged or avoided, and any unresolved concern. Separate observed behavior, assumed intent, system incentives, and impact. Do not infer motives from a single interaction.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Action Commitments",
+      "instruction": "List only concrete commitments with an accountable owner, due date or decision date, expected evidence of completion, and next checkpoint. Mark missing owners or dates explicitly.",
+      "format": "list",
+      "item_format": "| **Owner** | **Commitment** | **Due / Decision Date** | **Evidence of Done** | **Next Checkpoint** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Mayur Principles Scorecard",
+      "instruction": "Evaluate all eleven principles: Mission over theatre; Decision velocity with a risk exception; Intuition to data; Execution over prediction; Important over urgent; Be uncomfortably excited; Talent density requires time; Context, not control; Listen, write, then speak plainly; Feedback as an operating loop; Assume good intent and diagnose the system. Rate each Strong, Mixed, Weak, or Not observed. Cite specific transcript evidence or say Not observed; never manufacture evidence.",
+      "format": "list",
+      "item_format": "| **Principle** | **Rating** | **Transcript Evidence** | **Consequence** | **Next Improvement** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Make the Next Meeting Better",
+      "instruction": "Recommend three to five specific operating changes for the next meeting. Prioritize a clearer decision agenda, mission-linked decision rules, faster reversible decisions, explicit guardrails for high-stakes choices, stronger evidence, thinner execution slices, clearer ownership, and space for dissent. Avoid generic facilitation advice.",
+      "format": "list"
+    }
+  ]
+}
