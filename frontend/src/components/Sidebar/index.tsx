@@ -20,6 +20,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from './SidebarProvider';
+import type { DeferredDeleteResponse } from '@/types/meeting';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import Analytics from '@/lib/analytics';
@@ -53,6 +54,10 @@ function formatDuration(seconds: number | null): string {
   return `${minutes}:${String(remaining).padStart(2, '0')}`;
 }
 
+function errorDescription(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const navButtonClass =
   'flex h-[30px] w-full items-center gap-2.5 rounded-control px-2.5 text-left text-ui text-text transition-colors duration-150 hover:bg-surface';
 
@@ -76,7 +81,6 @@ export default function Sidebar() {
   const [showAllMeetings, setShowAllMeetings] = useState(false);
   const [renameMeeting, setRenameMeeting] = useState<CurrentMeeting | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  const [deleteMeeting, setDeleteMeeting] = useState<CurrentMeeting | null>(null);
   const [isMutating, setIsMutating] = useState(false);
 
   useEffect(() => {
@@ -129,35 +133,56 @@ export default function Sidebar() {
     } catch (error) {
       console.error('[Sidebar] Failed to rename meeting:', error);
       toast.error('Failed to update meeting title', {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorDescription(error),
       });
     } finally {
       setIsMutating(false);
     }
   };
 
-  const confirmDelete = async () => {
-    if (!deleteMeeting) return;
-    setIsMutating(true);
+  const restoreMeeting = useCallback(async (meeting: CurrentMeeting) => {
     try {
-      await invoke<void>('api_delete_meeting', { meetingId: deleteMeeting.id });
-      setMeetings(meetings.filter((meeting) => meeting.id !== deleteMeeting.id));
-      Analytics.trackMeetingDeleted(deleteMeeting.id);
-      if (currentMeeting?.id === deleteMeeting.id) {
+      await invoke<void>('api_restore_meeting', { meetingId: meeting.id });
+      await refetchMeetings();
+      toast.success('Meeting restored');
+    } catch (error) {
+      console.error('[Sidebar] Failed to restore meeting:', error);
+      toast.error('Could not restore meeting', {
+        description: errorDescription(error),
+      });
+    }
+  }, [refetchMeetings]);
+
+  const deleteMeetingWithUndo = useCallback(async (meeting: CurrentMeeting) => {
+    try {
+      await invoke<DeferredDeleteResponse>('api_defer_delete_meeting', {
+        meetingId: meeting.id,
+      });
+
+      setMeetings(meetings.filter((candidate) => candidate.id !== meeting.id));
+      Analytics.trackMeetingDeleted(meeting.id);
+
+      if (currentMeeting?.id === meeting.id) {
         setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
         router.push('/');
       }
-      setDeleteMeeting(null);
-      toast.success('Meeting deleted');
-    } catch (error) {
-      console.error('[Sidebar] Failed to delete meeting:', error);
-      toast.error('Failed to delete meeting', {
-        description: error instanceof Error ? error.message : String(error),
+
+      await refetchMeetings();
+      toast('Meeting deleted', {
+        duration: 8_000,
+        action: {
+          label: 'Undo',
+          onClick: () => void restoreMeeting(meeting),
+        },
       });
-    } finally {
-      setIsMutating(false);
+    } catch (error) {
+      console.error('[Sidebar] Failed to defer meeting deletion:', error);
+      toast.error('Could not delete meeting', {
+        description: errorDescription(error),
+      });
+      await refetchMeetings();
     }
-  };
+  }, [currentMeeting?.id, meetings, refetchMeetings, restoreMeeting, router, setCurrentMeeting, setMeetings]);
 
   const renderMeetingRow = (meeting: CurrentMeeting) => {
     const isActive = currentMeeting?.id === meeting.id;
@@ -196,10 +221,10 @@ export default function Sidebar() {
             </DropdownMenuItem>
             <DropdownMenuSeparator className="bg-border" />
             <DropdownMenuItem
-              onSelect={() => setDeleteMeeting(meeting)}
+              onSelect={() => void deleteMeetingWithUndo(meeting)}
               className="text-danger focus:bg-accent-soft focus:text-danger"
             >
-              <Trash2 /> Delete…
+              <Trash2 /> Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -314,15 +339,6 @@ export default function Sidebar() {
             <Settings className="h-4 w-4" strokeWidth={1.75} />
             <span>Settings</span>
           </button>
-          <button
-            type="button"
-            onClick={() => router.push('/settings?section=transcription')}
-            className="flex items-center gap-1.5 rounded-control px-2 py-1.5 text-caption text-2 transition-colors duration-150 hover:bg-surface hover:text-text"
-            title="Engine status"
-          >
-            <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
-            Ready
-          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" className={iconButtonClass} aria-label="More sidebar actions">
@@ -379,32 +395,6 @@ export default function Sidebar() {
               className="h-8 rounded-control border border-accent bg-accent px-3 text-ui font-semibold text-white disabled:opacity-50"
             >
               Save
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(deleteMeeting)} onOpenChange={(open) => !open && setDeleteMeeting(null)}>
-        <DialogContent className="border-border bg-surface text-text sm:max-w-[420px]">
-          <DialogTitle className="text-title">Delete meeting?</DialogTitle>
-          <p className="text-body text-2">
-            This permanently removes the meeting and its associated data. Undo is not available yet.
-          </p>
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={() => setDeleteMeeting(null)}
-              className="h-8 rounded-control border border-border bg-surface px-3 text-ui font-medium text-text hover:bg-bg"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => void confirmDelete()}
-              disabled={isMutating}
-              className="h-8 rounded-control border border-danger bg-danger px-3 text-ui font-semibold text-white disabled:opacity-50"
-            >
-              Delete
             </button>
           </DialogFooter>
         </DialogContent>

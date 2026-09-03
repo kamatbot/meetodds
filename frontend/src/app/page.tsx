@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 import { RecordingControls } from '@/components/RecordingControls';
 import HomeDashboard from '@/components/Home/HomeDashboard';
 import TranscriptDrawer from '@/components/Meeting/TranscriptDrawer';
+import StopProgressStrip from '@/components/Meeting/StopProgressStrip';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
-import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { useModalState } from '@/hooks/useModalState';
@@ -42,7 +42,6 @@ export default function Home() {
   } = usePermissionCheck();
   const {
     setIsMeetingActive,
-    isCollapsed: sidebarCollapsed,
     refetchMeetings,
   } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
@@ -76,8 +75,6 @@ export default function Home() {
     Analytics.trackPageView('home');
   }, []);
 
-  // Preserve the existing startup cleanup and recovery scan. Recovery is surfaced in
-  // the dashboard instead of automatically interrupting the user with a modal.
   useEffect(() => {
     const performStartupChecks = async () => {
       try {
@@ -194,6 +191,11 @@ export default function Home() {
         onLoadPreview={loadMeetingTranscripts}
       />
 
+      <StopProgressStrip
+        isProcessing={status === RecordingStatus.PROCESSING_TRANSCRIPTS && !recordingState.isRecording}
+        isSaving={status === RecordingStatus.SAVING}
+      />
+
       <div className="relative flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
           <HomeDashboard
@@ -246,12 +248,6 @@ export default function Home() {
             </div>
           </div>
         )}
-
-      <StatusOverlays
-        isProcessing={status === RecordingStatus.PROCESSING_TRANSCRIPTS && !recordingState.isRecording}
-        isSaving={status === RecordingStatus.SAVING}
-        sidebarCollapsed={sidebarCollapsed}
-      />
     </div>
   );
 }
