@@ -7,7 +7,7 @@ use rubato::{
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use super::audio_processing::{
@@ -723,8 +723,13 @@ impl AudioCapture {
     }
 }
 
+const LIVE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(450);
+const LIVE_PREVIEW_MIN_SPEECH_MS: u32 = 700;
+const LIVE_PREVIEW_MAX_WINDOW_MS: u32 = 2_800;
+
 /// VAD-driven audio processing pipeline
-/// Uses Voice Activity Detection to segment speech in real-time and send only speech to Whisper
+/// Uses Voice Activity Detection to segment canonical speech while also exposing
+/// disposable rolling snapshots for the subtitle preview lane.
 pub struct AudioPipeline {
     receiver: mpsc::UnboundedReceiver<AudioChunk>,
     transcription_sender: mpsc::UnboundedSender<AudioChunk>,
@@ -741,8 +746,14 @@ pub struct AudioPipeline {
     // PROFESSIONAL AUDIO MIXING: Ring buffer + RMS-based mixer
     ring_buffer: AudioMixerRingBuffer,
     mixer: ProfessionalAudioMixer,
+
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // Latest-only speculative subtitle lane. `watch` intentionally drops old snapshots.
+    live_preview_sender: Option<watch::Sender<Option<AudioChunk>>>,
+    mic_live_preview_last_emit: Option<std::time::Instant>,
+    system_live_preview_last_emit: Option<std::time::Instant>,
+    live_preview_revision: u64,
 }
 
 impl AudioPipeline {
@@ -827,8 +838,13 @@ impl AudioPipeline {
             metrics_batcher: Some(AudioMetricsBatcher::new()),
             // Initialize professional audio mixing
             ring_buffer,
+
             mixer,
             recording_sender_for_mixed: None, // Will be set by manager
+            live_preview_sender: None,
+            mic_live_preview_last_emit: None,
+            system_live_preview_last_emit: None,
+            live_preview_revision: 0,
         }
     }
 
@@ -961,12 +977,75 @@ impl AudioPipeline {
     }
 
     fn process_source_audio(&mut self, device_type: DeviceType, samples: &[f32]) -> Result<()> {
-        let segments = match &device_type {
-            DeviceType::Microphone => self.mic_vad_processor.process_audio(samples)?,
-            DeviceType::System => self.system_vad_processor.process_audio(samples)?,
+        let preview_due = self.live_preview_due(&device_type);
+        let (segments, live_snapshot) = match &device_type {
+            DeviceType::Microphone => {
+                let segments = self.mic_vad_processor.process_audio(samples)?;
+                let preview = if preview_due {
+                    self.mic_vad_processor.live_speech_snapshot(
+                        LIVE_PREVIEW_MIN_SPEECH_MS,
+                        LIVE_PREVIEW_MAX_WINDOW_MS,
+                    )
+                } else {
+                    None
+                };
+                (segments, preview)
+            }
+            DeviceType::System => {
+                let segments = self.system_vad_processor.process_audio(samples)?;
+                let preview = if preview_due {
+                    self.system_vad_processor.live_speech_snapshot(
+                        LIVE_PREVIEW_MIN_SPEECH_MS,
+                        LIVE_PREVIEW_MAX_WINDOW_MS,
+                    )
+                } else {
+                    None
+                };
+                (segments, preview)
+            }
         };
-        self.send_speech_segments(device_type, segments);
+
+        self.send_speech_segments(device_type.clone(), segments);
+        if let Some(snapshot) = live_snapshot {
+            self.send_live_preview_snapshot(device_type, snapshot);
+        }
         Ok(())
+    }
+
+    fn live_preview_due(&self, device_type: &DeviceType) -> bool {
+        if self.live_preview_sender.is_none() {
+            return false;
+        }
+        let last = match device_type {
+            DeviceType::Microphone => self.mic_live_preview_last_emit,
+            DeviceType::System => self.system_live_preview_last_emit,
+        };
+        last.map_or(true, |instant| instant.elapsed() >= LIVE_PREVIEW_INTERVAL)
+    }
+
+    fn send_live_preview_snapshot(&mut self, device_type: DeviceType, snapshot: SpeechSegment) {
+        let Some(sender) = self.live_preview_sender.as_ref().cloned() else {
+            return;
+        };
+
+        self.live_preview_revision = self.live_preview_revision.wrapping_add(1);
+        let preview_chunk = AudioChunk {
+            data: snapshot.samples,
+            sample_rate: 16_000,
+            timestamp: snapshot.start_timestamp_ms / 1000.0,
+            chunk_id: self.live_preview_revision,
+            device_type: device_type.clone(),
+        };
+
+        // `watch` retains exactly one value. If ASR is slower than capture, stale
+        // snapshots disappear automatically instead of building subtitle backlog.
+        if sender.send(Some(preview_chunk)).is_ok() {
+            let now = std::time::Instant::now();
+            match device_type {
+                DeviceType::Microphone => self.mic_live_preview_last_emit = Some(now),
+                DeviceType::System => self.system_live_preview_last_emit = Some(now),
+            }
+        }
     }
 
     fn send_speech_segments(&mut self, device_type: DeviceType, segments: Vec<SpeechSegment>) {
@@ -1041,6 +1120,7 @@ impl AudioPipelineManager {
         &mut self,
         state: Arc<RecordingState>,
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
+        live_preview_sender: Option<watch::Sender<Option<AudioChunk>>>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
@@ -1082,6 +1162,7 @@ impl AudioPipelineManager {
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
         // This ensures both mic AND system audio are captured in recordings
         pipeline.recording_sender_for_mixed = recording_sender;
+        pipeline.live_preview_sender = live_preview_sender;
 
         let handle = tokio::spawn(async move { pipeline.run().await });
 

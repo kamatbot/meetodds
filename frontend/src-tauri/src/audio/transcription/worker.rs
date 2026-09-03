@@ -6,7 +6,7 @@ use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
 use super::speaker_detection::SpeakerAttributor;
 use crate::audio::AudioChunk;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -16,7 +16,28 @@ use tauri::{AppHandle, Emitter, Runtime};
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Speech detection flag - reset per recording session
+
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
+static CANONICAL_TRANSCRIPTION_BUSY: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn canonical_transcription_busy() -> bool {
+    CANONICAL_TRANSCRIPTION_BUSY.load(Ordering::Acquire)
+}
+
+struct CanonicalTranscriptionGuard;
+
+impl CanonicalTranscriptionGuard {
+    fn new() -> Self {
+        CANONICAL_TRANSCRIPTION_BUSY.store(true, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for CanonicalTranscriptionGuard {
+    fn drop(&mut self) {
+        CANONICAL_TRANSCRIPTION_BUSY.store(false, Ordering::Release);
+    }
+}
 
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
@@ -174,10 +195,25 @@ pub fn start_transcription_task<R: Runtime>(
                                 )
                             };
 
-                            // Transcribe with provider-agnostic approach
-                            match transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone)
-                                .await
-                            {
+                            // Canonical sentence decoding always has priority over speculative
+                            // subtitles. The preview worker observes this flag and yields.
+                            let preview_source = match &chunk.device_type {
+                                crate::audio::recording_state::DeviceType::Microphone => {
+                                    "microphone"
+                                }
+                                crate::audio::recording_state::DeviceType::System => "system",
+                            };
+                            let transcription_result = {
+                                let _canonical_guard = CanonicalTranscriptionGuard::new();
+                                transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone)
+                                    .await
+                            };
+                            let _ = app_clone.emit(
+                                "live-transcript-preview-clear",
+                                serde_json::json!({ "source": preview_source }),
+                            );
+
+                            match transcription_result {
                                 Ok((transcript, confidence_opt, is_partial)) => {
                                     // Provider-aware confidence threshold
                                     let confidence_threshold = match &engine_clone {
@@ -191,7 +227,7 @@ pub fn start_transcription_task<R: Runtime>(
                                         None => "N/A".to_string(),
                                     };
 
-                                    info!("🔍 Worker {} transcription result: text='{}', confidence={}, partial={}, threshold={:.2}",
+                                    debug!("🔍 Worker {} transcription result: text='{}', confidence={}, partial={}, threshold={:.2}",
                                           worker_id, transcript, confidence_str, is_partial, confidence_threshold);
 
                                     // Check confidence threshold (or accept if no confidence provided)
@@ -200,14 +236,14 @@ pub fn start_transcription_task<R: Runtime>(
 
                                     if !transcript.trim().is_empty() && meets_threshold {
                                         // PERFORMANCE: Only log transcription results, not every processing step
-                                        info!("✅ Worker {} transcribed: {} (confidence: {}, partial: {})",
+                                        debug!("✅ Worker {} transcribed: {} (confidence: {}, partial: {})",
                                               worker_id, transcript, confidence_str, is_partial);
 
                                         // Emit speech-detected event for frontend UX (only on first detection per session)
                                         // This is lightweight and provides better user feedback
                                         let current_flag =
                                             SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst);
-                                        info!("🔍 Checking speech-detected flag: current={}, will_emit={}", current_flag, !current_flag);
+                                        debug!("🔍 Checking speech-detected flag: current={}, will_emit={}", current_flag, !current_flag);
 
                                         if !current_flag {
                                             SPEECH_DETECTED_EMITTED.store(true, Ordering::SeqCst);
@@ -218,7 +254,7 @@ pub fn start_transcription_task<R: Runtime>(
                                                 Err(e) => error!("🎤 ❌ Failed to emit speech-detected event: {}", e),
                                             }
                                         } else {
-                                            info!("🔍 Speech already detected in this session, not re-emitting");
+                                            debug!("🔍 Speech already detected in this session, not re-emitting");
                                         }
 
                                         // Generate sequence ID and calculate timestamps FIRST
@@ -477,7 +513,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
     // Calculate energy for logging/monitoring only
     let energy: f32 =
         speech_samples.iter().map(|&x| x * x).sum::<f32>() / speech_samples.len() as f32;
-    info!(
+    debug!(
         "Processing speech audio chunk {} with {} samples (energy: {:.6})",
         chunk.chunk_id,
         speech_samples.len(),
@@ -500,7 +536,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                         return Ok((String::new(), Some(confidence), is_partial));
                     }
 
-                    info!(
+                    debug!(
                         "Whisper transcription complete for chunk {}: '{}' (confidence: {:.2}, partial: {})",
                         chunk.chunk_id, cleaned_text, confidence, is_partial
                     );
@@ -535,7 +571,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                         return Ok((String::new(), None, false));
                     }
 
-                    info!(
+                    debug!(
                         "Parakeet transcription complete for chunk {}: '{}'",
                         chunk.chunk_id, cleaned_text
                     );
@@ -579,7 +615,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                         None => "no confidence".to_string(),
                     };
 
-                    info!(
+                    debug!(
                         "{} transcription complete for chunk {}: '{}' ({}, partial: {})",
                         provider.provider_name(),
                         chunk.chunk_id,
