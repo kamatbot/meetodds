@@ -487,8 +487,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
                 .slice(-settings.contextTurns)
                 .map((turn) => `${speakerLabel(turn)}: ${turn.text.trim()}`)
                 .filter((line) => line.trim().length > 0)
-                .join('
-');
+                .join('\n');
           const segmentKey = `live-preview-${livePreview.source}`;
           pendingPreviewRef.current = {
             segmentKey,
