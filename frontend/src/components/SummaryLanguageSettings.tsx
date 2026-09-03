@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Globe, Pin } from 'lucide-react';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Pin } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
+import SettingRow from '@/components/Settings/SettingRow';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
 
@@ -16,68 +17,24 @@ export function SummaryLanguageSettings() {
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm relative">
-      <div className="flex items-center gap-2 mb-2">
-        <Globe size={18} className="text-gray-500" />
-        <h3 className="text-lg font-semibold text-gray-900">Summary Language</h3>
-      </div>
-      <p className="text-sm text-gray-600 mb-4">
-        Pin one language as the default for new meetings. Unpinned languages remain as
-        quick-switch options in the summary generator. Auto uses the dominant transcript language.
-      </p>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {recents.map((code) => {
-          const isPinned = pinned === code;
-          return (
-            <span
-              key={code}
-              className={`inline-flex items-center rounded-full border text-sm overflow-hidden ${
-                isPinned
-                  ? 'bg-blue-50 border-blue-200 text-blue-800'
-                  : 'bg-gray-100 border-gray-200 text-gray-800'
-              }`}
-            >
-              <button
-                type="button"
-                aria-label={isPinned ? `Unpin ${labelForCode(code)} as default` : `Pin ${labelForCode(code)} as default`}
-                aria-pressed={isPinned}
-                title={isPinned ? 'Click to unset as default' : 'Click to set as default'}
-                onClick={() => togglePin(code)}
-                className={`flex items-center gap-1.5 pl-3 pr-2 py-1 hover:brightness-95 active:brightness-90 ${
-                  isPinned ? 'text-blue-800' : 'text-gray-800'
-                }`}
-              >
-                <Pin
-                  size={14}
-                  className={isPinned ? 'text-blue-600' : 'text-gray-400'}
-                  fill={isPinned ? 'currentColor' : 'none'}
-                />
-                {labelForCode(code)}
-              </button>
-              <button
-                type="button"
-                aria-label={`Remove ${labelForCode(code)}`}
-                onClick={() => removeRecent(code)}
-                className={`pr-2.5 pl-0.5 py-1 leading-none ${isPinned ? 'text-blue-400 hover:text-blue-700' : 'text-gray-400 hover:text-gray-700'}`}
-              >
-                ×
-              </button>
-            </span>
-          );
-        })}
-
+    <SettingRow
+      label="Summary language"
+      description={pinned
+        ? `Default: ${labelForCode(pinned)}. Keep up to five quick-switch languages available in meeting summaries.`
+        : 'Auto follows the dominant transcript language. Pin a language to make it the default for new meetings.'}
+      align="start"
+      control={(
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger asChild>
             <button
               type="button"
               disabled={recents.length >= 5}
-              className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-3 py-1 text-sm text-gray-600 hover:border-gray-400 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-8 rounded-control border border-border bg-bg px-2.5 text-ui font-medium text-text hover:bg-surface disabled:opacity-40"
             >
-              ＋ Add language
+              Add language…
             </button>
           </PopoverTrigger>
-          <PopoverContent align="start" className="w-auto p-0 border-0 shadow-none bg-transparent">
+          <PopoverContent align="end" className="w-auto border-0 bg-transparent p-0 shadow-none">
             <LanguagePickerPopover
               mode="settings"
               value={null}
@@ -89,13 +46,41 @@ export function SummaryLanguageSettings() {
             />
           </PopoverContent>
         </Popover>
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {recents.map((code) => {
+          const isPinned = pinned === code;
+          return (
+            <span
+              key={code}
+              className={`inline-flex items-center overflow-hidden rounded-full border text-caption ${isPinned ? 'border-accent/30 bg-accent-soft text-accent' : 'border-border bg-surface text-2'}`}
+            >
+              <button
+                type="button"
+                aria-label={isPinned ? `Unpin ${labelForCode(code)} as default` : `Pin ${labelForCode(code)} as default`}
+                aria-pressed={isPinned}
+                onClick={() => togglePin(code)}
+                className="flex items-center gap-1.5 py-1 pl-2.5 pr-1.5"
+              >
+                <Pin className="h-3 w-3" fill={isPinned ? 'currentColor' : 'none'} strokeWidth={1.75} />
+                {labelForCode(code)}
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${labelForCode(code)}`}
+                onClick={() => removeRecent(code)}
+                className="py-1 pl-1 pr-2 text-3 hover:text-text"
+              >
+                ×
+              </button>
+            </span>
+          );
+        })}
+        {recents.length === 0 && (
+          <span className="text-caption text-3">No quick-switch languages added.</span>
+        )}
       </div>
-
-      <p className="text-xs text-gray-400 mt-3">
-        {pinned
-          ? `Default: ${labelForCode(pinned)} - click it again to unset. Max 5 quick-switch options.`
-          : 'Click any language to set it as your default. Max 5 quick-switch options.'}
-      </p>
-    </div>
+    </SettingRow>
   );
 }

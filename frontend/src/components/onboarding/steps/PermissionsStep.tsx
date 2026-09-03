@@ -1,4 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+'use client';
+
+import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Mic, Volume2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -6,61 +8,54 @@ import { OnboardingContainer } from '../OnboardingContainer';
 import { PermissionRow } from '../shared';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 
-export function PermissionsStep() {
-  const { setPermissionStatus, setPermissionsSkipped, permissions, completeOnboarding } = useOnboarding();
-  const [isPending, setIsPending] = useState(false);
+interface PermissionsStepProps {
+  onComplete: () => void;
+}
 
-  // Check permissions - only logs current state, doesn't auto-authorize
-  // Actual permission checks are done via explicit user actions (clicking Enable)
+export function PermissionsStep({ onComplete }: PermissionsStepProps) {
+  const {
+    setPermissionStatus,
+    setPermissionsSkipped,
+    permissions,
+    completeOnboarding,
+  } = useOnboarding();
+  const [isPending, setIsPending] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
+
   const checkPermissions = useCallback(async () => {
     console.log('[PermissionsStep] Current permission states:');
     console.log(`  - Microphone: ${permissions.microphone}`);
     console.log(`  - System Audio: ${permissions.systemAudio}`);
-    // Don't auto-set permissions based on device availability
-    // Permissions should only be set after explicit user action via Enable button
   }, [permissions.microphone, permissions.systemAudio]);
 
-  // Check permissions on mount
   useEffect(() => {
-    checkPermissions();
+    void checkPermissions();
   }, [checkPermissions]);
 
-  // Request microphone permission
   const handleMicrophoneAction = async () => {
     if (permissions.microphone === 'denied') {
-      // Try to open system settings
       try {
         await invoke('open_system_settings');
       } catch {
-        alert('Please enable microphone access in System Preferences > Security & Privacy > Microphone');
+        alert('Please enable microphone access in System Settings → Privacy & Security → Microphone');
       }
       return;
     }
 
     setIsPending(true);
     try {
-      console.log('[PermissionsStep] Triggering microphone permission...');
       const granted = await invoke<boolean>('trigger_microphone_permission');
-      console.log('[PermissionsStep] Microphone permission result:', granted);
-
-      if (granted) {
-        setPermissionStatus('microphone', 'authorized');
-      } else {
-        // Permission was denied or dialog was dismissed
-        setPermissionStatus('microphone', 'denied');
-      }
-    } catch (err) {
-      console.error('[PermissionsStep] Failed to request microphone permission:', err);
+      setPermissionStatus('microphone', granted ? 'authorized' : 'denied');
+    } catch (error) {
+      console.error('[PermissionsStep] Failed to request microphone permission:', error);
       setPermissionStatus('microphone', 'denied');
     } finally {
       setIsPending(false);
     }
   };
 
-  // Request system audio permission
   const handleSystemAudioAction = async () => {
     if (permissions.systemAudio === 'denied') {
-      // Try to open system settings
       try {
         await invoke('open_system_settings');
       } catch {
@@ -71,22 +66,10 @@ export function PermissionsStep() {
 
     setIsPending(true);
     try {
-      console.log('[PermissionsStep] Triggering Audio Capture permission...');
-      // Backend creates Core Audio tap, captures audio, and verifies it's not silence
-      // Returns true if permission granted and audio verified, false if denied (silence)
       const granted = await invoke<boolean>('trigger_system_audio_permission_command');
-      console.log('[PermissionsStep] System audio permission result:', granted);
-
-      if (granted) {
-        setPermissionStatus('systemAudio', 'authorized');
-        console.log('[PermissionsStep] Audio Capture permission verified - audio is not silence');
-      } else {
-        // Permission was denied (audio is silence)
-        setPermissionStatus('systemAudio', 'denied');
-        console.log('[PermissionsStep] Audio Capture permission denied - audio is silence');
-      }
-    } catch (err) {
-      console.error('[PermissionsStep] Failed to request system audio permission:', err);
+      setPermissionStatus('systemAudio', granted ? 'authorized' : 'denied');
+    } catch (error) {
+      console.error('[PermissionsStep] Failed to request system audio permission:', error);
       setPermissionStatus('systemAudio', 'denied');
     } finally {
       setIsPending(false);
@@ -94,11 +77,14 @@ export function PermissionsStep() {
   };
 
   const handleFinish = async () => {
+    if (isFinishing) return;
+    setIsFinishing(true);
     try {
       await completeOnboarding();
-      window.location.reload();
+      onComplete();
     } catch (error) {
       console.error('Failed to complete onboarding:', error);
+      setIsFinishing(false);
     }
   };
 
@@ -113,53 +99,57 @@ export function PermissionsStep() {
 
   return (
     <OnboardingContainer
-      title="Grant Permissions"
-      description="Meetily needs access to your microphone and system audio to record meetings"
+      title="Allow meeting capture"
+      description="MeetOdds needs microphone and system-audio access to capture both sides of a meeting."
       step={4}
-      hideProgress={true}
-      showNavigation={allPermissionsGranted}
-      canGoNext={allPermissionsGranted}
+      totalSteps={4}
+      hideProgress={false}
     >
-      <div className="max-w-lg mx-auto space-y-6">
-        {/* Permission Rows */}
-        <div className="space-y-4">
-          {/* Microphone */}
-          <PermissionRow
-            icon={<Mic className="w-5 h-5" />}
-            title="Microphone"
-            description="Required to capture your voice during meetings"
-            status={permissions.microphone}
-            isPending={isPending}
-            onAction={handleMicrophoneAction}
-          />
-
-          {/* System Audio */}
-          <PermissionRow
-            icon={<Volume2 className="w-5 h-5" />}
-            title="System Audio"
-            description="Click Enable to grant Audio Capture permission"
-            status={permissions.systemAudio}
-            isPending={isPending}
-            onAction={handleSystemAudioAction}
-          />
+      <div className="mx-auto max-w-lg space-y-6">
+        <div className="overflow-hidden rounded-card border border-border bg-surface">
+          <div className="border-b border-border p-4">
+            <PermissionRow
+              icon={<Mic className="h-5 w-5" />}
+              title="Microphone"
+              description="Capture your voice during meetings."
+              status={permissions.microphone}
+              isPending={isPending}
+              onAction={handleMicrophoneAction}
+            />
+          </div>
+          <div className="p-4">
+            <PermissionRow
+              icon={<Volume2 className="h-5 w-5" />}
+              title="System audio"
+              description="Capture audio from calls, videos, and conferencing apps."
+              status={permissions.systemAudio}
+              isPending={isPending}
+              onAction={handleSystemAudioAction}
+            />
+          </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col gap-3 pt-4">
-          <Button onClick={handleFinish} disabled={!allPermissionsGranted} className="w-full h-11">
-            Finish Setup
+        <div className="flex flex-col gap-3 pt-1">
+          <Button
+            onClick={() => void handleFinish()}
+            disabled={!allPermissionsGranted || isFinishing}
+            className="h-10 w-full rounded-control bg-accent text-white hover:opacity-90"
+          >
+            {isFinishing ? 'Finishing…' : 'Go to Home'}
           </Button>
 
           <button
-            onClick={handleSkip}
-            className="text-sm text-neutral-500 hover:text-neutral-700 transition-colors"
+            type="button"
+            onClick={() => void handleSkip()}
+            disabled={isFinishing}
+            className="text-ui text-3 transition-colors duration-150 hover:text-text disabled:opacity-40"
           >
-            I'll do this later
+            Set up permissions later
           </button>
 
           {!allPermissionsGranted && (
-            <p className="text-xs text-center text-muted-foreground">
-              Recording won't work without permissions. You can grant them later in settings.
+            <p className="text-center text-caption text-3">
+              You can finish setup now; Home will show anything that still needs attention.
             </p>
           )}
         </div>

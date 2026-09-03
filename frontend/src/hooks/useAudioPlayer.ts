@@ -1,275 +1,194 @@
-import { useState, useEffect, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 export const useAudioPlayer = (audioPath: string | null) => {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playbackRateRef = useRef(1);
+  const [isLoading, setIsLoading] = useState(Boolean(audioPath));
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState<number | null>(null);
+  const [playbackRate, setPlaybackRateState] = useState(1);
   const [error, setError] = useState<string | null>(null);
-  const audioRef = useRef<AudioContext | null>(null);
-  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const startTimeRef = useRef<number>(0);
-  const audioBufferRef = useRef<AudioBuffer | null>(null);
-  const rafRef = useRef<number>();
-  const seekTimeRef = useRef<number>(0);
 
-  const initAudioContext = async () => {
-    try {
-      if (!audioRef.current) {
-        console.log('Creating new AudioContext');
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        audioRef.current = new AudioContextClass();
-        console.log('AudioContext created:', {
-          state: audioRef.current.state,
-          sampleRate: audioRef.current.sampleRate,
-        });
-      }
-
-      if (audioRef.current.state === 'suspended') {
-        console.log('Resuming suspended AudioContext');
-        await audioRef.current.resume();
-        console.log('AudioContext resumed:', audioRef.current.state);
-      }
-      
-      setError(null);
-      return true;
-    } catch (error) {
-      console.error('Error initializing AudioContext:', error);
-      setError('Failed to initialize audio');
-      return false;
-    }
-  };
-
-  // Cleanup function
   useEffect(() => {
-    return () => {
-      console.log('Cleaning up audio resources');
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-      }
-      if (sourceRef.current) {
-        sourceRef.current.stop();
-      }
-      if (audioRef.current) {
-        audioRef.current.close();
-      }
-    };
-  }, []);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(null);
+    setError(null);
 
-  const loadAudio = async () => {
     if (!audioPath) {
-      console.log('No audio path provided');
+      setIsLoading(false);
+      audioRef.current = null;
       return;
     }
 
+    setIsLoading(true);
+
+    const audio = new Audio();
+    audio.preload = 'metadata';
+    audio.playbackRate = playbackRateRef.current;
+    audioRef.current = audio;
+
+    let disposed = false;
+    let fallbackAttempted = false;
+    let fallbackUrl: string | null = null;
+
+    const handleLoadedMetadata = () => {
+      const nextDuration = Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : null;
+      setDuration(nextDuration);
+      setCurrentTime(Number.isFinite(audio.currentTime) ? audio.currentTime : 0);
+      setIsLoading(false);
+      setError(nextDuration === null ? 'Audio duration is unavailable' : null);
+    };
+
+    const handleDurationChange = () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        setDuration(audio.duration);
+      }
+    };
+
+    const handleTimeUpdate = () => {
+      if (Number.isFinite(audio.currentTime)) {
+        setCurrentTime(audio.currentTime);
+      }
+    };
+
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(Number.isFinite(audio.duration) ? audio.duration : 0);
+    };
+
+    const handleError = async () => {
+      if (disposed) return;
+
+      // Tauri's fast asset-protocol path is intentionally scoped. Saved recordings
+      // may live outside that scope (the default macOS recording folder is under
+      // Movies and users can choose another folder), so fall back once to the
+      // pre-existing native file-read command using the native-confirmed audio path.
+      // This avoids widening the application's asset-protocol permissions globally.
+      if (!fallbackAttempted) {
+        fallbackAttempted = true;
+        try {
+          const bytes = await invoke<number[]>('read_audio_file', { filePath: audioPath });
+          if (disposed) return;
+
+          fallbackUrl = URL.createObjectURL(
+            new Blob([new Uint8Array(bytes)], { type: 'audio/mp4' }),
+          );
+          audio.src = fallbackUrl;
+          audio.playbackRate = playbackRateRef.current;
+          audio.load();
+          return;
+        } catch (fallbackError) {
+          console.error('[AudioPlayer] Native audio fallback failed:', fallbackError);
+        }
+      }
+
+      setIsPlaying(false);
+      setIsLoading(false);
+      setError('Saved audio could not be played');
+    };
+
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('durationchange', handleDurationChange);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('play', handlePlay);
+    audio.addEventListener('pause', handlePause);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+
     try {
-      // Initialize context first
-      const initialized = await initAudioContext();
-      if (!initialized || !audioRef.current) {
-        console.error('Failed to initialize audio context');
-        return;
-      }
-
-      console.log('Loading audio from:', audioPath);
-      
-      // Read the file using Tauri command
-      const result = await invoke<number[]>('read_audio_file', { 
-        filePath: audioPath 
-      });
-      
-      if (!result || result.length === 0) {
-        throw new Error('Empty audio data received');
-      }
-      
-      console.log('Audio file read, size:', result.length, 'bytes');
-      
-      // Create a copy of the audio data
-      const audioData = new Uint8Array(result).buffer;
-      
-      console.log('Created audio buffer, size:', audioData.byteLength, 'bytes');
-      
-      // Decode the audio data
-      const audioBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
-        audioRef.current!.decodeAudioData(
-          audioData,
-          buffer => {
-            console.log('Audio decoded successfully:', {
-              duration: buffer.duration,
-              sampleRate: buffer.sampleRate,
-              numberOfChannels: buffer.numberOfChannels,
-              length: buffer.length
-            });
-            resolve(buffer);
-          },
-          error => {
-            console.error('Audio decoding failed:', error);
-            reject(new Error('Failed to decode audio data: ' + error));
-          }
-        );
-      });
-      
-      audioBufferRef.current = audioBuffer;
-      setDuration(audioBuffer.duration);
-      setCurrentTime(0);
-      setError(null);
-      console.log('Audio loaded and ready to play');
-    } catch (error) {
-      console.error('Error loading audio:', error);
-      if (error instanceof Error) {
-        console.error('Error details:', {
-          message: error.message,
-          name: error.name,
-          stack: error.stack,
-        });
-      }
-      setError('Failed to load audio file');
+      audio.src = convertFileSrc(audioPath);
+      audio.load();
+    } catch (loadError) {
+      console.error('[AudioPlayer] Failed to create asset-protocol source:', loadError);
+      void handleError();
     }
-  };
 
-  // Load audio when path changes
-  useEffect(() => {
-    console.log('Audio path changed:', audioPath);
-    if (audioPath) {
-      loadAudio();
-    }
+    return () => {
+      disposed = true;
+      audio.pause();
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('durationchange', handleDurationChange);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+      audio.removeAttribute('src');
+      audio.load();
+      if (fallbackUrl) URL.revokeObjectURL(fallbackUrl);
+      if (audioRef.current === audio) {
+        audioRef.current = null;
+      }
+    };
   }, [audioPath]);
 
-  const stopPlayback = () => {
-    console.log('Stopping playback');
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = undefined;
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
     }
-    if (sourceRef.current) {
-      try {
-        sourceRef.current.stop();
-        sourceRef.current.disconnect();
-      } catch (e) {
-        console.log('Error stopping source:', e);
-      }
-      sourceRef.current = null;
-    }
-    setIsPlaying(false);
-  };
+  }, [playbackRate]);
 
-  const play = async () => {
-    console.log('Play requested');
-    
+  const play = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
     try {
-      // Initialize context if needed
-      const initialized = await initAudioContext();
-      if (!initialized) {
-        throw new Error('Audio context initialization failed');
-      }
-      if (!audioRef.current) {
-        throw new Error('Audio context is null after initialization');
-      }
-      if (!audioBufferRef.current) {
-        throw new Error('No audio buffer loaded - try loading the audio file first');
-      }
-      if (audioRef.current.state !== 'running') {
-        throw new Error(`Audio context is in invalid state: ${audioRef.current.state}`);
-      }
-
-      // Stop any existing playback
-      stopPlayback();
-
-      // Create and setup new source
-      console.log('Creating new audio source');
-      sourceRef.current = audioRef.current.createBufferSource();
-      sourceRef.current.buffer = audioBufferRef.current;
-      
-      console.log('Audio buffer details:', {
-        duration: audioBufferRef.current.duration,
-        sampleRate: audioBufferRef.current.sampleRate,
-        numberOfChannels: audioBufferRef.current.numberOfChannels,
-        length: audioBufferRef.current.length
-      });
-      
-      sourceRef.current.connect(audioRef.current.destination);
-      
-      // Setup ended callback
-      sourceRef.current.onended = () => {
-        console.log('Playback ended naturally');
-        stopPlayback();
-        setCurrentTime(0);
-      };
-      
-      // Start playback from the seek time
-      const startTime = seekTimeRef.current;
-      startTimeRef.current = audioRef.current.currentTime - startTime;
-      console.log('Starting playback', {
-        startTime,
-        contextTime: audioRef.current.currentTime,
-        seekTime: seekTimeRef.current
-      });
-      
-      sourceRef.current.start(0, startTime);
-      setIsPlaying(true);
+      await audio.play();
       setError(null);
-
-      // Setup time update
-      const updateTime = () => {
-        if (!audioRef.current || !sourceRef.current) {
-          console.log('Update cancelled - context or source is null');
-          return;
-        }
-        
-        const newTime = audioRef.current.currentTime - startTimeRef.current;
-        
-        if (newTime >= duration) {
-          console.log('Playback finished');
-          stopPlayback();
-          setCurrentTime(0);
-          seekTimeRef.current = 0;
-        } else {
-          setCurrentTime(newTime);
-          seekTimeRef.current = newTime;
-          rafRef.current = requestAnimationFrame(updateTime);
-        }
-      };
-      
-      rafRef.current = requestAnimationFrame(updateTime);
-    } catch (error) {
-      console.error('Error during playback:', error);
-      setError('Failed to play audio');
-      stopPlayback();
+    } catch (playError) {
+      console.error('[AudioPlayer] Playback failed:', playError);
+      setError('Saved audio could not be played');
+      setIsPlaying(false);
     }
-  };
+  }, []);
 
-  const seek = async (time: number) => {
-    console.log('Seek requested:', time);
-    if (time < 0) time = 0;
-    if (time > duration) time = duration;
-    
-    const wasPlaying = isPlaying;
-    
-    // Stop current playback
-    stopPlayback();
-    
-    // Update both current time and seek time reference
-    seekTimeRef.current = time;
-    setCurrentTime(time);
-    
-    // If it was playing before, restart playback at new position
-    if (wasPlaying) {
-      console.log('Restarting playback at:', time);
-      await play();
-    }
-  };
+  const pause = useCallback(() => {
+    audioRef.current?.pause();
+  }, []);
 
-  const pause = () => {
-    console.log('Pause requested');
-    stopPlayback();
-  };
+  const seek = useCallback((time: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const maxTime = Number.isFinite(audio.duration) && audio.duration > 0
+      ? audio.duration
+      : Math.max(0, time);
+    const nextTime = Math.max(0, Math.min(maxTime, time));
+    audio.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }, []);
+
+  const seekBy = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    seek(audio.currentTime + seconds);
+  }, [seek]);
+
+  const setPlaybackRate = useCallback((rate: number) => {
+    if (!Number.isFinite(rate)) return;
+    const nextRate = Math.max(0.75, Math.min(2, rate));
+    setPlaybackRateState(nextRate);
+  }, []);
 
   return {
+    isLoading,
     isPlaying,
     currentTime,
     duration,
+    playbackRate,
     error,
     play,
     pause,
-    seek
+    seek,
+    seekBy,
+    setPlaybackRate,
   };
 };

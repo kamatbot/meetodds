@@ -9,6 +9,69 @@ pub struct MeetingModel {
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub folder_path: Option<String>,
+    #[sqlx(default)]
+    pub duration_ms: Option<i64>,
+    #[sqlx(default)]
+    pub starred: bool,
+    #[sqlx(default)]
+    pub title_source: Option<String>,
+    #[sqlx(default)]
+    pub notes_markdown: Option<String>,
+    #[sqlx(default)]
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MeetingListSort {
+    Newest,
+    Oldest,
+    Longest,
+    Title,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingListRequest {
+    #[serde(default)]
+    pub cursor: Option<String>,
+    pub limit: i64,
+    #[serde(default)]
+    pub query: Option<String>,
+    pub sort: MeetingListSort,
+    #[serde(default)]
+    pub starred_only: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MeetingSummaryStatus {
+    Ready,
+    Missing,
+    Generating,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingListItem {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub duration_ms: Option<i64>,
+    pub starred: bool,
+    pub summary_status: MeetingSummaryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_snippet: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingListPage {
+    pub items: Vec<MeetingListItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]

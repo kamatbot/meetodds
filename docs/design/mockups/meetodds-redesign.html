@@ -1,0 +1,679 @@
+<title>MeetOdds Redesign Wireframes</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --page:#ECECE8; --page-2:#E2E2DD; --ink:#1B1B1B; --ink-2:#6B6B6B; --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --bg:#F7F7F5; --surface:#FFFFFF; --sidebar:rgba(242,242,240,.92); --border:#E6E6E3;
+    --text:#1B1B1B; --text-2:#6B6B6B; --text-3:#9A9A9A;
+    --accent:#3B6EF6; --accent-soft:#E8EFFF; --record:#E5484D; --record-soft:#FDE8E9;
+    --success:#2E9E5B; --success-soft:#E4F4EA; --warn:#D98D0B; --warn-soft:#FBF0DA; --danger:#D92D20;
+    --shadow:0 0 0 .5px rgb(0 0 0/.10), 0 18px 48px rgb(0 0 0/.14);
+    --pop:0 0 0 .5px rgb(0 0 0/.08), 0 8px 24px rgb(0 0 0/.12);
+    --sys:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI","Source Sans 3",sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --page:#141416; --page-2:#1A1A1D; --ink:#EDEDED; --ink-2:#A1A1A6;
+      --bg:#1C1C1E; --surface:#232326; --sidebar:rgba(30,30,32,.94); --border:#333336;
+      --text:#EDEDED; --text-2:#A1A1A6; --text-3:#6E6E73;
+      --accent:#5B8CFF; --accent-soft:#22304F; --record:#FF6369; --record-soft:#3A2224;
+      --success:#4CC37A; --success-soft:#1E3327; --warn:#F2B23E; --warn-soft:#3A2F16; --danger:#F26B62;
+      --shadow:0 0 0 .5px rgb(255 255 255/.10), 0 18px 48px rgb(0 0 0/.5);
+      --pop:0 0 0 .5px rgb(255 255 255/.10), 0 8px 24px rgb(0 0 0/.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --page:#141416; --page-2:#1A1A1D; --ink:#EDEDED; --ink-2:#A1A1A6;
+    --bg:#1C1C1E; --surface:#232326; --sidebar:rgba(30,30,32,.94); --border:#333336;
+    --text:#EDEDED; --text-2:#A1A1A6; --text-3:#6E6E73;
+    --accent:#5B8CFF; --accent-soft:#22304F; --record:#FF6369; --record-soft:#3A2224;
+    --success:#4CC37A; --success-soft:#1E3327; --warn:#F2B23E; --warn-soft:#3A2F16; --danger:#F26B62;
+    --shadow:0 0 0 .5px rgb(255 255 255/.10), 0 18px 48px rgb(0 0 0/.5);
+    --pop:0 0 0 .5px rgb(255 255 255/.10), 0 8px 24px rgb(0 0 0/.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font-family:var(--sys);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent)}
+  .page{max-width:1180px;margin:0 auto;padding:48px 24px 96px}
+  header.intro{display:grid;grid-template-columns:1fr 320px;gap:40px;align-items:end;margin-bottom:56px}
+  header h1{font-size:34px;line-height:1.1;margin:0 0 12px;letter-spacing:-.01em;text-wrap:balance}
+  header p{margin:0;max-width:60ch;color:var(--ink-2);font-size:15px}
+  .legend{font-family:var(--mono);font-size:12px;color:var(--ink-2);border-left:2px solid var(--accent);padding-left:14px;display:grid;gap:6px}
+  .legend b{color:var(--ink);font-weight:500}
+  .toc{display:flex;flex-wrap:wrap;gap:8px 18px;font-family:var(--mono);font-size:12px;margin:0 0 40px;padding:0;list-style:none}
+  .toc a{color:var(--ink-2);text-decoration:none;border-bottom:1px solid transparent}
+  .toc a:hover,.toc a:focus-visible{color:var(--accent);border-color:var(--accent);outline:none}
+  section.board{margin:0 0 72px}
+  .board-head{display:flex;justify-content:space-between;align-items:baseline;gap:24px;margin-bottom:16px}
+  .board-head h2{margin:0;font-size:20px;letter-spacing:-.01em}
+  .board-head .ref{font-family:var(--mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+  .frame{overflow-x:auto;padding:8px 0 24px}
+  .caption{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px 28px;margin:4px 0 0;padding:0;list-style:none;max-width:1100px}
+  .caption li{font-size:13.5px;color:var(--ink-2);padding-left:18px;position:relative}
+  .caption li::before{content:"";position:absolute;left:0;top:9px;width:8px;height:2px;background:var(--accent)}
+  .caption li b{color:var(--ink);font-weight:600}
+
+  /* ---------- window chrome ---------- */
+  .win{width:1100px;height:700px;background:var(--bg);border-radius:12px;box-shadow:var(--shadow);display:grid;grid-template-columns:260px 1fr;overflow:hidden;position:relative;color:var(--text);font-size:13px;line-height:1.4}
+  .win.no-sb{grid-template-columns:1fr}
+  .win.settings{width:760px;height:560px;grid-template-columns:200px 1fr}
+  .lights{display:flex;gap:8px;padding:0 0 0 14px;height:52px;align-items:center}
+  .lights i{width:12px;height:12px;border-radius:50%;background:#FF5F57;display:block}
+  .lights i:nth-child(2){background:#FEBC2E}.lights i:nth-child(3){background:#28C840}
+  .sb{background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;backdrop-filter:blur(20px)}
+  .sb .search{margin:2px 12px 10px;height:28px;border-radius:6px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--text-3)}
+  .sb .search kbd{margin-left:auto}
+  kbd{font-family:var(--sys);font-size:11px;color:var(--text-3);border:1px solid var(--border);border-radius:4px;padding:0 5px;line-height:16px;background:var(--surface)}
+  .nav{padding:0 8px;display:grid;gap:2px}
+  .nav a{display:flex;align-items:center;gap:10px;height:30px;padding:0 10px;border-radius:6px;color:var(--text);text-decoration:none}
+  .nav a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .nav a kbd{margin-left:auto;border:0;background:transparent}
+  .nav .ico{width:16px;height:16px;border-radius:4px;border:1.5px solid currentColor;opacity:.75;display:inline-block}
+  .sb h6{margin:16px 20px 6px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600}
+  .recent a{display:flex;flex-direction:column;align-items:flex-start;height:auto;padding:5px 10px}
+  .recent a small{color:var(--text-3);font-size:11px}
+  .sb .more{color:var(--text-3);padding:4px 20px}
+  .sb .foot{margin-top:auto;padding:12px;display:grid;gap:10px;border-top:1px solid var(--border)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:30px;padding:0 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-weight:500;white-space:nowrap}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.record{background:var(--record);border-color:var(--record);color:#fff}
+  .btn.ghost{border-color:transparent;background:transparent}
+  .btn.sm{height:24px;padding:0 8px;font-size:12px}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--text-3)}
+  .dot.rec{background:var(--record)}.dot.ok{background:var(--success)}.dot.warn{background:var(--warn)}
+  .sb .status{display:flex;align-items:center;gap:8px;color:var(--text-2);font-size:12px}
+  .sb .status .gear{margin-right:auto;color:var(--text)}
+  .rec-chip{margin:0 12px 8px;height:30px;border-radius:6px;background:var(--record-soft);color:var(--record);display:flex;align-items:center;gap:8px;padding:0 10px;font-weight:600}
+  .rec-chip span{font-weight:400;font-family:var(--mono);font-size:12px;margin-left:auto}
+
+  .main{display:flex;flex-direction:column;min-width:0}
+  .tb{height:52px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);background:var(--bg)}
+  .tb .lead,.tb .trail{display:flex;gap:6px;align-items:center}
+  .tb .trail{justify-content:flex-end}
+  .tb .center{display:flex;align-items:center;gap:14px;min-width:0}
+  .tb .title{font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .tbtn{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;color:var(--text-2);border:1px solid transparent}
+  .tbtn i{width:14px;height:12px;border:1.5px solid currentColor;border-radius:3px;display:block}
+  .tbtn.split i{background:linear-gradient(to right,currentColor 35%,transparent 35%)}
+  .seg{display:flex;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:2px}
+  .seg span{padding:3px 12px;border-radius:5px;color:var(--text-2)}
+  .seg span.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .body{flex:1;overflow:hidden;position:relative}
+  .col{max-width:760px;margin:0 auto;padding:28px 32px}
+
+  /* ---------- home ---------- */
+  .greet{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px}
+  .greet h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em}
+  .greet small{color:var(--text-2);font-size:13px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px}
+  .ready{padding:6px 0;margin-bottom:20px}
+  .ready .row{display:grid;grid-template-columns:20px 120px 1fr auto;align-items:center;gap:12px;padding:8px 16px}
+  .ready .row+.row{border-top:1px solid var(--border)}
+  .ready .k{color:var(--text-2)}
+  .ready .v{font-weight:500}
+  .ready .v small{color:var(--text-3);font-weight:400;margin-left:8px}
+  .chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:5px;font-size:12px;background:var(--accent-soft);color:var(--accent);font-weight:500}
+  .chip.warn{background:var(--warn-soft);color:var(--warn)}
+  h3.sec{margin:22px 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600;display:flex;justify-content:space-between}
+  h3.sec a{font-weight:500;letter-spacing:0;text-transform:none;font-size:12px;text-decoration:none}
+  .attn{display:flex;align-items:center;gap:12px;padding:10px 16px}
+  .attn .dot{flex:none}
+  .attn .btn{margin-left:auto}
+  .list{display:grid}
+  .mrow{display:grid;grid-template-columns:16px 1fr auto auto;gap:12px;align-items:center;padding:9px 16px;border-top:1px solid var(--border)}
+  .mrow:first-child{border-top:0}
+  .mrow .star{color:var(--text-3)}
+  .mrow .star.on{color:var(--warn)}
+  .mrow .t{font-weight:600}
+  .mrow .m{color:var(--text-3);font-size:12px;font-family:var(--mono)}
+  .mrow .s{font-size:12px;color:var(--text-2)}
+  .mrow .s.ok{color:var(--success)}
+  .mrow .s.gen{color:var(--accent)}
+  .mrow .sel{background:var(--accent-soft)}
+  .mrow.sel{background:var(--accent-soft)}
+  .ghead{padding:14px 16px 6px;font-size:12px;font-weight:600;color:var(--text-3);letter-spacing:.04em;text-transform:uppercase;position:sticky;top:0;background:var(--bg)}
+  .snip{grid-column:2/-1;font-size:12px;color:var(--text-2);margin-top:-4px}
+  .snip mark{background:var(--warn-soft);color:inherit;border-radius:2px;padding:0 2px}
+
+  /* ---------- meeting ---------- */
+  .titlefield{font-size:17px;font-weight:600;padding:3px 8px;border-radius:6px;border:1px solid var(--accent);background:var(--surface);min-width:300px;box-shadow:0 0 0 3px var(--accent-soft)}
+  .titlefield.placeholder{color:var(--text-3);font-weight:400}
+  .meta{display:flex;gap:14px;align-items:center;color:var(--text-2);font-size:12.5px;padding:14px 32px 0;flex-wrap:wrap}
+  .meta .pill{border:1px solid var(--border);border-radius:5px;padding:1px 7px;background:var(--surface)}
+  .split{display:grid;grid-template-columns:1fr 360px;height:100%}
+  .editor{padding:24px 40px;overflow:hidden;font-size:15px;line-height:1.6}
+  .editor h2{font-size:15px;margin:14px 0 4px;font-weight:600}
+  .editor ul{margin:0 0 6px;padding-left:20px}
+  .editor .ph{color:var(--text-3)}
+  .editor .cursor{border-left:1.5px solid var(--text);animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+  @media (prefers-reduced-motion:reduce){.editor .cursor{animation:none}}
+  .tpanel{border-left:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}
+  .tpanel .ph2{display:flex;align-items:center;gap:8px;height:40px;padding:0 12px;border-bottom:1px solid var(--border);font-weight:600}
+  .tpanel .ph2 .tbtn{margin-left:auto}
+  .tpanel .lines{padding:12px 14px;display:grid;gap:12px;font-size:13.5px;overflow:hidden}
+  .line{display:grid;grid-template-columns:38px 40px 1fr;gap:8px}
+  .line .ts{font-family:var(--mono);font-size:11px;color:var(--text-3);padding-top:2px}
+  .line .who{font-size:11px;font-weight:600;color:var(--text-2);padding-top:2px}
+  .line .who.them{color:var(--accent)}
+  .line.playing{background:var(--accent-soft);margin:0 -8px;padding:4px 8px;border-radius:6px}
+  .listen{display:flex;gap:8px;align-items:center;color:var(--text-3);font-size:12px}
+  .listen .dot{background:var(--accent)}
+  .recbar{height:56px;border-top:1px solid var(--border);background:var(--surface);display:flex;align-items:center;gap:16px;padding:0 20px}
+  .recbar .time{font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums}
+  .meter{display:flex;align-items:flex-end;gap:2px;height:16px}
+  .meter i{width:3px;background:var(--success);border-radius:1px;display:block}
+  .meter.low i{background:var(--text-3)}
+  .mlabel{font-size:11px;color:var(--text-3);margin-right:8px}
+  .recbar .grow{flex:1}
+  .health{display:inline-flex;align-items:center;gap:8px;height:26px;padding:0 10px;border-radius:6px;background:var(--warn-soft);color:var(--warn);font-weight:500;font-size:12px}
+  .health u{text-decoration:underline;cursor:pointer}
+  .tabbar{display:flex;align-items:center;gap:8px;padding:12px 32px 0}
+  .tabbar .btn{font-size:12.5px}
+  .prov{margin-left:auto;font-size:12px;color:var(--text-3)}
+  .sumbody{padding:8px 40px 0;max-width:720px;font-size:15px;line-height:1.6}
+  .sumbody h2{font-size:15px;margin:14px 0 4px}
+  .sumbody table{border-collapse:collapse;width:100%;font-size:13.5px;margin-top:6px}
+  .sumbody td,.sumbody th{border:1px solid var(--border);padding:5px 8px;text-align:left}
+  .sumbody th{background:var(--bg);font-weight:600}
+  .suggest{display:inline-flex;align-items:center;gap:10px;margin:10px 32px 0;padding:4px 4px 4px 10px;border-radius:6px;background:var(--accent-soft);color:var(--text);font-size:12.5px}
+  .suggest b{color:var(--accent);font-weight:600}
+  .audiobar{position:absolute;left:0;right:0;bottom:0;height:52px;border-top:1px solid var(--border);background:var(--surface);display:flex;align-items:center;gap:14px;padding:0 20px;font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+  .audiobar .play{width:28px;height:28px;border-radius:50%;background:var(--text);color:var(--bg);display:grid;place-items:center;font-family:var(--sys);font-size:11px}
+  .audiobar .track{flex:1;height:4px;border-radius:2px;background:var(--border);position:relative}
+  .audiobar .track i{position:absolute;left:0;top:0;bottom:0;width:15%;background:var(--accent);border-radius:2px}
+  .audiobar .track b{position:absolute;left:15%;top:-4px;width:12px;height:12px;border-radius:50%;background:var(--accent);transform:translateX(-50%)}
+  .audiobar .pin{color:var(--text-3);font-family:var(--sys)}
+  .menu{position:absolute;z-index:5;background:var(--surface);border-radius:10px;box-shadow:var(--pop);padding:6px;min-width:250px;font-size:13px}
+  .menu div{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px}
+  .menu div.hi{background:var(--accent);color:#fff}
+  .menu div kbd{margin-left:auto;font-family:var(--sys)}
+  .menu div.hi kbd{color:#fff;border-color:rgb(255 255 255/.4);background:transparent}
+  .menu hr{border:0;border-top:1px solid var(--border);margin:6px 4px}
+  .menu div.dim{color:var(--text-3)}
+  .menu div.dim small{margin-left:auto;font-size:11px}
+  .scrim{position:absolute;inset:0;background:rgb(0 0 0/.18);z-index:4}
+  .sheet{position:absolute;z-index:6;left:50%;top:0;transform:translateX(-50%);width:560px;background:var(--surface);border-radius:0 0 14px 14px;box-shadow:var(--pop);padding:22px 26px 20px;font-size:13px}
+  .sheet h3{margin:0 0 16px;font-size:15px}
+  .sheet .grp{display:grid;grid-template-columns:110px 1fr;gap:10px 16px;align-items:start;margin-bottom:16px}
+  .sheet .grp .k{color:var(--text-2);padding-top:2px}
+  .opts{display:flex;flex-wrap:wrap;gap:8px 16px}
+  .opt{display:inline-flex;align-items:center;gap:6px}
+  .opt i{width:14px;height:14px;border:1.5px solid var(--text-3);border-radius:3px;display:inline-block}
+  .opt.on i{background:var(--accent);border-color:var(--accent)}
+  .opt.r i{border-radius:50%}
+  .opt.r.on i{background:var(--surface);border-width:4.5px}
+  .opt.off{color:var(--text-3)}
+  .field{height:28px;border:1px solid var(--border);border-radius:6px;background:var(--bg);display:flex;align-items:center;padding:0 10px;color:var(--text-2);font-family:var(--mono);font-size:12px}
+  .sheet .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+
+  /* ---------- settings ---------- */
+  .settings .sb{padding-top:0}
+  .settings .lights{height:48px}
+  .settings .nav a{height:28px}
+  .settings .stitle{height:48px;display:flex;align-items:center;padding:0 22px;font-weight:600;font-size:15px;border-bottom:1px solid var(--border)}
+  .form{padding:18px 26px;display:grid;gap:0;max-width:520px}
+  .srow{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:11px 0;border-bottom:1px solid var(--border)}
+  .srow .l{font-weight:500}
+  .srow .d{color:var(--text-3);font-size:12px;margin-top:2px}
+  .select{height:26px;border:1px solid var(--border);border-radius:6px;background:var(--surface);display:inline-flex;align-items:center;gap:8px;padding:0 8px;font-size:12.5px;min-width:190px;justify-content:space-between}
+  .select::after{content:"⌄";color:var(--text-3)}
+  .sw{width:34px;height:20px;border-radius:10px;background:var(--text-3);position:relative;opacity:.5}
+  .sw.on{background:var(--accent);opacity:1}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+  .sw.on::after{left:16px}
+  .path{font-family:var(--mono);font-size:11.5px;color:var(--text-2)}
+
+  /* ---------- palette ---------- */
+  .palette{position:absolute;z-index:6;left:50%;top:96px;transform:translateX(-50%);width:620px;background:var(--surface);border-radius:12px;box-shadow:var(--pop);font-size:13px;overflow:hidden}
+  .palette .in{height:46px;display:flex;align-items:center;padding:0 16px;font-size:15px;border-bottom:1px solid var(--border);gap:10px}
+  .palette .in .q{color:var(--text)}
+  .palette .in .cursor{border-left:1.5px solid var(--text);height:18px}
+  .palette h6{margin:0;padding:10px 16px 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+  .palette .r{display:grid;grid-template-columns:1fr auto;gap:12px;padding:7px 16px;align-items:center}
+  .palette .r.hi{background:var(--accent-soft)}
+  .palette .r small{color:var(--text-3);font-family:var(--mono);font-size:11px}
+  .palette .r .sn{grid-column:1/-1;color:var(--text-2);font-size:12px}
+  .palette .r .sn mark{background:var(--warn-soft);color:inherit;border-radius:2px}
+  .palette .foot{display:flex;gap:16px;padding:8px 16px;border-top:1px solid var(--border);color:var(--text-3);font-size:11.5px}
+
+  .tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:16px}
+  .tok{border-radius:8px;overflow:hidden;border:1px solid var(--page-2);background:var(--surface);font-family:var(--mono);font-size:11px}
+  .tok i{display:block;height:44px}
+  .tok div{padding:8px 10px;color:var(--ink-2)}
+  .tok b{display:block;color:var(--ink);font-weight:500}
+</style>
+
+<div class="page">
+  <header class="intro">
+    <div>
+      <h1>MeetOdds redesign wireframes</h1>
+      <p>Seven screens from the UX redesign spec, drawn with the spec's own tokens so light and dark render from the same definitions. Open <code>docs/design/UX_REDESIGN_SPEC.md</code> for the rules behind each screen; the section reference sits beside every board.</p>
+    </div>
+    <div class="legend">
+      <span><b>Window</b> 1100 × 700, sidebar 260, toolbar 52</span>
+      <span><b>Type</b> system stack, 13 UI / 15 editor</span>
+      <span><b>Accent</b> #3B6EF6 · <b>Record</b> #E5484D only</span>
+      <span><b>Theme</b> follows the viewer; toggle your OS to compare</span>
+    </div>
+  </header>
+
+  <ul class="toc">
+    <li><a href="#home">Home</a></li>
+    <li><a href="#library">Library</a></li>
+    <li><a href="#live">Live meeting</a></li>
+    <li><a href="#detail">Meeting detail + Share</a></li>
+    <li><a href="#export">Export sheet</a></li>
+    <li><a href="#settings">Settings window</a></li>
+    <li><a href="#palette">Command palette</a></li>
+    <li><a href="#tokens">Tokens</a></li>
+  </ul>
+
+  <!-- ================= HOME ================= -->
+  <section class="board" id="home">
+    <div class="board-head"><h2>Home</h2><span class="ref">spec §6.2 · route /</span></div>
+    <div class="frame">
+      <div class="win">
+        <aside class="sb">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div class="search">⌕ Search or run a command <kbd>⌘K</kbd></div>
+          <nav class="nav">
+            <a class="on"><span class="ico"></span>Home<kbd>⌘1</kbd></a>
+            <a><span class="ico"></span>Meetings<kbd>⌘2</kbd></a>
+            <a><span class="ico"></span>Starred<kbd>⌘3</kbd></a>
+          </nav>
+          <h6>Recent</h6>
+          <nav class="nav recent">
+            <a>Sprint planning<small>Today · 10:58</small></a>
+            <a>Client call – Acme renewal<small>Today · 9:00</small></a>
+            <a>Design crit: onboarding<small>Yesterday</small></a>
+            <a>1:1 with Priya<small>Mon</small></a>
+            <a>Hiring sync<small>Mon</small></a>
+          </nav>
+          <div class="more">Show all →</div>
+          <div class="foot">
+            <span class="btn record">● New meeting <kbd style="border:0;background:transparent;color:#fff;opacity:.8">⌘N</kbd></span>
+            <div class="status"><span class="gear">⚙ Settings</span><span class="dot ok"></span>Ready</div>
+          </div>
+        </aside>
+        <div class="main">
+          <div class="tb">
+            <div class="lead"><span class="tbtn split"><i></i></span><span class="tbtn">‹</span><span class="tbtn">›</span></div>
+            <div class="center"><span class="title">Home</span></div>
+            <div class="trail"></div>
+          </div>
+          <div class="body">
+            <div class="col">
+              <div class="greet"><div><h1>Good morning</h1><small>Thursday, 3 September 2026</small></div><span class="btn record">● New meeting</span></div>
+              <div class="card ready">
+                <div class="row"><span class="dot ok"></span><span class="k">Microphone</span><span class="v">MacBook Pro Microphone</span><span class="chip">Change</span></div>
+                <div class="row"><span class="dot warn"></span><span class="k">System audio</span><span class="v">Needs screen-recording permission<small>Zoom and Meet audio will not be captured</small></span><span class="chip warn">Fix</span></div>
+                <div class="row"><span class="dot ok"></span><span class="k">Transcription</span><span class="v">Parakeet v3<small>on-device · English</small></span><span class="chip">Change</span></div>
+                <div class="row"><span class="dot ok"></span><span class="k">Summary</span><span class="v">Ollama · llama3.1:8b<small>local</small></span><span class="chip">Change</span></div>
+              </div>
+              <h3 class="sec">Needs attention</h3>
+              <div class="card">
+                <div class="attn"><span class="dot warn"></span><span><b>Client call – Acme renewal</b> has no summary yet</span><span class="btn sm">Generate</span></div>
+                <div class="attn" style="border-top:1px solid var(--border)"><span class="dot warn"></span><span>Unsaved transcript recovered from Tuesday, 14:02 (18 min)</span><span class="btn sm">Recover</span><span class="btn sm ghost">Discard</span></div>
+              </div>
+              <h3 class="sec">Recent meetings <a href="#library">See all meetings →</a></h3>
+              <div class="card list">
+                <div class="mrow"><span class="star on">★</span><span><span class="t">Sprint planning</span></span><span class="s ok">✓ Summarised</span><span class="m">10:58 · 24 min</span></div>
+                <div class="mrow"><span class="star">☆</span><span><span class="t">Client call – Acme renewal</span></span><span class="s">○ No summary</span><span class="m">09:00 · 41 min</span></div>
+                <div class="mrow"><span class="star">☆</span><span><span class="t">Design crit: onboarding</span></span><span class="s ok">✓ Summarised</span><span class="m">Yesterday · 32 min</span></div>
+                <div class="mrow"><span class="star">☆</span><span><span class="t">1:1 with Priya</span></span><span class="s ok">✓ Summarised</span><span class="m">Mon · 28 min</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="caption">
+      <li><b>Readiness card</b> replaces the old Model / Devices / Language toolbar buttons and the permission warning. Every row deep-links into the matching Settings section.</li>
+      <li><b>Needs attention</b> absorbs the transcript-recovery auto-dialog and “no summary” meetings. It disappears when empty.</li>
+      <li><b>Sidebar</b> is the only chrome. Recent shows the last eight; full browsing is the Library. The status dot mirrors engine health.</li>
+      <li><b>Red</b> appears only on the New meeting button and recording state, nowhere else on the page.</li>
+    </ul>
+  </section>
+
+  <!-- ================= LIBRARY ================= -->
+  <section class="board" id="library">
+    <div class="board-head"><h2>Library</h2><span class="ref">spec §6.3 · route /meetings</span></div>
+    <div class="frame">
+      <div class="win">
+        <aside class="sb">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div class="search">⌕ Search or run a command <kbd>⌘K</kbd></div>
+          <nav class="nav">
+            <a><span class="ico"></span>Home<kbd>⌘1</kbd></a>
+            <a class="on"><span class="ico"></span>Meetings<kbd>⌘2</kbd></a>
+            <a><span class="ico"></span>Starred<kbd>⌘3</kbd></a>
+          </nav>
+          <h6>Recent</h6>
+          <nav class="nav recent">
+            <a>Sprint planning<small>Today · 10:58</small></a>
+            <a>Client call – Acme renewal<small>Today · 9:00</small></a>
+            <a>Design crit: onboarding<small>Yesterday</small></a>
+          </nav>
+          <div class="foot">
+            <span class="btn record">● New meeting</span>
+            <div class="status"><span class="gear">⚙ Settings</span><span class="dot ok"></span>Ready</div>
+          </div>
+        </aside>
+        <div class="main">
+          <div class="tb">
+            <div class="lead"><span class="tbtn split"><i></i></span><span class="tbtn">‹</span><span class="tbtn">›</span></div>
+            <div class="center"><span class="title">Meetings</span></div>
+            <div class="trail"><span class="field" style="width:200px">⌕ acme</span><span class="btn sm">Newest ⌄</span><span class="btn sm">Select</span></div>
+          </div>
+          <div class="body" style="overflow:hidden">
+            <div class="list">
+              <div class="ghead">Today</div>
+              <div class="mrow"><span class="star on">★</span><span><span class="t">Sprint planning</span></span><span class="s ok">✓ Summarised · Me + 2</span><span class="m">10:58 · 24 min</span></div>
+              <div class="mrow sel"><span class="star">☆</span><span><span class="t">Client call – Acme renewal</span></span><span class="s">○ No summary · Me + 1</span><span class="m">09:00 · 41 min</span><span class="snip">…they want the <mark>Acme</mark> renewal signed before the offsite, pending the SSO fix…</span></div>
+              <div class="ghead">Yesterday</div>
+              <div class="mrow"><span class="star">☆</span><span><span class="t">Design crit: onboarding</span></span><span class="s ok">✓ Summarised</span><span class="m">15:30 · 32 min</span></div>
+              <div class="mrow"><span class="star">☆</span><span><span class="t">Acme security questionnaire walkthrough</span></span><span class="s gen">⟳ Generating…</span><span class="m">11:00 · 55 min</span></div>
+              <div class="ghead">This week</div>
+              <div class="mrow"><span class="star">☆</span><span><span class="t">1:1 with Priya</span></span><span class="s ok">✓ Summarised</span><span class="m">Mon · 28 min</span></div>
+              <div class="mrow"><span class="star">☆</span><span><span class="t">Hiring sync</span></span><span class="s ok">✓ Summarised · Me + 3</span><span class="m">Mon · 19 min</span></div>
+              <div class="ghead">August 2026</div>
+              <div class="mrow"><span class="star">☆</span><span><span class="t">Acme kickoff</span></span><span class="s ok">✓ Summarised · Me + 4</span><span class="m">28 Aug · 47 min</span></div>
+              <div class="mrow"><span class="star">☆</span><span><span class="t">Roadmap review Q4</span></span><span class="s ok">✓ Summarised</span><span class="m">26 Aug · 63 min</span></div>
+              <div class="mrow"><span class="star">☆</span><span><span class="t">Imported: board-call.m4a</span></span><span class="s ok">✓ Summarised</span><span class="m">21 Aug · 38 min</span></div>
+            </div>
+            <div class="menu" style="right:32px;top:120px">
+              <div>Open<kbd>↩</kbd></div>
+              <div>Rename<kbd>⌘⇧R</kbd></div>
+              <div>Star<kbd>⌘D</kbd></div>
+              <div>Move to folder…</div>
+              <hr>
+              <div>Share…</div>
+              <div>Export…<kbd>⌘E</kbd></div>
+              <div>Reveal recording in Finder</div>
+              <hr>
+              <div style="color:var(--danger)">Delete<kbd>⌘⌫</kbd></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="caption">
+      <li><b>Date groups</b> with sticky headers: Today, Yesterday, This week, then by month. Duration and summary status on every row.</li>
+      <li><b>Find</b> (⌘F) filters in place and shows a transcript snippet under matching rows, as the old sidebar search did.</li>
+      <li><b>Right-click menu</b> shown for the selected row. Rename is inline; Delete is undoable from a toast for 8 seconds.</li>
+      <li><b>Select</b> enters multi-select; a bottom action bar offers bulk Markdown export, move and delete.</li>
+    </ul>
+  </section>
+
+  <!-- ================= LIVE ================= -->
+  <section class="board" id="live">
+    <div class="board-head"><h2>Live meeting</h2><span class="ref">spec §6.4 · route /meeting?id=… while recording</span></div>
+    <div class="frame">
+      <div class="win">
+        <aside class="sb">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div class="search">⌕ Search or run a command <kbd>⌘K</kbd></div>
+          <div class="rec-chip"><span class="dot rec"></span>Recording<span>12:04</span></div>
+          <nav class="nav">
+            <a><span class="ico"></span>Home<kbd>⌘1</kbd></a>
+            <a><span class="ico"></span>Meetings<kbd>⌘2</kbd></a>
+            <a><span class="ico"></span>Starred<kbd>⌘3</kbd></a>
+          </nav>
+          <h6>Recent</h6>
+          <nav class="nav recent">
+            <a class="on">Meeting · Thu 3 Sep, 14:10<small>Recording…</small></a>
+            <a>Sprint planning<small>Today · 10:58</small></a>
+            <a>Client call – Acme renewal<small>Today · 9:00</small></a>
+          </nav>
+          <div class="foot">
+            <span class="btn" style="color:var(--text-3)">● New meeting</span>
+            <div class="status"><span class="gear">⚙ Settings</span><span class="dot ok"></span>Ready</div>
+          </div>
+        </aside>
+        <div class="main">
+          <div class="tb">
+            <div class="lead"><span class="tbtn split"><i></i></span><span class="tbtn">‹</span><span class="tbtn">›</span></div>
+            <div class="center"><span class="titlefield placeholder">Name this meeting…</span><span class="seg"><span class="on">Notes</span><span>Transcript</span></span></div>
+            <div class="trail"><span class="btn sm">Share ⌄</span><span class="tbtn">⋯</span></div>
+          </div>
+          <div class="body" style="display:flex;flex-direction:column">
+            <div class="split" style="flex:1;min-height:0">
+              <div class="editor">
+                <h2>Vendor eval – Acme SSO</h2>
+                <ul>
+                  <li>SAML works, SCIM provisioning still manual</li>
+                  <li>They asked for a 30-day pilot before renewal</li>
+                  <li>Risk: data residency for EU tenants<span class="cursor">&nbsp;</span></li>
+                </ul>
+                <p class="ph">Type <b>/</b> to pick a template for the summary</p>
+              </div>
+              <div class="tpanel">
+                <div class="ph2">Transcript<span class="tbtn">⋯</span><span class="tbtn">✕</span></div>
+                <div class="lines">
+                  <div class="line"><span class="ts">11:41</span><span class="who">Me</span><span>So the blocker on our side is SCIM. If provisioning stays manual we can't roll this to all EU tenants.</span></div>
+                  <div class="line"><span class="ts">11:52</span><span class="who them">Them</span><span>Understood. We can commit SCIM to the November release. Would a thirty-day pilot on the current build work for you in the meantime?</span></div>
+                  <div class="line"><span class="ts">12:01</span><span class="who">Me</span><span>Probably, as long as the pilot data stays in Frankfurt.</span></div>
+                  <div class="listen"><span class="dot"></span>Listening…</div>
+                </div>
+              </div>
+            </div>
+            <div class="recbar">
+              <span class="dot rec"></span><span class="time">12:04</span>
+              <span class="mlabel">mic</span><span class="meter"><i style="height:6px"></i><i style="height:10px"></i><i style="height:15px"></i><i style="height:9px"></i><i style="height:5px"></i></span>
+              <span class="mlabel" style="margin-left:12px">system</span><span class="meter low"><i style="height:3px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:3px"></i></span>
+              <span class="grow"></span>
+              <span class="health">⚠ No system audio for 30 s · <u>Check devices</u></span>
+              <span class="btn">⏸ Pause</span><span class="btn record">■ Stop</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="caption">
+      <li><b>Notes first.</b> The editor has focus; the transcript is a docked right panel (⌘T) with Me/Them labels. Live translation lives under the panel's ⋯ menu.</li>
+      <li><b>Title field</b> in the toolbar defaults to the date and time, is focused for five seconds after start, and can be renamed later with ⌘⇧R.</li>
+      <li><b>Recorder bar</b> is docked, not floating: real mic and system level meters, elapsed time, Pause and Stop.</li>
+      <li><b>Capture health</b> badge answers Granola's silent-failure complaint. Shown here: system audio has been silent for 30 seconds.</li>
+    </ul>
+  </section>
+
+  <!-- ================= DETAIL ================= -->
+  <section class="board" id="detail">
+    <div class="board-head"><h2>Meeting detail, Summary tab, Share menu open</h2><span class="ref">spec §6.5–6.6 · route /meeting?id=…</span></div>
+    <div class="frame">
+      <div class="win">
+        <aside class="sb">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div class="search">⌕ Search or run a command <kbd>⌘K</kbd></div>
+          <nav class="nav">
+            <a><span class="ico"></span>Home<kbd>⌘1</kbd></a>
+            <a><span class="ico"></span>Meetings<kbd>⌘2</kbd></a>
+            <a><span class="ico"></span>Starred<kbd>⌘3</kbd></a>
+          </nav>
+          <h6>Recent</h6>
+          <nav class="nav recent">
+            <a class="on">Sprint planning<small>Today · 10:58</small></a>
+            <a>Client call – Acme renewal<small>Today · 9:00</small></a>
+            <a>Design crit: onboarding<small>Yesterday</small></a>
+            <a>1:1 with Priya<small>Mon</small></a>
+          </nav>
+          <div class="foot">
+            <span class="btn record">● New meeting</span>
+            <div class="status"><span class="gear">⚙ Settings</span><span class="dot ok"></span>Ready</div>
+          </div>
+        </aside>
+        <div class="main">
+          <div class="tb">
+            <div class="lead"><span class="tbtn split"><i></i></span><span class="tbtn">‹</span><span class="tbtn">›</span></div>
+            <div class="center"><span class="title">Sprint planning <span style="color:var(--text-3);font-weight:400;font-size:13px">✎</span></span><span class="seg"><span class="on">Summary</span><span>Notes</span><span>Transcript</span></span></div>
+            <div class="trail"><span class="btn sm primary">Share ⌄</span><span class="tbtn">⋯</span></div>
+          </div>
+          <div class="body">
+            <div class="meta"><span>Thu 3 Sep 2026</span><span>10:58 – 11:22</span><span>24 min</span><span>Me + 2</span><span style="color:var(--warn)">★</span><span class="pill">Product</span></div>
+            <div class="suggest">Suggested title: <b>“Sprint 42 planning – Q4 scope”</b><span class="btn sm">Use</span><span class="btn sm ghost">Dismiss</span></div>
+            <div class="tabbar">
+              <span class="btn sm">Standard meeting ⌄</span>
+              <span class="btn sm">Regenerate</span>
+              <span class="btn sm ghost">Add context</span>
+              <span class="btn sm ghost">English ⌄</span>
+              <span class="prov">Generated with Ollama · llama3.1:8b · 12 s ago</span>
+            </div>
+            <div class="sumbody">
+              <h2>Summary</h2>
+              <p style="margin:0">The team scoped sprint 42 around the Acme renewal blockers: SCIM provisioning, EU data residency, and the onboarding redesign. Two items moved to sprint 43 to protect the SSO fix.</p>
+              <h2>Decisions</h2>
+              <ul style="margin:0;padding-left:20px"><li>Ship SCIM provisioning before the 30-day Acme pilot starts.</li><li>Onboarding redesign phase 2 slips one sprint.</li></ul>
+              <h2>Action items</h2>
+              <table><tr><th>Owner</th><th>Task</th><th>Due</th><th>Source</th></tr>
+                <tr><td>Priya</td><td>SCIM provisioning spike</td><td>9 Sep</td><td><span style="color:var(--accent)">04:12</span></td></tr>
+                <tr><td>Josh</td><td>Confirm Frankfurt residency with Acme legal</td><td>5 Sep</td><td><span style="color:var(--accent)">11:48</span></td></tr></table>
+            </div>
+            <div class="menu" style="right:48px;top:8px">
+              <div class="hi">Copy as Markdown<kbd>⌘⇧C</kbd></div>
+              <div>Copy summary</div>
+              <div>Copy transcript</div>
+              <hr>
+              <div>Export…<kbd>⌘E</kbd></div>
+              <div>Reveal recording in Finder</div>
+              <hr>
+              <div>Email…</div>
+              <div class="dim">Send to Obsidian<small>Coming soon</small></div>
+              <div class="dim">Send to Notion<small>Coming soon</small></div>
+              <div class="dim">Send to Slack<small>Coming soon</small></div>
+            </div>
+            <div class="audiobar"><span class="play">▶</span><span>03:41 / 24:10</span><span class="track"><i></i><b></b></span><span>1× ⌄</span><span class="pin">Pinned · ⤓</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="caption">
+      <li><b>Share</b> is the one primary button on every meeting, live or finished. Copy as Markdown is first; integrations sit below the rule, disabled until Phase 3.</li>
+      <li><b>Template chip</b> on the Summary tab regenerates with another template (Granola's Enhanced ▾ pattern). The provenance line always names the provider and model.</li>
+      <li><b>Title suggestion</b> appears once after the first summary if the title is still the auto default.</li>
+      <li><b>Audio bar</b> is pinned across tabs here; timestamps in the action-items table seek the recording. This is the feature Granola cannot offer.</li>
+    </ul>
+  </section>
+
+  <!-- ================= EXPORT ================= -->
+  <section class="board" id="export">
+    <div class="board-head"><h2>Export sheet</h2><span class="ref">spec §6.6 · ⌘E from any meeting</span></div>
+    <div class="frame">
+      <div class="win no-sb" style="height:440px">
+        <div class="main">
+          <div class="tb">
+            <div class="lead"><div class="lights" style="padding-left:0"><i></i><i></i><i></i></div><span class="tbtn split"><i></i></span></div>
+            <div class="center"><span class="title">Sprint planning</span><span class="seg"><span class="on">Summary</span><span>Notes</span><span>Transcript</span></span></div>
+            <div class="trail"><span class="btn sm primary">Share ⌄</span><span class="tbtn">⋯</span></div>
+          </div>
+          <div class="body">
+            <div class="scrim"></div>
+            <div class="sheet">
+              <h3>Export “Sprint planning”</h3>
+              <div class="grp"><span class="k">Include</span><div class="opts"><span class="opt on"><i></i>Summary</span><span class="opt on"><i></i>Notes</span><span class="opt on"><i></i>Transcript</span><span class="opt"><i></i>Audio file (24 MB)</span></div></div>
+              <div class="grp"><span class="k">Format</span><div class="opts"><span class="opt r on"><i></i>Markdown</span><span class="opt r"><i></i>PDF</span><span class="opt r"><i></i>Word</span><span class="opt r"><i></i>Plain text</span><span class="opt r off"><i></i>Subtitles (.srt)</span><span class="opt r"><i></i>JSON</span></div></div>
+              <div class="grp"><span class="k">Save to</span><div style="display:grid;gap:8px"><div style="display:flex;gap:8px"><span class="field" style="flex:1">~/Downloads</span><span class="btn sm">Choose folder…</span></div><span class="path">2026-09-03 Sprint planning.md</span></div></div>
+              <div class="actions"><span class="btn">Cancel</span><span class="btn primary">Export</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="caption">
+      <li><b>Content and format are separate choices.</b> Subtitles disables itself unless Transcript is the only content selected.</li>
+      <li><b>Filename preview</b> uses the date-first rule so exports sort in Finder and Obsidian.</li>
+      <li><b>Destination is remembered.</b> Success toast offers Show in Finder.</li>
+    </ul>
+  </section>
+
+  <!-- ================= SETTINGS ================= -->
+  <section class="board" id="settings">
+    <div class="board-head"><h2>Settings window, Recording section</h2><span class="ref">spec §6.8 · ⌘, · separate window</span></div>
+    <div class="frame">
+      <div class="win settings">
+        <aside class="sb">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <nav class="nav">
+            <a><span class="ico"></span>General</a>
+            <a class="on"><span class="ico"></span>Recording</a>
+            <a><span class="ico"></span>Transcription</a>
+            <a><span class="ico"></span>AI Summary</a>
+            <a><span class="ico"></span>Templates</a>
+            <a><span class="ico"></span>Live translation</a>
+            <a><span class="ico"></span>Privacy &amp; data</a>
+            <a><span class="ico"></span>Labs</a>
+            <a><span class="ico"></span>About</a>
+          </nav>
+        </aside>
+        <div class="main">
+          <div class="stitle">Recording</div>
+          <div class="body" style="overflow:hidden">
+            <div class="form">
+              <div class="srow"><div><div class="l">Microphone</div><div class="d">Level meter shows live input</div></div><div style="display:flex;gap:8px;align-items:center"><span class="meter"><i style="height:5px"></i><i style="height:9px"></i><i style="height:14px"></i><i style="height:8px"></i></span><span class="select">MacBook Pro Microphone</span></div></div>
+              <div class="srow"><div><div class="l">System audio</div><div class="d">What other people say in Zoom, Meet, Teams</div></div><span class="select">Default system audio</span></div>
+              <div class="srow"><div><div class="l">Audio capture method</div><div class="d">ScreenCaptureKit is recommended on macOS 13+</div></div><span class="select">ScreenCaptureKit</span></div>
+              <div class="srow"><div><div class="l">Save audio recordings</div><div class="d">Keeps a file you can play back and re-transcribe</div></div><span class="sw on"></span></div>
+              <div class="srow"><div><div class="l">Recording folder</div><div class="path">~/Movies/meetodds-recordings</div></div><div style="display:flex;gap:6px"><span class="btn sm">Change…</span><span class="btn sm">Open</span></div></div>
+              <div class="srow"><div><div class="l">Warn when no audio is detected</div><div class="d">Shows a badge in the recorder after 30 seconds of silence</div></div><span class="sw on"></span></div>
+              <div class="srow" style="border-bottom:0"><div><div class="l">Notify when recording starts and stops</div></div><span class="sw on"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="caption">
+      <li><b>One window, nine sections.</b> Every setting from the old page, the six Home modals and the dead tab component has exactly one row here (spec §15 lists the moves).</li>
+      <li><b>Flat rows</b>: label, one-line description, control. No cards inside cards, no tabs inside tabs. Changes apply immediately.</li>
+      <li><b>Deep links</b> from readiness chips and the menu bar open the window on the right section.</li>
+    </ul>
+  </section>
+
+  <!-- ================= PALETTE ================= -->
+  <section class="board" id="palette">
+    <div class="board-head"><h2>Command palette</h2><span class="ref">spec §6.7 · ⌘K from anywhere</span></div>
+    <div class="frame">
+      <div class="win no-sb" style="height:420px">
+        <div class="main">
+          <div class="tb">
+            <div class="lead"><div class="lights" style="padding-left:0"><i></i><i></i><i></i></div><span class="tbtn split"><i></i></span></div>
+            <div class="center"><span class="title">Meetings</span></div>
+            <div class="trail"></div>
+          </div>
+          <div class="body">
+            <div class="scrim"></div>
+            <div class="palette">
+              <div class="in">⌕ <span class="q">frankfurt</span><span class="cursor"></span></div>
+              <h6>Meetings</h6>
+              <div class="r hi"><span><b>Client call – Acme renewal</b></span><small>Today · 41 min</small></div>
+              <h6>Transcript matches</h6>
+              <div class="r"><span>Sprint planning</span><small>11:48</small><span class="sn">…confirm the pilot data stays in <mark>Frankfurt</mark> before legal signs…</span></div>
+              <div class="r"><span>Acme kickoff</span><small>28 Aug · 22:05</small><span class="sn">…their EU tenants are hosted in <mark>Frankfurt</mark> today…</span></div>
+              <div class="foot"><span>↑↓ navigate</span><span>↩ open</span><span>› for commands</span><span>esc close</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="caption">
+      <li><b>One palette, two modes.</b> Text searches titles, notes, summaries and transcripts; a leading › lists commands with their shortcuts.</li>
+      <li><b>Transcript hits</b> open the meeting on the Transcript tab, scrolled to the timestamp.</li>
+    </ul>
+  </section>
+
+  <!-- ================= TOKENS ================= -->
+  <section class="board" id="tokens">
+    <div class="board-head"><h2>Tokens used above</h2><span class="ref">spec §5.4 · light values shown in light theme, dark in dark</span></div>
+    <div class="tokens">
+      <div class="tok"><i style="background:var(--bg);border-bottom:1px solid var(--page-2)"></i><div><b>--bg</b>window ground</div></div>
+      <div class="tok"><i style="background:var(--surface);border-bottom:1px solid var(--page-2)"></i><div><b>--surface</b>cards, editor</div></div>
+      <div class="tok"><i style="background:var(--border)"></i><div><b>--border</b>hairlines</div></div>
+      <div class="tok"><i style="background:var(--text)"></i><div><b>--text</b>primary</div></div>
+      <div class="tok"><i style="background:var(--text-2)"></i><div><b>--text-2</b>secondary</div></div>
+      <div class="tok"><i style="background:var(--accent)"></i><div><b>--accent</b>selection, primary</div></div>
+      <div class="tok"><i style="background:var(--accent-soft)"></i><div><b>--accent-soft</b>selected rows</div></div>
+      <div class="tok"><i style="background:var(--record)"></i><div><b>--record</b>recording only</div></div>
+      <div class="tok"><i style="background:var(--success)"></i><div><b>--success</b>ready, saved</div></div>
+      <div class="tok"><i style="background:var(--warn)"></i><div><b>--warn</b>capture health</div></div>
+    </div>
+  </section>
+</div>
