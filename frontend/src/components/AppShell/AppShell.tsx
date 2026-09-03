@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import MainContent from '@/components/MainContent';
+import CommandPalette from '@/components/CommandPalette';
 import Toolbar from './Toolbar';
 
 const SIDEBAR_VISIBLE_KEY = 'meetodds.shell.sidebar.visible';
@@ -142,6 +143,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </section>
+
+      <CommandPalette onToggleSidebar={toggleSidebar} />
     </div>
   );
 }

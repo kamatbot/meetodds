@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Home,
   Library,
-  LoaderCircle,
   Mic,
   MoreHorizontal,
   Pencil,
@@ -15,7 +14,6 @@ import {
   Star,
   Trash2,
   Upload,
-  X,
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
@@ -56,18 +54,6 @@ function formatDuration(seconds: number | null): string {
   return `${minutes}:${String(remaining).padStart(2, '0')}`;
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tagName = target.tagName.toLowerCase();
-  return (
-    target.isContentEditable ||
-    tagName === 'input' ||
-    tagName === 'textarea' ||
-    tagName === 'select' ||
-    Boolean(target.closest('[contenteditable="true"]'))
-  );
-}
-
 const navButtonClass =
   'flex h-[30px] w-full items-center gap-2.5 rounded-control px-2.5 text-left text-ui text-text transition-colors duration-150 hover:bg-surface';
 
@@ -77,52 +63,23 @@ const iconButtonClass =
 export default function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const {
     currentMeeting,
     setCurrentMeeting,
     handleRecordingToggle,
-    searchTranscripts,
-    searchResults,
-    isSearching,
     meetings,
     setMeetings,
     refetchMeetings,
   } = useSidebar();
-  const searchTranscriptsRef = useRef(searchTranscripts);
   const { isRecording, recordingDuration } = useRecordingState();
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
 
-  const [searchQuery, setSearchQuery] = useState('');
   const [showAllMeetings, setShowAllMeetings] = useState(false);
   const [renameMeeting, setRenameMeeting] = useState<CurrentMeeting | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteMeeting, setDeleteMeeting] = useState<CurrentMeeting | null>(null);
   const [isMutating, setIsMutating] = useState(false);
-
-  useEffect(() => {
-    searchTranscriptsRef.current = searchTranscripts;
-  }, [searchTranscripts]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void searchTranscriptsRef.current(searchQuery);
-    }, searchQuery.trim() ? 120 : 0);
-    return () => window.clearTimeout(timer);
-  }, [searchQuery]);
-
-  useEffect(() => {
-    const handleSearchShortcut = (event: KeyboardEvent) => {
-      if (event.metaKey && event.key.toLowerCase() === 'k' && !isEditableTarget(event.target)) {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      }
-    };
-    window.addEventListener('keydown', handleSearchShortcut);
-    return () => window.removeEventListener('keydown', handleSearchShortcut);
-  }, []);
 
   useEffect(() => {
     const appWindow = window as Window & { openSettings?: () => void };
@@ -141,26 +98,6 @@ export default function Sidebar() {
     () => (showAllMeetings ? meetings : meetings.slice(0, 8)),
     [meetings, showAllMeetings],
   );
-
-  const searchMatches = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return [];
-
-    const results = new Map<string, CurrentMeeting & { matchContext?: string }>();
-    searchResults.forEach((result) => {
-      results.set(result.id, {
-        id: result.id,
-        title: result.title,
-        matchContext: result.matchContext,
-      });
-    });
-    meetings.forEach((meeting) => {
-      if (meeting.title.toLowerCase().includes(query) && !results.has(meeting.id)) {
-        results.set(meeting.id, meeting);
-      }
-    });
-    return Array.from(results.values());
-  }, [meetings, searchQuery, searchResults]);
 
   const startRename = (meeting: CurrentMeeting) => {
     setRenameMeeting(meeting);
@@ -224,10 +161,7 @@ export default function Sidebar() {
     }
   };
 
-  const renderMeetingRow = (
-    meeting: CurrentMeeting & { matchContext?: string },
-    showSnippet = false,
-  ) => {
+  const renderMeetingRow = (meeting: CurrentMeeting) => {
     const isActive = currentMeeting?.id === meeting.id;
     return (
       <div
@@ -244,11 +178,6 @@ export default function Sidebar() {
           <span className={`block truncate text-ui ${isActive ? 'font-semibold text-accent' : 'text-text'}`}>
             {displayMeetingTitle(meeting.title)}
           </span>
-          {showSnippet && meeting.matchContext && (
-            <span className="mt-0.5 block line-clamp-2 text-caption text-3">
-              {meeting.matchContext}
-            </span>
-          )}
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -289,35 +218,16 @@ export default function Sidebar() {
       <div data-tauri-drag-region className="h-[52px] shrink-0" aria-hidden="true" />
 
       <div className="px-3 pb-2">
-        <div className="relative">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-3"
-            strokeWidth={1.75}
-          />
-          <input
-            ref={searchInputRef}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search meetings"
-            aria-label="Search meetings"
-            className="h-7 w-full rounded-control border border-border bg-surface pl-8 pr-12 text-ui text-text placeholder:text-3 focus:outline-none"
-          />
-          {searchQuery ? (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-control text-3 hover:text-text"
-              aria-label="Clear search"
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={1.75} />
-            </button>
-          ) : (
-            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-bg px-1 text-[10px] leading-4 text-3">
-              ⌘K
-            </kbd>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new Event('meetodds:open-command-palette'))}
+          className="flex h-7 w-full items-center gap-2 rounded-control border border-border bg-surface px-2.5 text-left text-ui text-3 transition-colors duration-150 hover:text-text focus:outline-none"
+          aria-label="Search meetings or run a command"
+        >
+          <Search className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">Search or run a command</span>
+          <kbd className="rounded border border-border bg-bg px-1 text-[10px] leading-4 text-3">⌘K</kbd>
+        </button>
       </div>
 
       {isRecording && (
@@ -363,41 +273,26 @@ export default function Sidebar() {
       </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 custom-scrollbar">
-        {searchQuery.trim() ? (
-          <section aria-label="Search results">
-            <div className="flex h-8 items-center px-2.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-3">
-              Search results
-              {isSearching && <LoaderCircle className="ml-auto h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />}
-            </div>
-            <div className="grid gap-0.5">
-              {searchMatches.map((meeting) => renderMeetingRow(meeting, true))}
-              {!isSearching && searchMatches.length === 0 && (
-                <p className="px-2.5 py-4 text-caption text-3">No matching meetings.</p>
-              )}
-            </div>
-          </section>
-        ) : (
-          <section aria-label="Recent meetings">
-            <div className="flex h-8 items-center px-2.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-3">
-              Recent
-            </div>
-            <div className="grid gap-0.5">
-              {recentMeetings.map((meeting) => renderMeetingRow(meeting))}
-              {meetings.length === 0 && (
-                <p className="px-2.5 py-4 text-caption text-3">No saved meetings yet.</p>
-              )}
-            </div>
-            {meetings.length > 8 && (
-              <button
-                type="button"
-                onClick={() => setShowAllMeetings((value) => !value)}
-                className="mt-1 rounded-control px-2.5 py-1 text-caption font-medium text-3 transition-colors duration-150 hover:bg-surface hover:text-text"
-              >
-                {showAllMeetings ? 'Show recent' : `Show all ${meetings.length} →`}
-              </button>
+        <section aria-label="Recent meetings">
+          <div className="flex h-8 items-center px-2.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-3">
+            Recent
+          </div>
+          <div className="grid gap-0.5">
+            {recentMeetings.map((meeting) => renderMeetingRow(meeting))}
+            {meetings.length === 0 && (
+              <p className="px-2.5 py-4 text-caption text-3">No saved meetings yet.</p>
             )}
-          </section>
-        )}
+          </div>
+          {meetings.length > 8 && (
+            <button
+              type="button"
+              onClick={() => setShowAllMeetings((value) => !value)}
+              className="mt-1 rounded-control px-2.5 py-1 text-caption font-medium text-3 transition-colors duration-150 hover:bg-surface hover:text-text"
+            >
+              {showAllMeetings ? 'Show recent' : `Show all ${meetings.length} →`}
+            </button>
+          )}
+        </section>
       </div>
 
       <div className="shrink-0 border-t border-border p-3">
