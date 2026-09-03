@@ -33,6 +33,9 @@ export default function Home() {
   const { openImportDialog } = useImportDialog();
   const recordingState = useRecordingState();
   const { status, isStopping, isProcessing } = recordingState;
+  // A native `recording-started` event can arrive before its frontend listener is
+  // ready. Keep the controls available from the confirmed local start state too.
+  const inAppRecording = recordingState.isRecording || isRecording;
 
   const {
     hasMicrophone,
@@ -156,7 +159,7 @@ export default function Home() {
 
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
   const recordingBusy =
-    recordingState.isRecording ||
+    inAppRecording ||
     status === RecordingStatus.STARTING ||
     status === RecordingStatus.STOPPING ||
     status === RecordingStatus.PROCESSING_TRANSCRIPTS ||
@@ -205,7 +208,7 @@ export default function Home() {
             permissionError={permissionError}
             recoverableMeetings={recoverableMeetings}
             isRecoveryLoading={isLoadingRecovery}
-            isRecording={recordingState.isRecording}
+            isRecording={inAppRecording}
             recordingStatus={status}
             recordingDuration={recordingState.recordingDuration}
             newMeetingDisabled={!hasMicrophone || isRecordingDisabled}
@@ -216,7 +219,7 @@ export default function Home() {
           />
         </div>
 
-        {(recordingState.isRecording || isStopping || isProcessingStop) && (
+        {(inAppRecording || isStopping || isProcessingStop) && (
           <TranscriptDrawer
             isProcessingStop={isProcessingStop}
             isStopping={isStopping}
@@ -225,13 +228,13 @@ export default function Home() {
         )}
       </div>
 
-      {recordingState.isRecording &&
+      {inAppRecording &&
         status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
         status !== RecordingStatus.SAVING && (
           <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center px-6">
             <div className="pointer-events-auto">
               <RecordingControls
-                isRecording={recordingState.isRecording}
+                isRecording={inAppRecording}
                 onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
                 onRecordingStart={handleRecordingStart}
                 onTranscriptReceived={() => {}}
