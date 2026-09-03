@@ -70,7 +70,10 @@ export default function Toolbar({
         {getRouteTitle(pathname)}
       </div>
 
-      <div className="no-drag flex min-w-0 items-center justify-end gap-2 justify-self-stretch">
+      <div
+        data-meetodds-toolbar-trailing
+        className="no-drag flex min-w-0 items-center justify-end gap-2 justify-self-stretch"
+      >
         {trailingAction}
       </div>
     </header>
