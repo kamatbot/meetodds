@@ -66,9 +66,9 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
-// Global language preference storage (default to "auto-translate" for automatic translation to English)
+// Global language preference storage (default to automatic detection in the original language)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
-    std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+    std::sync::LazyLock::new(|| StdMutex::new("auto".to_string()));
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
@@ -642,6 +642,7 @@ pub fn run() {
             live_translation::api_translate_live_text,
             live_translation::api_cancel_live_translation,
             live_translation::api_warm_live_translation,
+            live_translation::api_prepare_live_translation,
             anthropic::anthropic::get_anthropic_models,
             groq::groq::get_groq_models,
             api::api_get_meetings,

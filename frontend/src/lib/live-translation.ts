@@ -1,5 +1,7 @@
 export type TranslationDisplayMode = 'bilingual' | 'translated';
 export type LiveTranslationStatus = 'queued' | 'translating' | 'translated' | 'error';
+export type LiveTranslationSpeed = 'instant' | 'balanced' | 'accurate';
+export type LiveTranslationEngine = 'auto' | 'summary' | 'groq' | 'openai' | 'claude';
 
 export interface LiveTranslationLanguage {
   code: string;
@@ -12,6 +14,12 @@ export interface LiveTranslationSettings {
   sourceLanguage: 'auto';
   targetLanguage: string;
   displayMode: TranslationDisplayMode;
+  speed: LiveTranslationSpeed;
+  engine: LiveTranslationEngine;
+  contextTurns: 0 | 2 | 4;
+  modelOverride: string;
+  glossary: string;
+  contextHint: string;
 }
 
 export interface LiveTranslationEntry {
@@ -24,6 +32,8 @@ export interface LiveTranslationEntry {
   provider?: string;
   model?: string;
   latencyMs?: number;
+  firstWordLatencyMs?: number;
+  fallbackReason?: string;
   cached?: boolean;
 }
 
@@ -35,6 +45,8 @@ export interface LiveTranslationResponse {
   provider: string;
   model: string;
   latencyMs: number;
+  firstWordLatencyMs: number;
+  fallbackReason?: string | null;
   cached: boolean;
 }
 
@@ -77,9 +89,16 @@ export const DEFAULT_LIVE_TRANSLATION_SETTINGS: LiveTranslationSettings = {
   sourceLanguage: 'auto',
   targetLanguage: 'en',
   displayMode: 'bilingual',
+  speed: 'instant',
+  engine: 'auto',
+  contextTurns: 2,
+  modelOverride: '',
+  glossary: '',
+  contextHint: '',
 };
 
-export const LIVE_TRANSLATION_STORAGE_KEY = 'meetodds.liveTranslation.v1';
+export const LIVE_TRANSLATION_STORAGE_KEY = 'meetodds.liveTranslation.v2';
+const LEGACY_STORAGE_KEY = 'meetodds.liveTranslation.v1';
 
 export function getLiveTranslationLanguage(code: string): LiveTranslationLanguage | undefined {
   return LIVE_TRANSLATION_LANGUAGES.find((language) => language.code === code);
@@ -87,23 +106,32 @@ export function getLiveTranslationLanguage(code: string): LiveTranslationLanguag
 
 export function loadLiveTranslationSettings(): LiveTranslationSettings {
   if (typeof window === 'undefined') return DEFAULT_LIVE_TRANSLATION_SETTINGS;
-
   try {
-    const raw = window.localStorage.getItem(LIVE_TRANSLATION_STORAGE_KEY);
+    const raw = window.localStorage.getItem(LIVE_TRANSLATION_STORAGE_KEY)
+      ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return DEFAULT_LIVE_TRANSLATION_SETTINGS;
-
     const parsed = JSON.parse(raw) as Partial<LiveTranslationSettings>;
     const supportedTarget = LIVE_TRANSLATION_LANGUAGES.some(
       (language) => language.code === parsed.targetLanguage
     );
-
+    const speed: LiveTranslationSpeed = ['instant', 'balanced', 'accurate'].includes(parsed.speed ?? '')
+      ? parsed.speed as LiveTranslationSpeed
+      : 'instant';
+    const engine: LiveTranslationEngine = ['auto', 'summary', 'groq', 'openai', 'claude'].includes(parsed.engine ?? '')
+      ? parsed.engine as LiveTranslationEngine
+      : 'auto';
+    const contextTurns: 0 | 2 | 4 = parsed.contextTurns === 0 || parsed.contextTurns === 4 ? parsed.contextTurns : 2;
     return {
       enabled: parsed.enabled === true,
       sourceLanguage: 'auto',
-      targetLanguage: supportedTarget
-        ? parsed.targetLanguage!
-        : DEFAULT_LIVE_TRANSLATION_SETTINGS.targetLanguage,
+      targetLanguage: supportedTarget ? parsed.targetLanguage! : 'en',
       displayMode: parsed.displayMode === 'translated' ? 'translated' : 'bilingual',
+      speed,
+      engine,
+      contextTurns,
+      modelOverride: typeof parsed.modelOverride === 'string' ? parsed.modelOverride : '',
+      glossary: typeof parsed.glossary === 'string' ? parsed.glossary : '',
+      contextHint: typeof parsed.contextHint === 'string' ? parsed.contextHint : '',
     };
   } catch {
     return DEFAULT_LIVE_TRANSLATION_SETTINGS;
@@ -115,9 +143,6 @@ export function saveLiveTranslationSettings(settings: LiveTranslationSettings): 
   window.localStorage.setItem(LIVE_TRANSLATION_STORAGE_KEY, JSON.stringify(settings));
 }
 
-export function liveTranslationSegmentKey(segment: {
-  id: string;
-  sequence_id?: number;
-}): string {
+export function liveTranslationSegmentKey(segment: { id: string; sequence_id?: number }): string {
   return segment.sequence_id === undefined ? segment.id : `sequence-${segment.sequence_id}`;
 }
