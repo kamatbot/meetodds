@@ -16,7 +16,7 @@ import {
 
 const MAX_CONCURRENT_TRANSLATIONS = 2;
 const MAX_QUEUED_TRANSLATIONS = 24;
-const BACKFILL_SEGMENT_LIMIT = 3;
+const BACKFILL_SEGMENT_LIMIT = 12;
 const RESULT_CACHE_LIMIT = 200;
 
 interface TranslationJob {
@@ -200,6 +200,7 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
           if (!isCurrentJob(job)) return;
           const message = error instanceof Error ? error.message : String(error);
           if (/cancelled/i.test(message)) return;
+          latestRevisionRef.current.delete(job.segmentKey);
           setTranslations((previous) => ({
             ...previous,
             [job.segmentKey]: {
@@ -231,8 +232,8 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
   const enqueueJob = useCallback((job: TranslationJob) => {
     if (!isCurrentJob(job)) return;
     queueRef.current = queueRef.current.filter((queued) => queued.segmentKey !== job.segmentKey);
-    if (queueRef.current.length >= MAX_QUEUED_TRANSLATIONS) queueRef.current.pop();
-    queueRef.current.unshift(job);
+    if (queueRef.current.length >= MAX_QUEUED_TRANSLATIONS) queueRef.current.shift();
+    queueRef.current.push(job);
     updateCounts();
     queueMicrotask(() => drainQueueRef.current());
   }, [isCurrentJob, updateCounts]);
@@ -436,27 +437,35 @@ runPreviewTranslationRef.current = runPreviewTranslation;
     };
   }, [clearPendingWork]);
 
+  // When target language changes, reset pending work and clear prior language translations
   useEffect(() => {
     clearPendingWork();
     setTranslations({});
     setLastError(null);
+  }, [settings.targetLanguage, settings.sourceLanguage, clearPendingWork]);
+
+  // When engine, speed, or model changes, cancel in-flight work but preserve existing rendered text
+  useEffect(() => {
+    clearPendingWork();
+    setLastError(null);
+  }, [settings.engine, settings.speed, settings.modelOverride, clearPendingWork]);
+
+  // When live translation is enabled or engine settings change, prepare provider
+  useEffect(() => {
     if (settings.enabled) {
       void invoke('api_prepare_live_translation', {
         translationEngine: settings.engine,
         speedMode: settings.speed,
         modelOverride: settings.modelOverride || null,
       }).catch(() => undefined);
+    } else {
+      clearPendingWork();
     }
   }, [
     settings.enabled,
-    settings.sourceLanguage,
-    settings.targetLanguage,
     settings.engine,
     settings.speed,
     settings.modelOverride,
-    settings.contextTurns,
-    settings.glossary,
-    settings.contextHint,
     clearPendingWork,
   ]);
 

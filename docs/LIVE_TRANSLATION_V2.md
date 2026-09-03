@@ -26,7 +26,7 @@ adaptive translation router
       |
       +-- Groq / llama-3.1-8b-instant
       +-- OpenAI / gpt-4o-mini
-      +-- Claude / claude-haiku-4-5-20251001
+      +-- Claude / claude-3-5-haiku-20241022
       +-- configured summary provider as compatibility fallback
       |
       v
@@ -37,9 +37,9 @@ streamed SSE deltas ----------> translated caption
 
 | Mode | First-word budget | Provider attempt | Total fallback chain |
 | --- | ---: | ---: | ---: |
-| Instant | 1.8 s | 8 s | 12 s |
-| Balanced | 3.2 s | 15 s | 22 s |
-| Accurate | 10 s | 30 s | 32 s |
+| Instant | 2.8 s (12s local) | 10 s (25s local) | 15 s (30s local) |
+| Balanced | 4.5 s (12s local) | 16 s (25s local) | 24 s (30s local) |
+| Accurate | 10 s (12s local) | 30 s (25s local) | 35 s (30s local) |
 
 A provider that repeatedly misses the first-word budget is temporarily cooled down. The next configured fast provider is attempted automatically.
 
@@ -49,7 +49,7 @@ Summary quality and live-caption latency are different optimization problems. Au
 
 - Groq: `llama-3.1-8b-instant`
 - OpenAI API: `gpt-4o-mini`
-- Anthropic: `claude-haiku-4-5-20251001`
+- Anthropic: `claude-3-5-haiku-20241022`
 - Current summary provider: final fallback for compatibility, including ChatGPT/Codex, Ollama, Built-in AI, OpenRouter, and custom OpenAI endpoints.
 
 Users can explicitly select Groq/OpenAI/Claude/current-summary-provider and optionally override the model.

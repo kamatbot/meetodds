@@ -23,8 +23,8 @@ const TRANSLATION_CACHE_CAPACITY: usize = 256;
 const DELTA_EMIT_INTERVAL: Duration = Duration::from_millis(40);
 const FAST_GROQ_MODEL: &str = "llama-3.1-8b-instant";
 const FAST_OPENAI_MODEL: &str = "gpt-4o-mini";
-const FAST_CLAUDE_MODEL: &str = "claude-haiku-4-5-20251001";
-const PROVIDER_COOLDOWN: Duration = Duration::from_secs(45);
+const FAST_CLAUDE_MODEL: &str = "claude-3-5-haiku-20241022";
+const PROVIDER_COOLDOWN: Duration = Duration::from_secs(20);
 
 static CLOUD_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(2));
 static LOCAL_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(1));
@@ -342,7 +342,14 @@ fn clean_translation_output(raw: &str) -> String {
         }
     }
 
-    for prefix in ["Translation:", "Translated text:", "Translated Text:"] {
+    for prefix in [
+        "Translation:",
+        "Translated text:",
+        "Translated Text:",
+        "Translated:",
+        "Here is the translation:",
+        "Here's the translation:",
+    ] {
         if output.starts_with(prefix) {
             output = output[prefix.len()..].trim_start().to_string();
             break;
@@ -375,19 +382,25 @@ async fn stream_sse(
     let mut buffer: Vec<u8> = Vec::new();
     let mut text = String::new();
     let mut first_word_ms: Option<u64> = None;
+    let mut stream_connected = false;
 
     loop {
         let next_chunk = if first_word_ms.is_none() {
-            let Some(remaining) = first_word_budget.checked_sub(attempt_started.elapsed()) else {
+            let effective_budget = if stream_connected {
+                first_word_budget + Duration::from_millis(1500)
+            } else {
+                first_word_budget
+            };
+            let Some(remaining) = effective_budget.checked_sub(attempt_started.elapsed()) else {
                 return Err(format!(
                     "first translated word exceeded {}ms",
-                    first_word_budget.as_millis()
+                    effective_budget.as_millis()
                 ));
             };
             tokio::select! {
                 _ = cancellation_token.cancelled() => return Err("Live translation was cancelled.".to_string()),
                 next = timeout(remaining, stream.next()) => next
-                    .map_err(|_| format!("first translated word exceeded {}ms", first_word_budget.as_millis()))?,
+                    .map_err(|_| format!("first translated word exceeded {}ms", effective_budget.as_millis()))?,
             }
         } else {
             tokio::select! {
@@ -398,6 +411,7 @@ async fn stream_sse(
 
         let Some(chunk) = next_chunk else { break };
         let chunk = chunk.map_err(|error| format!("Translation stream failed: {error}"))?;
+        stream_connected = true;
         buffer.extend_from_slice(&chunk);
         while let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = buffer.drain(..=newline).collect();
@@ -512,18 +526,30 @@ fn translation_budgets(speed: Option<&str>) -> TranslationBudgets {
         "accurate" => TranslationBudgets {
             first_word: Duration::from_secs(10),
             attempt: Duration::from_secs(30),
-            total: Duration::from_secs(32),
+            total: Duration::from_secs(35),
         },
         "balanced" => TranslationBudgets {
-            first_word: Duration::from_millis(3200),
-            attempt: Duration::from_secs(15),
-            total: Duration::from_secs(22),
+            first_word: Duration::from_millis(4500),
+            attempt: Duration::from_secs(16),
+            total: Duration::from_secs(24),
         },
         _ => TranslationBudgets {
-            first_word: Duration::from_millis(1800),
-            attempt: Duration::from_secs(8),
-            total: Duration::from_secs(12),
+            first_word: Duration::from_millis(2800),
+            attempt: Duration::from_secs(10),
+            total: Duration::from_secs(15),
         },
+    }
+}
+
+fn effective_budgets(base: TranslationBudgets, is_local: bool) -> TranslationBudgets {
+    if is_local {
+        TranslationBudgets {
+            first_word: base.first_word.max(Duration::from_secs(12)),
+            attempt: base.attempt.max(Duration::from_secs(25)),
+            total: base.total.max(Duration::from_secs(30)),
+        }
+    } else {
+        base
     }
 }
 
@@ -550,6 +576,11 @@ async fn provider_is_cooling_down(config: &TranslationProviderConfig) -> bool {
         .is_some_and(|until| until > Instant::now())
 }
 
+async fn clear_provider_health() {
+    let mut health = PROVIDER_HEALTH.lock().await;
+    health.clear();
+}
+
 async fn record_provider_success(config: &TranslationProviderConfig, first_word_ms: u64) {
     let key = provider_health_key(config);
     let mut health = PROVIDER_HEALTH.lock().await;
@@ -567,7 +598,7 @@ async fn record_provider_failure(config: &TranslationProviderConfig) {
     let mut health = PROVIDER_HEALTH.lock().await;
     let entry = health.entry(key).or_default();
     entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
-    if entry.consecutive_failures >= 2 {
+    if entry.consecutive_failures >= 3 {
         entry.cooldown_until = Some(Instant::now() + PROVIDER_COOLDOWN);
     }
 }
@@ -826,12 +857,13 @@ async fn translate_with_candidate<R: Runtime>(
         config.top_p,
         true,
     )?;
-    let response = timeout(budgets.first_word, request.send())
+    let connect_timeout = budgets.first_word.max(Duration::from_millis(3500));
+    let response = timeout(connect_timeout, request.send())
         .await
         .map_err(|_| {
             format!(
-                "first translated word exceeded {}ms",
-                budgets.first_word.as_millis()
+                "translation request connection timed out after {}ms",
+                connect_timeout.as_millis()
             )
         })?
         .map_err(|error| format!("Failed to send translation request: {error}"))?;
@@ -971,6 +1003,7 @@ pub async fn api_prepare_live_translation(
     speed_mode: Option<String>,
     model_override: Option<String>,
 ) -> Result<LiveTranslationPreparation, String> {
+    clear_provider_health().await;
     let _ = translation_budgets(speed_mode.as_deref());
     let candidates = resolve_provider_candidates(
         state.db_manager.pool(),
@@ -1041,6 +1074,28 @@ pub async fn api_translate_live_text<R: Runtime>(
         });
     }
 
+    if source.is_none() && text.chars().count() >= 12 {
+        if let Some(info) = whatlang::detect(text) {
+            if info.is_reliable() && info.confidence() >= 0.75 {
+                let detected_code = info.lang().code();
+                if target.code.starts_with(detected_code) || detected_code.starts_with(&target.code) {
+                    return Ok(LiveTranslationResponse {
+                        request_id,
+                        translated_text: text.to_string(),
+                        source_language: Some(detected_code.to_string()),
+                        target_language: target.code.to_string(),
+                        provider: "passthrough".to_string(),
+                        model: "none".to_string(),
+                        latency_ms: 0,
+                        first_word_latency_ms: 0,
+                        fallback_reason: None,
+                        cached: true,
+                    });
+                }
+            }
+        }
+    }
+
     let budgets = translation_budgets(speed_mode.as_deref());
     let mut candidates = resolve_provider_candidates(
         state.db_manager.pool(),
@@ -1058,7 +1113,11 @@ pub async fn api_translate_live_text<R: Runtime>(
                 ready.push(candidate);
             }
         }
-        ready.extend(cooling);
+        if ready.is_empty() {
+            ready = cooling;
+        } else {
+            ready.extend(cooling);
+        }
         candidates = ready;
     }
 
@@ -1068,10 +1127,12 @@ pub async fn api_translate_live_text<R: Runtime>(
     let mut fallback_reason = None;
 
     for (index, config) in candidates.iter().enumerate() {
-        if total_started.elapsed() >= budgets.total {
+        let effective_config_budgets =
+            effective_budgets(budgets, uses_local_translation_worker(&config.provider));
+        if total_started.elapsed() >= effective_config_budgets.total {
             last_error = Some(format!(
                 "live translation exceeded total {}ms latency budget",
-                budgets.total.as_millis()
+                effective_config_budgets.total.as_millis()
             ));
             break;
         }
@@ -1112,8 +1173,10 @@ pub async fn api_translate_live_text<R: Runtime>(
             }),
         );
 
-        let remaining_total = budgets.total.saturating_sub(total_started.elapsed());
-        let attempt_limit = budgets.attempt.min(remaining_total);
+        let remaining_total = effective_config_budgets
+            .total
+            .saturating_sub(total_started.elapsed());
+        let attempt_limit = effective_config_budgets.attempt.min(remaining_total);
         let candidate_result = timeout(
             attempt_limit,
             translate_with_candidate(
@@ -1127,7 +1190,7 @@ pub async fn api_translate_live_text<R: Runtime>(
                 glossary.as_deref(),
                 context_hint.as_deref(),
                 &cancellation_token,
-                budgets,
+                effective_config_budgets,
             ),
         )
         .await;
@@ -1206,8 +1269,8 @@ mod tests {
     #[test]
     fn instant_mode_has_tight_first_word_budget() {
         let budget = translation_budgets(Some("instant"));
-        assert_eq!(budget.first_word, Duration::from_millis(1800));
-        assert_eq!(budget.total, Duration::from_secs(12));
+        assert_eq!(budget.first_word, Duration::from_millis(2800));
+        assert_eq!(budget.total, Duration::from_secs(15));
     }
 
     #[test]
