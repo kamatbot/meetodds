@@ -1,4 +1,3 @@
-\
 export type TranslationDisplayMode = 'bilingual' | 'translated';
 export type LiveTranslationStatus = 'queued' | 'translating' | 'translated' | 'error';
 export type LiveTranslationSpeed = 'instant' | 'balanced' | 'accurate';

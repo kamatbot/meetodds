@@ -1,4 +1,3 @@
-\
 'use client';
 
 import { Languages, Loader2, Trash2 } from 'lucide-react';
