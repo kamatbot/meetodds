@@ -1,7 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, MutableRefObject } from 'react';
-import { Transcript, TranscriptUpdate } from '@/types';
+import { LiveTranscriptPreview, Transcript, TranscriptUpdate } from '@/types';
+import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
@@ -11,6 +12,7 @@ import { indexedDBService } from '@/services/indexedDBService';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
+  livePreview: LiveTranscriptPreview | null;
   transcriptsRef: MutableRefObject<Transcript[]>
   addTranscript: (update: TranscriptUpdate) => void;
   copyTranscript: () => void;
@@ -27,6 +29,7 @@ const TranscriptContext = createContext<TranscriptContextType | undefined>(undef
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [livePreview, setLivePreview] = useState<LiveTranscriptPreview | null>(null);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
@@ -43,6 +46,42 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     transcriptsRef.current = transcripts;
   }, [transcripts]);
+
+
+// Ephemeral subtitle stream. These events never enter IndexedDB/SQLite and are
+// replaced by the canonical transcript once VAD closes the sentence.
+useEffect(() => {
+  let unlistenPreview: (() => void) | undefined;
+  let unlistenClear: (() => void) | undefined;
+  let disposed = false;
+
+  void listen<LiveTranscriptPreview>('live-transcript-preview', (event) => {
+    setLivePreview(event.payload);
+  }).then((dispose) => {
+    if (disposed) dispose();
+    else unlistenPreview = dispose;
+  });
+
+  void listen<{ source?: 'microphone' | 'system' | null }>(
+    'live-transcript-preview-clear',
+    (event) => {
+      setLivePreview((current) => {
+        const source = event.payload?.source;
+        if (!source || current?.source === source) return null;
+        return current;
+      });
+    }
+  ).then((dispose) => {
+    if (disposed) dispose();
+    else unlistenClear = dispose;
+  });
+
+  return () => {
+    disposed = true;
+    unlistenPreview?.();
+    unlistenClear?.();
+  };
+}, []);
 
   // Smart auto-scroll: Track user scroll position
   useEffect(() => {
@@ -62,27 +101,22 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Auto-scroll when transcripts change (only if user is at bottom)
-  useEffect(() => {
-    // Only auto-scroll if user was at the bottom before new content
-    if (isUserAtBottomRef.current && transcriptContainerRef.current) {
-      // Wait for Framer Motion animation to complete (150ms) before scrolling
-      // This ensures scrollHeight includes the full rendered height of the new transcript
-      const scrollTimeout = setTimeout(() => {
-        const container = transcriptContainerRef.current;
-        if (container) {
-          container.scrollTo({
-            top: container.scrollHeight,
-            behavior: 'smooth'
-          });
-        }
-      }, 150); // Match Framer Motion transition duration
 
-      return () => clearTimeout(scrollTimeout);
-    }
-  }, [transcripts]);
+// Auto-scroll without adding another 150ms of perceived transcript latency.
+useEffect(() => {
+  if (!isUserAtBottomRef.current || !transcriptContainerRef.current) return;
+  const frame = requestAnimationFrame(() => {
+    const container = transcriptContainerRef.current;
+    if (!container) return;
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: recordingState.isRecording ? 'auto' : 'smooth',
+    });
+  });
+  return () => cancelAnimationFrame(frame);
+}, [transcripts, recordingState.isRecording]);
 
-  // Initialize IndexedDB and listen for recording-started/stopped events
+// Initialize IndexedDB and listen for recording-started/stopped events
   useEffect(() => {
     let unlistenRecordingStarted: (() => void) | undefined;
     let unlistenRecordingStopped: (() => void) | undefined;
@@ -94,6 +128,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
         // Listen for recording-started event
         unlistenRecordingStarted = await recordingService.onRecordingStarted(async () => {
+          setLivePreview(null);
           try {
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;
@@ -145,6 +180,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
         // Listen for recording-stopped event
         unlistenRecordingStopped = await recordingService.onRecordingStopped(async (payload) => {
+          setLivePreview(null);
           try {
             if (currentMeetingId) {
               // Update folder path in IndexedDB
@@ -184,7 +220,6 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
-    let processingTimer: NodeJS.Timeout | undefined;
 
     const processBufferedTranscripts = (forceFlush = false) => {
       const sortedTranscripts: Transcript[] = [];
@@ -332,13 +367,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
               .catch(err => console.warn('IndexedDB save failed:', err));
           }
 
-          // Clear any existing timer and set a new one
-          if (processingTimer) {
-            clearTimeout(processingTimer);
-          }
-
-          // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
-          processingTimer = setTimeout(processBufferedTranscripts, 10);
+          // Serial backend emission is already ordered; yield only to the current JS
+          // task, then render the finalized sentence immediately.
+          queueMicrotask(() => processBufferedTranscripts());
         });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
@@ -352,10 +383,6 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
     return () => {
       console.log('🧹 CLEANUP: Cleaning up MAIN transcript listener...');
-      if (processingTimer) {
-        clearTimeout(processingTimer);
-        console.log('🧹 CLEANUP: Cleared processing timer');
-      }
       if (unlistenFn) {
         unlistenFn();
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
@@ -492,6 +519,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    setLivePreview(null);
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 
@@ -520,6 +548,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   const value: TranscriptContextType = {
     transcripts,
+    livePreview,
     transcriptsRef,
     addTranscript,
     copyTranscript,

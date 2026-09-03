@@ -1,6 +1,7 @@
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { LiveTranslationControl } from '@/components/LiveTranslationControl';
+import { LiveTranscriptSubtitle } from '@/components/LiveTranscriptSubtitle';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Copy, GlobeIcon } from 'lucide-react';
@@ -35,12 +36,12 @@ export function TranscriptPanel({
   showModal
 }: TranscriptPanelProps) {
   // Contexts
-  const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
+  const { transcripts, livePreview, transcriptContainerRef, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
-  const liveTranslation = useLiveTranslation(transcripts);
+  const liveTranslation = useLiveTranslation(transcripts, livePreview);
 
   // Convert transcripts to segments for virtualized view. Translation is merged
   // at render time so the original transcript pipeline remains completely independent.
@@ -67,7 +68,7 @@ export function TranscriptPanel({
   );
 
   return (
-    <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
+    <div ref={transcriptContainerRef} className="relative w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
       {/* Title area - Sticky header */}
       <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
         <div className="flex flex-col space-y-3">
@@ -151,6 +152,17 @@ export function TranscriptPanel({
           </div>
         </div>
       </div>
+
+      {isRecording && (
+        <LiveTranscriptSubtitle
+          preview={livePreview}
+          translation={liveTranslation.previewTranslation}
+          translationEnabled={liveTranslation.settings.enabled}
+          translationDisplayMode={liveTranslation.settings.displayMode}
+          translationTargetLanguage={liveTranslation.settings.targetLanguage}
+          isPaused={isPaused}
+        />
+      )}
     </div>
   );
 }

@@ -40,6 +40,18 @@ export interface TranscriptUpdate {
   duration: number;          // Segment duration in seconds
 }
 
+
+export interface LiveTranscriptPreview {
+  text: string;
+  source: 'microphone' | 'system';
+  speaker: string;
+  speakerLabel: string;
+  revision: number;
+  audioStartTime: number;
+  audioEndTime: number;
+  latencyMs: number;
+}
+
 export interface Block {
   id: string;
   type: string;

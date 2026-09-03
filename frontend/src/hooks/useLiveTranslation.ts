@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Transcript } from '@/types';
+import { LiveTranscriptPreview, Transcript } from '@/types';
 import {
   DEFAULT_LIVE_TRANSLATION_SETTINGS,
   LiveTranslationEntry,
@@ -49,6 +49,7 @@ interface LiveTranslationState {
   lastLatencyMs: number | null;
   lastFirstWordLatencyMs: number | null;
   lastFallbackReason: string | null;
+  previewTranslation?: LiveTranslationEntry;
 }
 
 function cacheKey(job: TranslationJob): string {
@@ -85,7 +86,10 @@ function contextForTurn(transcripts: Transcript[], index: number, turns: 0 | 2 |
     .join('\n');
 }
 
-export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationState {
+export function useLiveTranslation(
+  transcripts: Transcript[],
+  livePreview: LiveTranscriptPreview | null = null
+): LiveTranslationState {
   const [settings, setSettings] = useState<LiveTranslationSettings>(DEFAULT_LIVE_TRANSLATION_SETTINGS);
   const [translations, setTranslations] = useState<Record<string, LiveTranslationEntry>>({});
   const [queuedCount, setQueuedCount] = useState(0);
@@ -106,7 +110,11 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
   const activeRequestIdsRef = useRef(new Map<string, string>());
   const activeJobsRef = useRef(new Map<string, TranslationJob>());
   const resultCacheRef = useRef(new Map<string, LiveTranslationResponse>());
-  const drainQueueRef = useRef<() => void>(() => undefined);
+
+const drainQueueRef = useRef<() => void>(() => undefined);
+const previewInFlightRef = useRef<TranslationJob | null>(null);
+const pendingPreviewRef = useRef<TranslationJob | null>(null);
+const runPreviewTranslationRef = useRef<() => void>(() => undefined);
 
   const updateCounts = useCallback(() => {
     if (!mountedRef.current) return;
@@ -235,6 +243,8 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     for (const requestId of activeRequestIdsRef.current.values()) cancelNativeRequest(requestId);
     activeRequestIdsRef.current.clear();
     activeJobsRef.current.clear();
+    previewInFlightRef.current = null;
+    pendingPreviewRef.current = null;
     latestRevisionRef.current.clear();
     updateCounts();
   }, [cancelNativeRequest, updateCounts]);
@@ -255,6 +265,97 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
       return next;
     });
   }, []);
+
+
+const runPreviewTranslation = useCallback(() => {
+  if (previewInFlightRef.current || !pendingPreviewRef.current) return;
+  const job = pendingPreviewRef.current;
+  pendingPreviewRef.current = null;
+  if (!mountedRef.current || job.generation !== generationRef.current) return;
+
+  latestRevisionRef.current.set(job.segmentKey, job.revision);
+  previewInFlightRef.current = job;
+  activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
+  activeJobsRef.current.set(job.requestId, job);
+  setTranslations((previous) => ({
+    ...previous,
+    [job.segmentKey]: {
+      segmentKey: job.segmentKey,
+      sourceText: job.text,
+      targetLanguage: job.targetLanguage,
+      status: 'translating',
+    },
+  }));
+
+  void (async () => {
+    try {
+      const key = cacheKey(job);
+      const cached = resultCacheRef.current.get(key);
+      const response = cached ?? await invoke<LiveTranslationResponse>('api_translate_live_text', {
+        requestId: job.requestId,
+        text: job.text,
+        sourceLanguage: job.sourceLanguage,
+        targetLanguage: job.targetLanguage,
+        translationEngine: job.translationEngine,
+        speedMode: job.speedMode,
+        modelOverride: job.modelOverride || null,
+        contextText: job.contextText || null,
+        glossary: job.glossary || null,
+        contextHint: job.contextHint || null,
+      });
+      if (!cached) {
+        resultCacheRef.current.set(key, response);
+        trimCache(resultCacheRef.current);
+      }
+      if (!isCurrentJob(job)) return;
+      setTranslations((previous) => ({
+        ...previous,
+        [job.segmentKey]: {
+          segmentKey: job.segmentKey,
+          sourceText: job.text,
+          translatedText: response.translatedText,
+          targetLanguage: response.targetLanguage,
+          status: 'translated',
+          provider: response.provider,
+          model: response.model,
+          latencyMs: cached ? 0 : response.latencyMs,
+          firstWordLatencyMs: cached ? 0 : response.firstWordLatencyMs,
+          fallbackReason: response.fallbackReason ?? undefined,
+          cached: response.cached || Boolean(cached),
+        },
+      }));
+    } catch (error) {
+      if (!isCurrentJob(job)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/cancelled/i.test(message)) {
+        setTranslations((previous) => ({
+          ...previous,
+          [job.segmentKey]: {
+            ...(previous[job.segmentKey] ?? {}),
+            segmentKey: job.segmentKey,
+            sourceText: job.text,
+            targetLanguage: job.targetLanguage,
+            status: 'error',
+            error: message,
+          },
+        }));
+      }
+    } finally {
+      activeJobsRef.current.delete(job.requestId);
+      if (activeRequestIdsRef.current.get(job.segmentKey) === job.requestId) {
+        activeRequestIdsRef.current.delete(job.segmentKey);
+      }
+      if (previewInFlightRef.current?.requestId === job.requestId) {
+        previewInFlightRef.current = null;
+      }
+      if (pendingPreviewRef.current) {
+        queueMicrotask(() => runPreviewTranslationRef.current());
+      }
+    }
+  })();
+}, [isCurrentJob]);
+
+runPreviewTranslationRef.current = runPreviewTranslation;
 
   useEffect(() => {
     let disposed = false;
@@ -359,6 +460,81 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     clearPendingWork,
   ]);
 
+
+        useEffect(() => {
+          const previewKey = livePreview ? `live-preview-${livePreview.source}` : null;
+          if (!settings.enabled || !livePreview || !livePreview.text.trim()) {
+            pendingPreviewRef.current = null;
+            const inFlight = previewInFlightRef.current;
+            if (inFlight) {
+              cancelNativeRequest(inFlight.requestId);
+              latestRevisionRef.current.delete(inFlight.segmentKey);
+            }
+            if (previewKey) latestRevisionRef.current.delete(previewKey);
+            setTranslations((previous) => {
+              const keys = Object.keys(previous).filter((key) => key.startsWith('live-preview-'));
+              if (keys.length === 0) return previous;
+              const next = { ...previous };
+              keys.forEach((key) => delete next[key]);
+              return next;
+            });
+            return;
+          }
+
+          const contextText = settings.contextTurns === 0
+            ? ''
+            : transcripts
+                .slice(-settings.contextTurns)
+                .map((turn) => `${speakerLabel(turn)}: ${turn.text.trim()}`)
+                .filter((line) => line.trim().length > 0)
+                .join('
+');
+          const segmentKey = `live-preview-${livePreview.source}`;
+          pendingPreviewRef.current = {
+            segmentKey,
+            text: livePreview.text.trim(),
+            revision: [
+              generationRef.current,
+              livePreview.revision,
+              settings.targetLanguage,
+              settings.engine,
+              settings.speed,
+              settings.modelOverride,
+              contextText,
+              settings.glossary,
+              settings.contextHint,
+            ].join(''),
+            requestId: `live-preview-translation-${Date.now()}-${requestCounterRef.current++}`,
+            sourceLanguage: 'auto',
+            targetLanguage: settings.targetLanguage,
+            generation: generationRef.current,
+            translationEngine: settings.engine,
+            speedMode: settings.speed,
+            modelOverride: settings.modelOverride,
+            contextText,
+            glossary: settings.glossary,
+            contextHint: settings.contextHint,
+          };
+
+          // Do not cancel a translation every 450ms as the ASR preview revises. Finish
+          // the current short request, then immediately jump to the newest caption.
+          if (!previewInFlightRef.current) {
+            runPreviewTranslationRef.current();
+          }
+        }, [
+          livePreview,
+          transcripts,
+          settings.enabled,
+          settings.targetLanguage,
+          settings.engine,
+          settings.speed,
+          settings.modelOverride,
+          settings.contextTurns,
+          settings.glossary,
+          settings.contextHint,
+          cancelNativeRequest,
+        ]);
+
   useEffect(() => {
     if (!settings.enabled || transcripts.length === 0) return;
     const start = Math.max(0, transcripts.length - BACKFILL_SEGMENT_LIMIT);
@@ -403,10 +579,16 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     });
   }, [transcripts, settings, cancelNativeRequest, enqueueJob]);
 
-  const translatedCount = useMemo(
-    () => Object.values(translations).filter((entry) => entry.status === 'translated').length,
-    [translations]
-  );
+
+const translatedCount = useMemo(
+  () => Object.entries(translations).filter(
+    ([key, entry]) => !key.startsWith('live-preview-') && entry.status === 'translated'
+  ).length,
+  [translations]
+);
+const previewTranslation = livePreview
+  ? translations[`live-preview-${livePreview.source}`]
+  : undefined;
 
   return {
     settings,
@@ -422,5 +604,6 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     lastLatencyMs,
     lastFirstWordLatencyMs,
     lastFallbackReason,
+    previewTranslation,
   };
 }
