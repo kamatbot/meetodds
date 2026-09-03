@@ -1,0 +1,107 @@
+name: Fix and validate streaming live transcripts
+
+on:
+  push:
+    branches: [feature/streaming-live-transcripts]
+    paths:
+      - .github/workflows/fix-validate-streaming-live-transcripts.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/streaming-live-transcripts
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fix generated frontend escape and checkpoint
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main feature/streaming-live-transcripts
+          git merge --no-edit origin/main
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/hooks/useLiveTranslation.ts')
+          text = path.read_text()
+          broken = ".join('\n');"
+          fixed = ".join('\\n');"
+          if broken in text:
+              text = text.replace(broken, fixed)
+          elif fixed not in text:
+              raise SystemExit('preview context join anchor not found')
+          path.write_text(text)
+          PY
+          git add frontend/src/hooks/useLiveTranslation.ts
+          git commit -m "fix(transcript): preserve newline separator in live translation context"
+          git push origin HEAD:feature/streaming-live-transcripts
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential cmake clang libclang-dev pkg-config \
+            libglib2.0-dev libasound2-dev libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf >/dev/null
+
+      - name: Provide Tauri helper placeholder
+        run: |
+          mkdir -p frontend/src-tauri/binaries
+          : > frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+
+      - name: Frozen frontend production build
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Full native Rust compile check
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: "1"
+          CARGO_TERM_COLOR: never
+        run: cargo check -q -p meetily --lib --message-format short
+
+      - name: Verify main ancestry and live/canonical separation
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          grep -q 'live-transcript-preview' frontend/src-tauri/src/audio/transcription/live_preview.rs
+          grep -q 'live-transcript-preview-clear' frontend/src-tauri/src/audio/transcription/worker.rs
+          grep -q 'LiveTranscriptSubtitle' frontend/src/app/_components/TranscriptPanel.tsx
+          grep -q 'These events never enter IndexedDB/SQLite' frontend/src/contexts/TranscriptContext.tsx
+          git diff --check origin/main...HEAD
+
+      - name: Remove all one-time streaming transcript helpers
+        if: success()
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/implement-streaming-live-transcripts.yml \
+            .github/workflows/implement-streaming-live-transcripts-v2.yml \
+            .github/workflows/implement-streaming-live-transcripts-v3.yml \
+            .github/workflows/validate-streaming-live-transcripts.yml \
+            .github/workflows/fix-validate-streaming-live-transcripts.yml \
+            frontend/scripts/implement_streaming_live_subtitles.py \
+            frontend/scripts/patch_streaming_harness_v3.py \
+            frontend/scripts/patch_streaming_harness_v4.py \
+            frontend/scripts/patch_streaming_frontend_timer.py \
+            frontend/scripts/patch_streaming_frontend_panel.py
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(ci): remove streaming transcript implementation helpers"
+            git push origin HEAD:feature/streaming-live-transcripts
+          fi
