@@ -29,6 +29,13 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   // Sidebar context
   const { setCurrentMeeting, setMeetings, meetings: sidebarMeetings } = useSidebar();
 
+  // Keep the existing detail hooks aligned when the canonical header renames a meeting.
+  useEffect(() => {
+    setMeetingTitle(meeting.title || '+ New Call');
+    setIsTitleDirty(false);
+    setIsEditingTitle(false);
+  }, [meeting.id, meeting.title]);
+
   // Sync aiSummary state when summaryData prop changes (fixes display of fetched summaries)
   useEffect(() => {
     console.log('[useMeetingData] Syncing summary data from prop:', summaryData ? 'present' : 'null');

@@ -1,14 +1,13 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
-import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
+import type { MeetingDetailTab } from '@/components/Meeting/MeetingHeader';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -21,6 +20,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 export default function PageContent({
   meeting,
   summaryData,
+  activeTab,
   shouldAutoGenerate = false,
   onAutoGenerateComplete,
   onMeetingUpdated,
@@ -35,6 +35,7 @@ export default function PageContent({
 }: {
   meeting: any;
   summaryData: Summary | null;
+  activeTab: MeetingDetailTab;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -61,13 +62,10 @@ export default function PageContent({
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
 
-  // Sidebar context
-  const { serverAddress } = useSidebar();
-
   // Get model config from ConfigContext
   const { modelConfig, setModelConfig } = useConfig();
 
-  // Custom hooks
+  // Custom hooks stay mounted while tabs switch so summary/transcript state is not reloaded.
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
   const templates = useTemplates();
 
@@ -134,12 +132,10 @@ export default function PageContent({
     meeting,
   });
 
-  // Track page view
   useEffect(() => {
     Analytics.trackPageView('meeting_details');
   }, []);
 
-  // Auto-generate summary when flag is set
   useEffect(() => {
     let cancelled = false;
 
@@ -148,86 +144,105 @@ export default function PageContent({
         console.log(`🤖 Auto-generating summary with ${modelConfig.provider}/${modelConfig.model}...`);
         await summaryGeneration.handleGenerateSummary('');
 
-        // Notify parent that auto-generation is complete (only if not cancelled)
         if (onAutoGenerateComplete && !cancelled) {
           onAutoGenerateComplete();
         }
       }
     };
 
-    autoGenerate();
+    void autoGenerate();
 
-    // Cleanup: cancel if component unmounts or meeting changes
     return () => {
       cancelled = true;
     };
-  }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
+  }, [shouldAutoGenerate, meeting.id]);
+
+  const transcriptPanel = (
+    <TranscriptPanel
+      transcripts={meetingData.transcripts}
+      customPrompt={customPrompt}
+      onPromptChange={setCustomPrompt}
+      onCopyTranscript={copyOperations.handleCopyTranscript}
+      onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
+      isRecording={isRecording}
+      disableAutoScroll={true}
+      usePagination={true}
+      segments={segments}
+      hasMore={hasMore}
+      isLoadingMore={isLoadingMore}
+      totalCount={totalCount}
+      loadedCount={loadedCount}
+      onLoadMore={onLoadMore}
+      meetingId={meeting.id}
+      meetingFolderPath={meeting.folder_path}
+      onRefetchTranscripts={onRefetchTranscripts}
+    />
+  );
+
+  const summaryPanel = (
+    <SummaryPanel
+      meeting={meeting}
+      meetingTitle={meetingData.meetingTitle}
+      onTitleChange={meetingData.handleTitleChange}
+      isEditingTitle={meetingData.isEditingTitle}
+      onStartEditTitle={() => meetingData.setIsEditingTitle(true)}
+      onFinishEditTitle={() => meetingData.setIsEditingTitle(false)}
+      isTitleDirty={meetingData.isTitleDirty}
+      summaryRef={meetingData.blockNoteSummaryRef}
+      isSaving={meetingData.isSaving}
+      onSaveAll={meetingData.saveAllChanges}
+      onCopySummary={copyOperations.handleCopySummary}
+      onOpenFolder={meetingOperations.handleOpenMeetingFolder}
+      aiSummary={meetingData.aiSummary}
+      summaryStatus={summaryGeneration.summaryStatus}
+      transcripts={meetingData.transcripts}
+      modelConfig={modelConfig}
+      setModelConfig={setModelConfig}
+      onSaveModelConfig={handleSaveModelConfig}
+      onGenerateSummary={summaryGeneration.handleGenerateSummary}
+      onStopGeneration={summaryGeneration.handleStopGeneration}
+      customPrompt={customPrompt}
+      summaryResponse={summaryResponse}
+      onSaveSummary={meetingData.handleSaveSummary}
+      onSummaryChange={meetingData.handleSummaryChange}
+      onDirtyChange={meetingData.setIsSummaryDirty}
+      summaryError={summaryGeneration.summaryError}
+      onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
+      getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
+      availableTemplates={templates.availableTemplates}
+      selectedTemplate={templates.selectedTemplate}
+      onTemplateSelect={templates.handleTemplateSelection}
+      isModelConfigLoading={false}
+      onOpenModelSettings={handleRegisterModalOpen}
+    />
+  );
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
-    >
-      <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          transcripts={meetingData.transcripts}
-          customPrompt={customPrompt}
-          onPromptChange={setCustomPrompt}
-          onCopyTranscript={copyOperations.handleCopyTranscript}
-          onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
-          isRecording={isRecording}
-          disableAutoScroll={true}
-          // Pagination props for efficient loading
-          usePagination={true}
-          segments={segments}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          totalCount={totalCount}
-          loadedCount={loadedCount}
-          onLoadMore={onLoadMore}
-          // Retranscription props
-          meetingId={meeting.id}
-          meetingFolderPath={meeting.folder_path}
-          onRefetchTranscripts={onRefetchTranscripts}
-        />
-        <SummaryPanel
-          meeting={meeting}
-          meetingTitle={meetingData.meetingTitle}
-          onTitleChange={meetingData.handleTitleChange}
-          isEditingTitle={meetingData.isEditingTitle}
-          onStartEditTitle={() => meetingData.setIsEditingTitle(true)}
-          onFinishEditTitle={() => meetingData.setIsEditingTitle(false)}
-          isTitleDirty={meetingData.isTitleDirty}
-          summaryRef={meetingData.blockNoteSummaryRef}
-          isSaving={meetingData.isSaving}
-          onSaveAll={meetingData.saveAllChanges}
-          onCopySummary={copyOperations.handleCopySummary}
-          onOpenFolder={meetingOperations.handleOpenMeetingFolder}
-          aiSummary={meetingData.aiSummary}
-          summaryStatus={summaryGeneration.summaryStatus}
-          transcripts={meetingData.transcripts}
-          modelConfig={modelConfig}
-          setModelConfig={setModelConfig}
-          onSaveModelConfig={handleSaveModelConfig}
-          onGenerateSummary={summaryGeneration.handleGenerateSummary}
-          onStopGeneration={summaryGeneration.handleStopGeneration}
-          customPrompt={customPrompt}
-          summaryResponse={summaryResponse}
-          onSaveSummary={meetingData.handleSaveSummary}
-          onSummaryChange={meetingData.handleSummaryChange}
-          onDirtyChange={meetingData.setIsSummaryDirty}
-          summaryError={summaryGeneration.summaryError}
-          onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
-          getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
-          availableTemplates={templates.availableTemplates}
-          selectedTemplate={templates.selectedTemplate}
-          onTemplateSelect={templates.handleTemplateSelection}
-          isModelConfigLoading={false}
-          onOpenModelSettings={handleRegisterModalOpen}
-        />
+    <div className="flex h-full min-h-0 flex-col bg-bg">
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {activeTab === 'summary' && (
+          <div className="flex h-full min-h-0 [&>div]:!bg-bg">
+            {summaryPanel}
+          </div>
+        )}
+
+        {activeTab === 'transcript' && (
+          <div className="flex h-full min-h-0 [&>div]:!flex [&>div]:!w-full [&>div]:!border-r-0 [&>div]:!bg-bg">
+            {transcriptPanel}
+          </div>
+        )}
+
+        {activeTab === 'notes' && (
+          <div className="flex h-full items-start justify-center overflow-y-auto px-6 py-10">
+            <div className="w-full max-w-[760px] rounded-card border border-border bg-surface p-6">
+              <h2 className="text-title text-text">Notes</h2>
+              <p className="mt-1.5 text-body text-2">
+                Notes persistence is wired in the next implementation module. This tab is intentionally non-editable until the native notes contract lands.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
-    </motion.div>
+    </div>
   );
 }
