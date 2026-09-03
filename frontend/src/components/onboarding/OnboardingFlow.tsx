@@ -1,4 +1,6 @@
-import React, { useEffect } from 'react';
+'use client';
+
+import React, { useEffect, useRef, useState } from 'react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import {
   WelcomeStep,
@@ -12,37 +14,48 @@ interface OnboardingFlowProps {
 }
 
 export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
-  const { currentStep } = useOnboarding();
-  const [isMac, setIsMac] = React.useState(false);
+  const { currentStep, completeOnboarding } = useOnboarding();
+  const [isMac, setIsMac] = useState<boolean | null>(null);
+  const completingNonMacRef = useRef(false);
 
   useEffect(() => {
-    // Check if running on macOS
     const checkPlatform = async () => {
       try {
-        // Dynamic import to avoid SSR issues if any
         const { platform } = await import('@tauri-apps/plugin-os');
         setIsMac(platform() === 'macos');
-      } catch (e) {
-        console.error('Failed to detect platform:', e);
-        // Fallback
+      } catch (error) {
+        console.error('Failed to detect platform:', error);
         setIsMac(navigator.userAgent.includes('Mac'));
       }
     };
-    checkPlatform();
+    void checkPlatform();
   }, []);
 
-  // 4-Step Onboarding Flow (System-Recommended Models):
-  // Step 1: Welcome - Introduce Meetily features
-  // Step 2: Setup Overview - Database initialization + show recommended downloads
-  // Step 3: Download Progress - Download Parakeet + Summary Model (auto-selected based on platform/RAM)
-  // Step 4: Permissions - Request mic + system audio (macOS only)
+  // On non-macOS platforms there is no permission-specific fourth screen in the
+  // current flow. Complete the existing native onboarding contract and enter Home
+  // rather than leaving the user on a blank step.
+  useEffect(() => {
+    if (currentStep !== 4 || isMac !== false || completingNonMacRef.current) return;
+    completingNonMacRef.current = true;
+    void completeOnboarding()
+      .then(onComplete)
+      .catch((error) => {
+        completingNonMacRef.current = false;
+        console.error('Failed to complete onboarding:', error);
+      });
+  }, [completeOnboarding, currentStep, isMac, onComplete]);
 
   return (
     <div className="onboarding-flow">
       {currentStep === 1 && <WelcomeStep />}
       {currentStep === 2 && <SetupOverviewStep />}
       {currentStep === 3 && <DownloadProgressStep />}
-      {currentStep === 4 && isMac && <PermissionsStep />}
+      {currentStep === 4 && isMac === true && <PermissionsStep onComplete={onComplete} />}
+      {currentStep === 4 && isMac === null && (
+        <div className="fixed inset-0 grid place-items-center bg-bg text-ui text-3">
+          Preparing permissions…
+        </div>
+      )}
     </div>
   );
 }

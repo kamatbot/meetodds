@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
-import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import {
   Dialog,
@@ -66,7 +65,6 @@ export default function CommandPalette({ onToggleSidebar }: CommandPaletteProps)
     isSearching,
   } = useSidebar();
   const { openImportDialog } = useImportDialog();
-  const { betaFeatures } = useConfig();
   const { isRecording } = useRecordingState();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -203,15 +201,11 @@ export default function CommandPalette({ onToggleSidebar }: CommandPaletteProps)
                   </Command.Item>
                   <Command.Item
                     value="import audio file"
-                    disabled={!betaFeatures.importAndRetranscribe}
                     onSelect={() => run(() => openImportDialog())}
                     className={itemClass}
                   >
                     <Upload className="h-4 w-4 text-2" strokeWidth={1.75} />
                     Import audio…
-                    {!betaFeatures.importAndRetranscribe && (
-                      <span className="ml-auto text-caption text-3">Labs</span>
-                    )}
                   </Command.Item>
                   <Command.Item
                     value="open settings preferences"
@@ -271,7 +265,6 @@ export default function CommandPalette({ onToggleSidebar }: CommandPaletteProps)
                 </Command.Item>
                 <Command.Item
                   value="> import audio file"
-                  disabled={!betaFeatures.importAndRetranscribe}
                   onSelect={() => run(() => openImportDialog())}
                   className={itemClass}
                 >

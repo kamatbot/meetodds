@@ -22,7 +22,6 @@ import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from './SidebarProvider';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
-import { useConfig } from '@/contexts/ConfigContext';
 import Analytics from '@/lib/analytics';
 import {
   Dialog,
@@ -73,7 +72,6 @@ export default function Sidebar() {
   } = useSidebar();
   const { isRecording, recordingDuration } = useRecordingState();
   const { openImportDialog } = useImportDialog();
-  const { betaFeatures } = useConfig();
 
   const [showAllMeetings, setShowAllMeetings] = useState(false);
   const [renameMeeting, setRenameMeeting] = useState<CurrentMeeting | null>(null);
@@ -91,7 +89,7 @@ export default function Sidebar() {
 
   const openMeeting = useCallback((meeting: CurrentMeeting) => {
     setCurrentMeeting(meeting);
-    router.push(`/meeting-details?id=${encodeURIComponent(meeting.id)}`);
+    router.push(`/meeting?id=${encodeURIComponent(meeting.id)}`);
   }, [router, setCurrentMeeting]);
 
   const recentMeetings = useMemo(
@@ -318,7 +316,7 @@ export default function Sidebar() {
           </button>
           <button
             type="button"
-            onClick={() => router.push('/settings')}
+            onClick={() => router.push('/settings?section=transcription')}
             className="flex items-center gap-1.5 rounded-control px-2 py-1.5 text-caption text-2 transition-colors duration-150 hover:bg-surface hover:text-text"
             title="Engine status"
           >
@@ -332,14 +330,11 @@ export default function Sidebar() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="top" className="border-border bg-surface text-text">
-              <DropdownMenuItem
-                disabled={!betaFeatures.importAndRetranscribe}
-                onSelect={() => openImportDialog()}
-              >
+              <DropdownMenuItem onSelect={() => openImportDialog()}>
                 <Upload /> Import audio…
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => router.push('/settings')}>
-                <SlidersHorizontal /> Model settings
+              <DropdownMenuItem onSelect={() => router.push('/settings?section=summary')}>
+                <SlidersHorizontal /> Summary model…
               </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-border" />
               <DropdownMenuItem onSelect={() => void refetchMeetings()}>

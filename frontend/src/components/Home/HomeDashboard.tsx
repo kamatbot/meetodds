@@ -236,7 +236,7 @@ export default function HomeDashboard({
         <section className="mt-6 overflow-hidden rounded-card border border-border bg-surface" aria-label="Capture readiness">
           <button
             type="button"
-            onClick={onOpenSettings}
+            onClick={() => router.push('/settings?section=recording')}
             className="grid w-full grid-cols-[20px_112px_minmax(0,1fr)_auto] items-center gap-2 border-b border-border px-4 py-3 text-left last:border-b-0 hover:bg-bg"
           >
             {permissionsLoading ? (
@@ -261,7 +261,7 @@ export default function HomeDashboard({
 
           <button
             type="button"
-            onClick={onOpenSettings}
+            onClick={() => router.push('/settings?section=recording')}
             className="grid w-full grid-cols-[20px_112px_minmax(0,1fr)_auto] items-center gap-2 border-b border-border px-4 py-3 text-left last:border-b-0 hover:bg-bg"
           >
             {permissionsLoading ? (
@@ -286,7 +286,7 @@ export default function HomeDashboard({
 
           <button
             type="button"
-            onClick={onOpenSettings}
+            onClick={() => router.push('/settings?section=transcription')}
             className="grid w-full grid-cols-[20px_112px_minmax(0,1fr)_auto] items-center gap-2 border-b border-border px-4 py-3 text-left last:border-b-0 hover:bg-bg"
           >
             <Radio className="h-4 w-4 text-3" strokeWidth={1.75} />
@@ -300,7 +300,7 @@ export default function HomeDashboard({
 
           <button
             type="button"
-            onClick={onOpenSettings}
+            onClick={() => router.push('/settings?section=summary')}
             className="grid w-full grid-cols-[20px_112px_minmax(0,1fr)_auto] items-center gap-2 px-4 py-3 text-left hover:bg-bg"
           >
             {configError ? (
@@ -347,7 +347,7 @@ export default function HomeDashboard({
               {permissionError && (
                 <button
                   type="button"
-                  onClick={onOpenSettings}
+                  onClick={() => router.push('/settings?section=recording')}
                   className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left last:border-b-0 hover:bg-bg"
                 >
                   <AlertCircle className="h-4 w-4 shrink-0 text-warn" strokeWidth={1.75} />
@@ -359,7 +359,7 @@ export default function HomeDashboard({
               {meetingNeedingAttention && (
                 <button
                   type="button"
-                  onClick={() => router.push(`/meeting-details?id=${encodeURIComponent(meetingNeedingAttention.id)}`)}
+                  onClick={() => router.push(`/meeting?id=${encodeURIComponent(meetingNeedingAttention.id)}`)}
                   className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left last:border-b-0 hover:bg-bg"
                 >
                   <AlertCircle className="h-4 w-4 shrink-0 text-warn" strokeWidth={1.75} />
@@ -437,7 +437,7 @@ export default function HomeDashboard({
                 <RecentMeetingRow
                   key={meeting.id}
                   item={meeting}
-                  onOpen={() => router.push(`/meeting-details?id=${encodeURIComponent(meeting.id)}`)}
+                  onOpen={() => router.push(`/meeting?id=${encodeURIComponent(meeting.id)}`)}
                 />
               ))}
             </div>
