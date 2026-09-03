@@ -1,0 +1,43 @@
+name: Clean recovered V2 source headers
+
+on:
+  push:
+    branches: [feature/live-translation-v2]
+    paths:
+      - .github/workflows/fix-recovered-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/live-translation-v2
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Remove recovery escape markers and commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for file in \
+            frontend/src/lib/live-translation.ts \
+            frontend/src/hooks/useLiveTranslation.ts \
+            frontend/src/components/LiveTranslationControl.tsx; do
+            if [ "$(head -n 1 "$file")" = '\' ]; then
+              tail -n +2 "$file" > "$file.tmp"
+              mv "$file.tmp" "$file"
+            fi
+          done
+          git add frontend/src/lib/live-translation.ts frontend/src/hooks/useLiveTranslation.ts frontend/src/components/LiveTranslationControl.tsx
+          git commit -m "fix(translation): clean recovered v2 source headers"
+          git push origin HEAD:feature/live-translation-v2
+      - name: Remove one-time cleanup workflow
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/fix-recovered-v2.yml
+          git commit -m "chore(recovery): remove v2 cleanup harness"
+          git push origin HEAD:feature/live-translation-v2
