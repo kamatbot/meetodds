@@ -10,6 +10,24 @@ use tokio::sync::watch;
 
 const MAX_STALE_REVISIONS: u64 = 2;
 
+#[derive(Debug)]
+struct LastEmittedPreview {
+    text: String,
+    audio_end_time: f64,
+}
+
+fn should_emit_preview(
+    last_emitted: &HashMap<String, LastEmittedPreview>,
+    source: &str,
+    text: &str,
+    audio_start_time: f64,
+) -> bool {
+    match last_emitted.get(source) {
+        Some(previous) => previous.text != text || audio_start_time > previous.audio_end_time,
+        None => true,
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveTranscriptPreviewUpdate {
@@ -36,7 +54,7 @@ pub fn start_live_preview_task<R: Runtime>(
                 return;
             }
         };
-        let mut last_emitted: HashMap<String, String> = HashMap::new();
+        let mut last_emitted: HashMap<String, LastEmittedPreview> = HashMap::new();
 
         while receiver.changed().await.is_ok() {
             let Some(chunk) = ({ receiver.borrow_and_update().clone() }) else {
@@ -77,20 +95,24 @@ pub fn start_live_preview_task<R: Runtime>(
                 continue;
             }
 
-            if last_emitted
-                .get(source)
-                .is_some_and(|previous| previous == &text)
-            {
+            let duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+            let audio_end_time = chunk.timestamp + duration;
+            if !should_emit_preview(&last_emitted, source, &text, chunk.timestamp) {
                 continue;
             }
-            last_emitted.insert(source.to_string(), text.clone());
+            last_emitted.insert(
+                source.to_string(),
+                LastEmittedPreview {
+                    text: text.clone(),
+                    audio_end_time,
+                },
+            );
 
             let (speaker, speaker_label) = match (&chunk.device_type, channel_separated) {
                 (DeviceType::Microphone, true) => ("me", "Me"),
                 (DeviceType::System, _) => ("remote-live", "Other"),
                 (DeviceType::Microphone, false) => ("room-live", "Live"),
             };
-            let duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
             let update = LiveTranscriptPreviewUpdate {
                 text,
                 source: source.to_string(),
@@ -98,12 +120,42 @@ pub fn start_live_preview_task<R: Runtime>(
                 speaker_label: speaker_label.to_string(),
                 revision,
                 audio_start_time: chunk.timestamp,
-                audio_end_time: chunk.timestamp + duration,
+                audio_end_time,
                 latency_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
             };
             let _ = app.emit("live-transcript-preview", update);
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn re_emits_a_repeated_caption_for_a_new_utterance() {
+        let mut last_emitted = HashMap::new();
+        last_emitted.insert(
+            "microphone".to_string(),
+            LastEmittedPreview {
+                text: "Yes".to_string(),
+                audio_end_time: 10.0,
+            },
+        );
+
+        assert!(!should_emit_preview(
+            &last_emitted,
+            "microphone",
+            "Yes",
+            9.5
+        ));
+        assert!(should_emit_preview(
+            &last_emitted,
+            "microphone",
+            "Yes",
+            10.1
+        ));
+    }
 }
 
 async fn decode_preview(

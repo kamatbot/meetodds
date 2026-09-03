@@ -489,7 +489,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
                 .filter((line) => line.trim().length > 0)
                 .join('\n');
           const segmentKey = `live-preview-${livePreview.source}`;
-          pendingPreviewRef.current = {
+          const previewJob: TranslationJob = {
             segmentKey,
             text: livePreview.text.trim(),
             revision: [
@@ -502,7 +502,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
               contextText,
               settings.glossary,
               settings.contextHint,
-            ].join(''),
+            ].join('\u0001'),
             requestId: `live-preview-translation-${Date.now()}-${requestCounterRef.current++}`,
             sourceLanguage: 'auto',
             targetLanguage: settings.targetLanguage,
@@ -514,6 +514,20 @@ runPreviewTranslationRef.current = runPreviewTranslation;
             glossary: settings.glossary,
             contextHint: settings.contextHint,
           };
+          // The caption can change while its previous translation is still in flight.
+          // Mark the newest revision immediately so an older result is never displayed
+          // beneath unrelated source text.
+          latestRevisionRef.current.set(segmentKey, previewJob.revision);
+          pendingPreviewRef.current = previewJob;
+          setTranslations((previous) => ({
+            ...previous,
+            [segmentKey]: {
+              segmentKey,
+              sourceText: previewJob.text,
+              targetLanguage: previewJob.targetLanguage,
+              status: 'translating',
+            },
+          }));
 
           // Do not cancel a translation every 450ms as the ASR preview revises. Finish
           // the current short request, then immediately jump to the newest caption.
