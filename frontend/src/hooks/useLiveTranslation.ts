@@ -15,6 +15,7 @@ import {
 } from '@/lib/live-translation';
 
 const MAX_CONCURRENT_TRANSLATIONS = 2;
+const MAX_CONCURRENT_BACKFILL = 1;
 const MAX_QUEUED_TRANSLATIONS = 24;
 const BACKFILL_SEGMENT_LIMIT = 12;
 const RESULT_CACHE_LIMIT = 200;
@@ -33,6 +34,7 @@ interface TranslationJob {
   contextText: string;
   glossary: string;
   contextHint: string;
+  isLive: boolean;
 }
 
 interface LiveTranslationState {
@@ -104,6 +106,7 @@ export function useLiveTranslation(
   const mountedRef = useRef(true);
   const queueRef = useRef<TranslationJob[]>([]);
   const activeCountRef = useRef(0);
+  const activeBackfillCountRef = useRef(0);
   const generationRef = useRef(0);
   const requestCounterRef = useRef(0);
   const latestRevisionRef = useRef(new Map<string, string>());
@@ -135,9 +138,28 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
 
   const drainQueue = useCallback(() => {
     while (activeCountRef.current < MAX_CONCURRENT_TRANSLATIONS && queueRef.current.length > 0) {
-      const job = queueRef.current.shift()!;
+      // Prioritize live speech turns ahead of historical backfill turns
+      const liveIndex = queueRef.current.findIndex((job) => job.isLive && isCurrentJob(job));
+      let jobIndex = -1;
+
+      if (liveIndex !== -1) {
+        jobIndex = liveIndex;
+      } else if (activeBackfillCountRef.current < MAX_CONCURRENT_BACKFILL) {
+        jobIndex = queueRef.current.findIndex((job) => isCurrentJob(job));
+      }
+
+      if (jobIndex === -1) {
+        // No runnable job or remaining jobs are backfill while backfill worker is already busy
+        break;
+      }
+
+      const [job] = queueRef.current.splice(jobIndex, 1);
       if (!isCurrentJob(job)) continue;
+
       activeCountRef.current += 1;
+      if (!job.isLive) {
+        activeBackfillCountRef.current += 1;
+      }
       activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
       activeJobsRef.current.set(job.requestId, job);
       updateCounts();
@@ -219,6 +241,9 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
             activeRequestIdsRef.current.delete(job.segmentKey);
           }
           activeCountRef.current = Math.max(0, activeCountRef.current - 1);
+          if (!job.isLive) {
+            activeBackfillCountRef.current = Math.max(0, activeBackfillCountRef.current - 1);
+          }
           updateCounts();
           queueMicrotask(() => drainQueueRef.current());
         }
@@ -232,8 +257,24 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
   const enqueueJob = useCallback((job: TranslationJob) => {
     if (!isCurrentJob(job)) return;
     queueRef.current = queueRef.current.filter((queued) => queued.segmentKey !== job.segmentKey);
-    if (queueRef.current.length >= MAX_QUEUED_TRANSLATIONS) queueRef.current.shift();
-    queueRef.current.push(job);
+    if (queueRef.current.length >= MAX_QUEUED_TRANSLATIONS) {
+      const dropIndex = queueRef.current.findIndex((queued) => !queued.isLive);
+      if (dropIndex !== -1) {
+        queueRef.current.splice(dropIndex, 1);
+      } else {
+        queueRef.current.shift();
+      }
+    }
+    if (job.isLive) {
+      const lastLiveIndex = queueRef.current.map((j) => j.isLive).lastIndexOf(true);
+      if (lastLiveIndex === -1) {
+        queueRef.current.unshift(job);
+      } else {
+        queueRef.current.splice(lastLiveIndex + 1, 0, job);
+      }
+    } else {
+      queueRef.current.push(job);
+    }
     updateCounts();
     queueMicrotask(() => drainQueueRef.current());
   }, [isCurrentJob, updateCounts]);
@@ -246,6 +287,7 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
     activeJobsRef.current.clear();
     previewInFlightRef.current = null;
     pendingPreviewRef.current = null;
+    activeBackfillCountRef.current = 0;
     latestRevisionRef.current.clear();
     updateCounts();
   }, [cancelNativeRequest, updateCounts]);
@@ -522,6 +564,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
             contextText,
             glossary: settings.glossary,
             contextHint: settings.contextHint,
+            isLive: true,
           };
           // The caption can change while its previous translation is still in flight.
           // Mark the newest revision immediately so an older result is never displayed
@@ -561,10 +604,12 @@ runPreviewTranslationRef.current = runPreviewTranslation;
     if (!settings.enabled || transcripts.length === 0) return;
     const start = Math.max(0, transcripts.length - BACKFILL_SEGMENT_LIMIT);
     const candidates = transcripts.slice(start);
+    const lastIndex = transcripts.length - 1;
     candidates.forEach((transcript, offset) => {
       const text = transcript.text.trim();
       if (!text) return;
       const index = start + offset;
+      const isLive = index === lastIndex;
       const segmentKey = liveTranslationSegmentKey(transcript);
       const contextText = contextForTurn(transcripts, index, settings.contextTurns);
       const revision = [
@@ -597,6 +642,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
         contextText,
         glossary: settings.glossary,
         contextHint: settings.contextHint,
+        isLive,
       });
     });
   }, [transcripts, settings, cancelNativeRequest, enqueueJob]);

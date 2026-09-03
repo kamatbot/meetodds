@@ -39,7 +39,6 @@ const CACHE_TTL_SECS: u64 = 300;
 
 /// Fallback models when API fetch fails (matches frontend hardcoded values)
 const FALLBACK_MODELS: &[(&str, &str)] = &[
-    ("claude-3-5-haiku-20241022", "Claude 3.5 Haiku"),
     ("claude-sonnet-4-5-20250929", "Claude 4.5 Sonnet"),
     ("claude-haiku-4-5-20251001", "Claude 4.5 Haiku"),
     ("claude-opus-4-1-20250805", "Claude 4.1 Opus"),

@@ -23,7 +23,7 @@ const TRANSLATION_CACHE_CAPACITY: usize = 256;
 const DELTA_EMIT_INTERVAL: Duration = Duration::from_millis(40);
 const FAST_GROQ_MODEL: &str = "llama-3.1-8b-instant";
 const FAST_OPENAI_MODEL: &str = "gpt-4o-mini";
-const FAST_CLAUDE_MODEL: &str = "claude-3-5-haiku-20241022";
+const FAST_CLAUDE_MODEL: &str = "claude-haiku-4-5-20251001";
 const PROVIDER_COOLDOWN: Duration = Duration::from_secs(20);
 
 static CLOUD_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(2));
@@ -278,6 +278,58 @@ fn resolve_source_language(value: Option<&str>) -> Result<Option<LanguageSpec>, 
     }
 }
 
+fn whatlang_to_app_language_code(lang: whatlang::Lang) -> Option<&'static str> {
+    match lang {
+        whatlang::Lang::Eng => Some("en"),
+        whatlang::Lang::Spa => Some("es"),
+        whatlang::Lang::Fra => Some("fr"),
+        whatlang::Lang::Deu => Some("de"),
+        whatlang::Lang::Ita => Some("it"),
+        whatlang::Lang::Por => Some("pt"),
+        whatlang::Lang::Nld => Some("nl"),
+        whatlang::Lang::Swe => Some("sv"),
+        whatlang::Lang::Nob => Some("no"),
+        whatlang::Lang::Dan => Some("da"),
+        whatlang::Lang::Fin => Some("fi"),
+        whatlang::Lang::Pol => Some("pl"),
+        whatlang::Lang::Ces => Some("cs"),
+        whatlang::Lang::Ron => Some("ro"),
+        whatlang::Lang::Hun => Some("hu"),
+        whatlang::Lang::Tur => Some("tr"),
+        whatlang::Lang::Rus => Some("ru"),
+        whatlang::Lang::Ukr => Some("uk"),
+        whatlang::Lang::Ara => Some("ar"),
+        whatlang::Lang::Heb => Some("he"),
+        whatlang::Lang::Hin => Some("hi"),
+        whatlang::Lang::Ben => Some("bn"),
+        whatlang::Lang::Urd => Some("ur"),
+        whatlang::Lang::Tha => Some("th"),
+        whatlang::Lang::Vie => Some("vi"),
+        whatlang::Lang::Ind => Some("id"),
+        whatlang::Lang::Cmn => Some("zh"),
+        whatlang::Lang::Jpn => Some("ja"),
+        whatlang::Lang::Kor => Some("ko"),
+        _ => None,
+    }
+}
+
+fn is_detected_language_matching_target(detected_code: &str, target_code: &str) -> bool {
+    let norm_target = target_code.trim().to_ascii_lowercase();
+    let norm_detected = detected_code.trim().to_ascii_lowercase();
+    if norm_target == norm_detected {
+        return true;
+    }
+    if norm_detected == "zh" && (norm_target == "zh-cn" || norm_target == "zh-tw") {
+        return true;
+    }
+    if norm_target.starts_with(&norm_detected)
+        && norm_target.as_bytes().get(norm_detected.len()) == Some(&b'-')
+    {
+        return true;
+    }
+    false
+}
+
 fn build_translation_prompts(
     text: &str,
     source_language: Option<LanguageSpec>,
@@ -374,7 +426,7 @@ async fn stream_sse(
     response: reqwest::Response,
     mut extract: impl FnMut(&Value) -> Result<Option<String>, String>,
     mut on_text: impl FnMut(&str, u64),
-    attempt_started: Instant,
+    stream_started: Instant,
     first_word_budget: Duration,
     cancellation_token: &CancellationToken,
 ) -> Result<(String, u64), String> {
@@ -391,16 +443,16 @@ async fn stream_sse(
             } else {
                 first_word_budget
             };
-            let Some(remaining) = effective_budget.checked_sub(attempt_started.elapsed()) else {
+            let Some(remaining) = effective_budget.checked_sub(stream_started.elapsed()) else {
                 return Err(format!(
-                    "first translated word exceeded {}ms",
+                    "first translated word exceeded {}ms after response headers",
                     effective_budget.as_millis()
                 ));
             };
             tokio::select! {
                 _ = cancellation_token.cancelled() => return Err("Live translation was cancelled.".to_string()),
                 next = timeout(remaining, stream.next()) => next
-                    .map_err(|_| format!("first translated word exceeded {}ms", effective_budget.as_millis()))?,
+                    .map_err(|_| format!("first translated word exceeded {}ms after response headers", effective_budget.as_millis()))?,
             }
         } else {
             tokio::select! {
@@ -430,7 +482,7 @@ async fn stream_sse(
                 if !delta.is_empty() {
                     text.push_str(&delta);
                     let first = *first_word_ms.get_or_insert_with(|| {
-                        attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                        stream_started.elapsed().as_millis().min(u64::MAX as u128) as u64
                     });
                     on_text(&text, first);
                 }
@@ -443,7 +495,7 @@ async fn stream_sse(
     }
     Ok((
         text,
-        first_word_ms.unwrap_or_else(|| attempt_started.elapsed().as_millis() as u64),
+        first_word_ms.unwrap_or_else(|| stream_started.elapsed().as_millis() as u64),
     ))
 }
 
@@ -828,11 +880,12 @@ async fn translate_with_candidate<R: Runtime>(
                 budgets.first_word.as_millis()
             )
         })??;
+        let stream_started = Instant::now();
         return stream_sse(
             response,
             codex_delta,
             &mut emit_text,
-            attempt_started,
+            stream_started,
             budgets.first_word,
             cancellation_token,
         )
@@ -875,6 +928,7 @@ async fn translate_with_candidate<R: Runtime>(
             .unwrap_or_else(|_| "Unknown error".to_string());
         return Err(format!("translation provider returned {status}: {body}"));
     }
+    let stream_started = Instant::now();
     let extract: fn(&Value) -> Result<Option<String>, String> =
         if config.provider == LLMProvider::Claude {
             claude_delta
@@ -885,7 +939,7 @@ async fn translate_with_candidate<R: Runtime>(
         response,
         extract,
         &mut emit_text,
-        attempt_started,
+        stream_started,
         budgets.first_word,
         cancellation_token,
     )
@@ -1077,20 +1131,21 @@ pub async fn api_translate_live_text<R: Runtime>(
     if source.is_none() && text.chars().count() >= 12 {
         if let Some(info) = whatlang::detect(text) {
             if info.is_reliable() && info.confidence() >= 0.75 {
-                let detected_code = info.lang().code();
-                if target.code.starts_with(detected_code) || detected_code.starts_with(&target.code) {
-                    return Ok(LiveTranslationResponse {
-                        request_id,
-                        translated_text: text.to_string(),
-                        source_language: Some(detected_code.to_string()),
-                        target_language: target.code.to_string(),
-                        provider: "passthrough".to_string(),
-                        model: "none".to_string(),
-                        latency_ms: 0,
-                        first_word_latency_ms: 0,
-                        fallback_reason: None,
-                        cached: true,
-                    });
+                if let Some(detected_app_code) = whatlang_to_app_language_code(info.lang()) {
+                    if is_detected_language_matching_target(detected_app_code, &target.code) {
+                        return Ok(LiveTranslationResponse {
+                            request_id,
+                            translated_text: text.to_string(),
+                            source_language: Some(detected_app_code.to_string()),
+                            target_language: target.code.to_string(),
+                            provider: "passthrough".to_string(),
+                            model: "none".to_string(),
+                            latency_ms: 0,
+                            first_word_latency_ms: 0,
+                            fallback_reason: None,
+                            cached: true,
+                        });
+                    }
                 }
             }
         }
@@ -1352,5 +1407,68 @@ mod tests {
         assert_eq!(clean_translation_output("Translation: Bonjour"), "Bonjour");
         assert_eq!(clean_translation_output("\"Hola\""), "Hola");
         assert_eq!(clean_translation_output("```text\nCiao\n```"), "Ciao");
+    }
+
+    #[test]
+    fn fast_claude_model_is_haiku_4_5() {
+        assert_eq!(FAST_CLAUDE_MODEL, "claude-haiku-4-5-20251001");
+        assert_eq!(fast_default_model("claude"), Some("claude-haiku-4-5-20251001"));
+    }
+
+    #[test]
+    fn maps_whatlang_languages_to_supported_app_codes() {
+        assert_eq!(whatlang_to_app_language_code(whatlang::Lang::Jpn), Some("ja"));
+        assert_eq!(whatlang_to_app_language_code(whatlang::Lang::Spa), Some("es"));
+        assert_eq!(whatlang_to_app_language_code(whatlang::Lang::Cmn), Some("zh"));
+        assert_eq!(whatlang_to_app_language_code(whatlang::Lang::Deu), Some("de"));
+        assert_eq!(whatlang_to_app_language_code(whatlang::Lang::Fra), Some("fr"));
+        assert_eq!(whatlang_to_app_language_code(whatlang::Lang::Eng), Some("en"));
+        assert_eq!(whatlang_to_app_language_code(whatlang::Lang::Rus), Some("ru"));
+        assert_eq!(whatlang_to_app_language_code(whatlang::Lang::Kor), Some("ko"));
+    }
+
+    #[test]
+    fn detected_language_matches_target() {
+        assert!(is_detected_language_matching_target("ja", "ja"));
+        assert!(is_detected_language_matching_target("es", "es"));
+        assert!(is_detected_language_matching_target("zh", "zh-CN"));
+        assert!(is_detected_language_matching_target("zh", "zh-TW"));
+        assert!(is_detected_language_matching_target("en", "en"));
+        assert!(!is_detected_language_matching_target("ja", "en"));
+        assert!(!is_detected_language_matching_target("es", "fr"));
+    }
+
+    #[test]
+    fn local_providers_receive_extended_budgets() {
+        let instant_cloud = effective_budgets(translation_budgets(Some("instant")), false);
+        assert_eq!(instant_cloud.first_word, Duration::from_millis(2800));
+        assert_eq!(instant_cloud.total, Duration::from_secs(15));
+
+        let instant_local = effective_budgets(translation_budgets(Some("instant")), true);
+        assert_eq!(instant_local.first_word, Duration::from_secs(12));
+        assert_eq!(instant_local.attempt, Duration::from_secs(25));
+        assert_eq!(instant_local.total, Duration::from_secs(30));
+    }
+
+    #[tokio::test]
+    async fn provider_cooldown_resets() {
+        let config = TranslationProviderConfig {
+            provider: LLMProvider::Groq,
+            provider_name: "groq".to_string(),
+            model_name: FAST_GROQ_MODEL.to_string(),
+            api_key: "dummy".to_string(),
+            ollama_endpoint: None,
+            custom_openai_endpoint: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        };
+        record_provider_failure(&config).await;
+        record_provider_failure(&config).await;
+        record_provider_failure(&config).await;
+        assert!(provider_is_cooling_down(&config).await);
+
+        clear_provider_health().await;
+        assert!(!provider_is_cooling_down(&config).await);
     }
 }

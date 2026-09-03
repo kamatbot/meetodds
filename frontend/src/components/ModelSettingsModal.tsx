@@ -98,7 +98,6 @@ const CODEX_FALLBACK_MODELS = [
 ];
 
 const CLAUDE_FALLBACK_MODELS = [
-  'claude-3-5-haiku-20241022',
   'claude-sonnet-4-5-20250929',
   'claude-haiku-4-5-20251001',
   'claude-opus-4-5-20251101',

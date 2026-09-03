@@ -26,7 +26,7 @@ adaptive translation router
       |
       +-- Groq / llama-3.1-8b-instant
       +-- OpenAI / gpt-4o-mini
-      +-- Claude / claude-3-5-haiku-20241022
+      +-- Claude / claude-haiku-4-5-20251001
       +-- configured summary provider as compatibility fallback
       |
       v
@@ -49,7 +49,7 @@ Summary quality and live-caption latency are different optimization problems. Au
 
 - Groq: `llama-3.1-8b-instant`
 - OpenAI API: `gpt-4o-mini`
-- Anthropic: `claude-3-5-haiku-20241022`
+- Anthropic: `claude-haiku-4-5-20251001`
 - Current summary provider: final fallback for compatibility, including ChatGPT/Codex, Ollama, Built-in AI, OpenRouter, and custom OpenAI endpoints.
 
 Users can explicitly select Groq/OpenAI/Claude/current-summary-provider and optionally override the model.
