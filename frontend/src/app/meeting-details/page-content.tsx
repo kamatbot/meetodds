@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import NotesEditor from '@/components/Meeting/NotesEditor';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import type { MeetingDetailTab } from '@/components/Meeting/MeetingHeader';
 
@@ -233,14 +234,7 @@ export default function PageContent({
         )}
 
         {activeTab === 'notes' && (
-          <div className="flex h-full items-start justify-center overflow-y-auto px-6 py-10">
-            <div className="w-full max-w-[760px] rounded-card border border-border bg-surface p-6">
-              <h2 className="text-title text-text">Notes</h2>
-              <p className="mt-1.5 text-body text-2">
-                Notes persistence is wired in the next implementation module. This tab is intentionally non-editable until the native notes contract lands.
-              </p>
-            </div>
-          </div>
+          <NotesEditor meetingId={meeting.id} />
         )}
       </div>
     </div>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { RecordingControls } from '@/components/RecordingControls';
 import HomeDashboard from '@/components/Home/HomeDashboard';
+import TranscriptDrawer from '@/components/Meeting/TranscriptDrawer';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
@@ -12,7 +13,6 @@ import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
-import { TranscriptPanel } from './_components/TranscriptPanel';
 import { useModalState } from '@/hooks/useModalState';
 import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
@@ -26,7 +26,6 @@ import { useRouter } from 'next/navigation';
 export default function Home() {
   // Keep the existing local recorder state because the start/stop hooks still depend on it.
   const [isRecording, setIsRecordingState] = useState(false);
-  const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
 
   const { meetingTitle } = useTranscripts();
@@ -125,7 +124,7 @@ export default function Home() {
           action: result.meetingId ? {
             label: 'View Meeting',
             onClick: () => {
-              router.push(`/meeting-details?id=${result.meetingId}`);
+              router.push(`/meeting?id=${result.meetingId}`);
             },
           } : undefined,
           duration: 10_000,
@@ -139,7 +138,7 @@ export default function Home() {
 
         if (result.meetingId) {
           setTimeout(() => {
-            router.push(`/meeting-details?id=${result.meetingId}`);
+            router.push(`/meeting?id=${result.meetingId}`);
           }, 2_000);
         }
       }
@@ -157,24 +156,6 @@ export default function Home() {
       sessionStorage.removeItem('recovery_dialog_shown');
     }
   };
-
-  // This is the existing RecordingControls presentation contract. Real level-meter
-  // migration belongs to Module 2B; do not alter the recorder/audio critical path here.
-  useEffect(() => {
-    if (recordingState.isRecording) {
-      const interval = setInterval(() => {
-        setBarHeights((previous) => {
-          const next = [...previous];
-          next[0] = `${Math.random() * 20 + 10}px`;
-          next[1] = `${Math.random() * 20 + 10}px`;
-          next[2] = `${Math.random() * 20 + 10}px`;
-          return next;
-        });
-      }, 300);
-
-      return () => clearInterval(interval);
-    }
-  }, [recordingState.isRecording]);
 
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
   const recordingBusy =
@@ -213,45 +194,47 @@ export default function Home() {
         onLoadPreview={loadMeetingTranscripts}
       />
 
-      <HomeDashboard
-        hasMicrophone={hasMicrophone}
-        hasSystemAudio={hasSystemAudio}
-        permissionsLoading={isCheckingPermissions}
-        permissionError={permissionError}
-        recoverableMeetings={recoverableMeetings}
-        isRecoveryLoading={isLoadingRecovery}
-        isRecording={recordingState.isRecording}
-        recordingStatus={status}
-        recordingDuration={recordingState.recordingDuration}
-        newMeetingDisabled={!hasMicrophone || isRecordingDisabled}
-        onNewMeeting={() => void handleNewMeeting()}
-        onImport={(filePath) => openImportDialog(filePath)}
-        onReviewRecovery={() => setShowRecoveryDialog(true)}
-        onOpenSettings={() => router.push('/settings')}
-      />
+      <div className="relative flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1">
+          <HomeDashboard
+            hasMicrophone={hasMicrophone}
+            hasSystemAudio={hasSystemAudio}
+            permissionsLoading={isCheckingPermissions}
+            permissionError={permissionError}
+            recoverableMeetings={recoverableMeetings}
+            isRecoveryLoading={isLoadingRecovery}
+            isRecording={recordingState.isRecording}
+            recordingStatus={status}
+            recordingDuration={recordingState.recordingDuration}
+            newMeetingDisabled={!hasMicrophone || isRecordingDisabled}
+            onNewMeeting={() => void handleNewMeeting()}
+            onImport={(filePath) => openImportDialog(filePath)}
+            onReviewRecovery={() => setShowRecoveryDialog(true)}
+            onOpenSettings={() => router.push('/settings')}
+          />
+        </div>
 
-      {/* Preserve TranscriptPanel lifecycle/state without exposing a live transcript on Home.
-          Module 2 will move this presentation to the canonical meeting route. */}
-      <div className="hidden" aria-hidden="true">
-        <TranscriptPanel
-          isProcessingStop={isProcessingStop}
-          isStopping={isStopping}
-          showModal={showModal}
-        />
+        {(recordingState.isRecording || isStopping || isProcessingStop) && (
+          <TranscriptDrawer
+            isProcessingStop={isProcessingStop}
+            isStopping={isStopping}
+            showModal={showModal}
+          />
+        )}
       </div>
 
       {recordingState.isRecording &&
         status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
         status !== RecordingStatus.SAVING && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-6">
-            <div className="pointer-events-auto rounded-full bg-surface shadow-popover">
+          <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center px-6">
+            <div className="pointer-events-auto">
               <RecordingControls
                 isRecording={recordingState.isRecording}
                 onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
                 onRecordingStart={handleRecordingStart}
                 onTranscriptReceived={() => {}}
                 onStopInitiated={() => setIsStopping(true)}
-                barHeights={barHeights}
+                barHeights={[]}
                 onTranscriptionError={(message) => {
                   showModal('errorAlert', message);
                 }}

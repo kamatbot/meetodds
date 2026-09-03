@@ -651,6 +651,8 @@ pub fn run() {
             api::api_set_meeting_starred,
             api::api_defer_delete_meeting,
             api::api_restore_meeting,
+            api::api_get_meeting_notes,
+            api::api_save_meeting_notes,
             api::api_search_transcripts,
             api::api_get_profile,
             api::api_save_profile,
