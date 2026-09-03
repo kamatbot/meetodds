@@ -831,6 +831,8 @@ async fn translate_with_candidate<R: Runtime>(
         );
     };
 
+    let connect_timeout = budgets.first_word.max(Duration::from_millis(3500));
+
     if config.provider == LLMProvider::BuiltInAI {
         let future = generate_summary(
             &TRANSLATION_HTTP_CLIENT,
@@ -847,10 +849,10 @@ async fn translate_with_candidate<R: Runtime>(
             app_data_dir.as_ref(),
             None,
         );
-        let result = timeout(budgets.first_word, future).await.map_err(|_| {
+        let result = timeout(budgets.attempt, future).await.map_err(|_| {
             format!(
-                "first translated word exceeded {}ms",
-                budgets.first_word.as_millis()
+                "translation exceeded {}ms attempt limit",
+                budgets.attempt.as_millis()
             )
         })??;
         let first = attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -863,7 +865,7 @@ async fn translate_with_candidate<R: Runtime>(
             .as_deref()
             .ok_or_else(|| "app_data_dir is required for OpenAI Codex provider".to_string())?;
         let response = timeout(
-            budgets.first_word,
+            connect_timeout,
             crate::openai_codex::open_codex_stream(
                 &TRANSLATION_HTTP_CLIENT,
                 dir,
@@ -876,8 +878,8 @@ async fn translate_with_candidate<R: Runtime>(
         .await
         .map_err(|_| {
             format!(
-                "first translated word exceeded {}ms",
-                budgets.first_word.as_millis()
+                "translation request connection timed out after {}ms",
+                connect_timeout.as_millis()
             )
         })??;
         let stream_started = Instant::now();
@@ -910,7 +912,6 @@ async fn translate_with_candidate<R: Runtime>(
         config.top_p,
         true,
     )?;
-    let connect_timeout = budgets.first_word.max(Duration::from_millis(3500));
     let response = timeout(connect_timeout, request.send())
         .await
         .map_err(|_| {
