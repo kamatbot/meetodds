@@ -6,6 +6,7 @@ import { LoaderIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import MeetingHeader, { type MeetingDetailTab } from '@/components/Meeting/MeetingHeader';
+import AudioPlayer from '@/components/AudioPlayer';
 import { useConfig } from '@/contexts/ConfigContext';
 import { usePaginatedTranscripts } from '@/hooks/usePaginatedTranscripts';
 import Analytics from '@/lib/analytics';
@@ -339,6 +340,9 @@ function MeetingContent() {
           onLoadMore={loadMore}
         />
       </div>
+      {activeTab === 'transcript' && (
+        <AudioPlayer meetingId={meetingDetails.id} />
+      )}
     </div>
   );
 }

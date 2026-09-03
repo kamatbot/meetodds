@@ -5,12 +5,12 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   MoreHorizontal,
   Pencil,
-  Share2,
   Star,
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+import ShareMenu from '@/components/Meeting/ShareMenu';
 import type { DeferredDeleteResponse, MeetingListPage } from '@/types/meeting';
 import {
   DropdownMenu,
@@ -313,14 +313,7 @@ export default function MeetingHeader({
           >
             <Star className="h-4 w-4" fill={starred ? 'currentColor' : 'none'} strokeWidth={1.75} />
           </button>
-          <button
-            type="button"
-            disabled
-            title="Share and export arrive in the Share/Export module"
-            className="inline-flex h-8 items-center gap-1.5 rounded-control border border-border bg-surface px-2.5 text-ui font-medium text-2 opacity-55"
-          >
-            <Share2 className="h-4 w-4" strokeWidth={1.75} /> Share
-          </button>
+          <ShareMenu meetingId={meetingId} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button

@@ -30,3 +30,34 @@ export interface DeferredDeleteResponse {
   meetingId: string;
   undoUntil: string;
 }
+
+export interface MeetingExportInfo {
+  meetingId: string;
+  title: string;
+  createdAt: string;
+  hasSummary: boolean;
+  hasNotes: boolean;
+  hasTranscript: boolean;
+  hasAudio: boolean;
+  transcriptHasTiming: boolean;
+  audioPath: string | null;
+}
+
+export interface MeetingExportSelection {
+  includeSummary: boolean;
+  includeNotes: boolean;
+  includeTranscript: boolean;
+}
+
+export type MeetingExportFormat = 'markdown' | 'text' | 'srt' | 'json';
+
+export interface MeetingExportRequest {
+  meetingId: string;
+  format: MeetingExportFormat;
+  selection: MeetingExportSelection;
+}
+
+export interface MeetingExportResult {
+  cancelled: boolean;
+  path?: string | null;
+}
