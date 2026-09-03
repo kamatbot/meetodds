@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { RecordingControls } from '@/components/RecordingControls';
+import { useCallback, useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { appDataDir } from '@tauri-apps/api/path';
 import HomeDashboard from '@/components/Home/HomeDashboard';
+import LiveMeetingBar from '@/components/Meeting/LiveMeetingBar';
 import TranscriptDrawer from '@/components/Meeting/TranscriptDrawer';
 import StopProgressStrip from '@/components/Meeting/StopProgressStrip';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -27,9 +29,10 @@ export default function Home() {
   // Keep the existing local recorder state because the start/stop hooks still depend on it.
   const [isRecording, setIsRecordingState] = useState(false);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  const [isHomeControlBusy, setIsHomeControlBusy] = useState(false);
 
-  const { meetingTitle } = useTranscripts();
-  const { transcriptModelConfig, selectedDevices } = useConfig();
+  const { livePreview } = useTranscripts();
+  const { transcriptModelConfig } = useConfig();
   const { openImportDialog } = useImportDialog();
   const recordingState = useRecordingState();
   const { status, isStopping, isProcessing } = recordingState;
@@ -177,6 +180,41 @@ export default function Home() {
     }
   };
 
+  const handleHomePauseResume = useCallback(async () => {
+    if (!inAppRecording || isHomeControlBusy) return;
+    setIsHomeControlBusy(true);
+    try {
+      await invoke(recordingState.isPaused ? 'resume_recording' : 'pause_recording');
+    } catch (error) {
+      toast.error(`Could not ${recordingState.isPaused ? 'resume' : 'pause'} recording`, {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsHomeControlBusy(false);
+    }
+  }, [inAppRecording, isHomeControlBusy, recordingState.isPaused]);
+
+  const handleHomeStop = useCallback(async () => {
+    if (!inAppRecording || isHomeControlBusy) return;
+    setIsHomeControlBusy(true);
+    setIsStopping(true);
+    try {
+      const dataDir = await appDataDir();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      await invoke('stop_recording', {
+        args: { save_path: `${dataDir}/recording-${timestamp}.wav` },
+      });
+      await handleRecordingStop(true);
+    } catch (error) {
+      setIsStopping(false);
+      toast.error('Could not stop recording', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsHomeControlBusy(false);
+    }
+  }, [handleRecordingStop, inAppRecording, isHomeControlBusy, setIsStopping]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-bg">
       <SettingsModals
@@ -198,6 +236,16 @@ export default function Home() {
         isProcessing={status === RecordingStatus.PROCESSING_TRANSCRIPTS && !recordingState.isRecording}
         isSaving={status === RecordingStatus.SAVING}
       />
+
+      {inAppRecording && (
+        <LiveMeetingBar
+          preview={livePreview}
+          isPaused={recordingState.isPaused}
+          isBusy={isHomeControlBusy || isStopping || isProcessingStop}
+          onPauseResume={() => void handleHomePauseResume()}
+          onStop={() => void handleHomeStop()}
+        />
+      )}
 
       <div className="relative flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
@@ -228,29 +276,6 @@ export default function Home() {
         )}
       </div>
 
-      {inAppRecording &&
-        status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
-        status !== RecordingStatus.SAVING && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center px-6">
-            <div className="pointer-events-auto">
-              <RecordingControls
-                isRecording={inAppRecording}
-                onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
-                onRecordingStart={handleRecordingStart}
-                onTranscriptReceived={() => {}}
-                onStopInitiated={() => setIsStopping(true)}
-                barHeights={[]}
-                onTranscriptionError={(message) => {
-                  showModal('errorAlert', message);
-                }}
-                isRecordingDisabled={isRecordingDisabled}
-                isParentProcessing={isProcessingStop}
-                selectedDevices={selectedDevices}
-                meetingName={meetingTitle}
-              />
-            </div>
-          </div>
-        )}
     </div>
   );
 }

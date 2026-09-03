@@ -224,7 +224,7 @@ export default function HomeDashboard({
                 {recordingStatus === RecordingStatus.STARTING ? 'Starting recording…' : 'Recording in progress'}
               </p>
               <p className="text-caption text-3">
-                Recording continues while you use the app. Use the recorder controls below to pause or stop.
+                Recording continues while you use the app.
               </p>
             </div>
             <span className="font-mono text-caption tabular-nums text-record">
