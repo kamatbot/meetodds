@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import MainContent from '@/components/MainContent';
 import CommandPalette from '@/components/CommandPalette';
@@ -8,6 +9,7 @@ import Toolbar from './Toolbar';
 
 const SIDEBAR_VISIBLE_KEY = 'meetodds.shell.sidebar.visible';
 const SIDEBAR_WIDTH_KEY = 'meetodds.shell.sidebar.width';
+const APPEARANCE_KEY = 'meetodds.appearance';
 const DEFAULT_SIDEBAR_WIDTH = 260;
 const MIN_SIDEBAR_WIDTH = 220;
 const MAX_SIDEBAR_WIDTH = 360;
@@ -28,12 +30,27 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
+function restoreAppearance() {
+  try {
+    const appearance = window.localStorage.getItem(APPEARANCE_KEY);
+    if (appearance === 'light' || appearance === 'dark') {
+      document.documentElement.setAttribute('data-theme', appearance);
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  } catch (error) {
+    console.warn('[AppShell] Unable to restore appearance:', error);
+  }
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [storageReady, setStorageReady] = useState(false);
 
   useEffect(() => {
+    restoreAppearance();
     try {
       const persistedVisible = window.localStorage.getItem(SIDEBAR_VISIBLE_KEY);
       const persistedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
@@ -75,11 +92,37 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const editable = isEditableTarget(event.target);
+
+      if (event.metaKey && event.key === ',') {
+        event.preventDefault();
+        router.push('/settings');
+        return;
+      }
+
+      if (event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !editable) {
+        if (event.key === '1') {
+          event.preventDefault();
+          router.push('/');
+          return;
+        }
+        if (event.key === '2') {
+          event.preventDefault();
+          router.push('/meetings');
+          return;
+        }
+        if (event.key === '3') {
+          event.preventDefault();
+          router.push('/meetings?starred=1');
+          return;
+        }
+      }
+
       if (
         event.metaKey &&
         event.ctrlKey &&
         event.key.toLowerCase() === 's' &&
-        !isEditableTarget(event.target)
+        !editable
       ) {
         event.preventDefault();
         toggleSidebar();
@@ -88,7 +131,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleSidebar]);
+  }, [router, toggleSidebar]);
 
   const beginResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
