@@ -497,10 +497,25 @@ pub fn run() {
             // }
 
             // Initialize database (handles first launch detection and conditional setup)
-            tauri::async_runtime::block_on(async {
+            if let Err(error) = tauri::async_runtime::block_on(async {
                 database::setup::initialize_database_on_startup(&_app.handle()).await
-            })
-            .expect("Failed to initialize database");
+            }) {
+                log::error!(
+                    "Database initialization failed; preserving existing meeting data and starting without database access: {}",
+                    error
+                );
+
+                if let Ok(app_data_dir) = _app.handle().path().app_data_dir() {
+                    let diagnostic_path = app_data_dir.join("startup-database-error.txt");
+                    if let Err(write_error) = std::fs::write(&diagnostic_path, format!("{error}\n")) {
+                        log::error!(
+                            "Failed to write database startup diagnostic at {}: {}",
+                            diagnostic_path.display(),
+                            write_error
+                        );
+                    }
+                }
+            }
 
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
