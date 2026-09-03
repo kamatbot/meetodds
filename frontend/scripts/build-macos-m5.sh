@@ -20,4 +20,13 @@ export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$build_jobs}"
 export NEXT_TELEMETRY_DISABLED="${NEXT_TELEMETRY_DISABLED:-1}"
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-cpu=native"
 
+workspace_root="$(cd "$(dirname "$0")/../.." && pwd)"
+target_triple="$(rustc -vV | awk '/^host:/{print $2}')"
+sidecar_path="src-tauri/binaries/llama-helper-${target_triple}"
+
+echo "Building llama-helper sidecar for ${target_triple}"
+cargo build --manifest-path "$workspace_root/llama-helper/Cargo.toml" --release --features metal
+mkdir -p "$(dirname "$sidecar_path")"
+install -m 755 "$workspace_root/target/release/llama-helper" "$sidecar_path"
+
 pnpm exec tauri build -- --features metal,coreml

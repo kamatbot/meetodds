@@ -20,11 +20,16 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // Pass can_record=true initially, will be updated by update_tray_menu immediately
     let menu = build_menu(app, RecordingState::Stopped, true)?;
 
-    TrayIconBuilder::with_id("main-tray")
+    let tray = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .tooltip("MeetOdds")
-        .icon(app.default_window_icon().unwrap().clone())
-        .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
+        .tooltip("MeetOdds");
+    let tray = if let Some(icon) = app.default_window_icon() {
+        tray.icon(icon.clone())
+    } else {
+        log::warn!("No default window icon is available; creating the tray icon without one");
+        tray
+    };
+    tray.on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .build(app)?;
 
     // Update tray menu with actual recording state after creation
