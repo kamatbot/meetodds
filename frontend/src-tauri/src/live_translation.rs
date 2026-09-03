@@ -16,7 +16,6 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 const MAX_LIVE_TEXT_CHARS: usize = 6_000;
-const LIVE_TRANSLATION_TIMEOUT: Duration = Duration::from_secs(30);
 // A translation is roughly the input length; this only bounds runaway output.
 const LIVE_TRANSLATION_MAX_TOKENS: u32 = 512;
 const TRANSLATION_CACHE_CAPACITY: usize = 256;
@@ -279,46 +278,58 @@ fn resolve_source_language(value: Option<&str>) -> Result<Option<LanguageSpec>, 
     }
 }
 
-    fn build_translation_prompts(
-        text: &str,
-        source_language: Option<LanguageSpec>,
-        target_language: LanguageSpec,
-        context_text: Option<&str>,
-        glossary: Option<&str>,
-        context_hint: Option<&str>,
-    ) -> (String, String) {
-        let source = source_language
-            .map(|language| language.name.to_string())
-            .unwrap_or_else(|| "the automatically detected source language".to_string());
+fn build_translation_prompts(
+    text: &str,
+    source_language: Option<LanguageSpec>,
+    target_language: LanguageSpec,
+    context_text: Option<&str>,
+    glossary: Option<&str>,
+    context_hint: Option<&str>,
+) -> (String, String) {
+    let source = source_language
+        .map(|language| language.name.to_string())
+        .unwrap_or_else(|| "the automatically detected source language".to_string());
 
-        let mut system_prompt = format!(
+    let mut system_prompt = format!(
             "You are a simultaneous interpreter for a live business meeting. Translate from {source} to {}. \
 Return ONLY the translation of the CURRENT UTTERANCE. Never repeat the reference context. \
 Prefer natural spoken language over literal word-for-word phrasing. Preserve names, product terms, numbers, dates, URLs, and intent. \
 Translate short turns such as Yes, No, Agreed, and interruptions; do not invent missing speech. \
 If the current utterance is already in {}, return it unchanged.",
             target_language.name, target_language.name
+    );
+
+    if let Some(hint) = context_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        system_prompt.push_str(
+            "
+Meeting context: ",
         );
-
-        if let Some(hint) = context_hint.map(str::trim).filter(|value| !value.is_empty()) {
-            system_prompt.push_str("
-Meeting context: ");
-            system_prompt.push_str(hint);
-        }
-        if let Some(terms) = glossary.map(str::trim).filter(|value| !value.is_empty()) {
-            system_prompt.push_str("
-Terminology / names to preserve consistently: ");
-            system_prompt.push_str(terms);
-        }
-        if let Some(context) = context_text.map(str::trim).filter(|value| !value.is_empty()) {
-            system_prompt.push_str("
-Reference-only previous turns (DO NOT translate or output these):
-");
-            system_prompt.push_str(context);
-        }
-
-        (system_prompt, text.to_string())
+        system_prompt.push_str(hint);
     }
+    if let Some(terms) = glossary.map(str::trim).filter(|value| !value.is_empty()) {
+        system_prompt.push_str(
+            "
+Terminology / names to preserve consistently: ",
+        );
+        system_prompt.push_str(terms);
+    }
+    if let Some(context) = context_text
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        system_prompt.push_str(
+            "
+Reference-only previous turns (DO NOT translate or output these):
+",
+        );
+        system_prompt.push_str(context);
+    }
+
+    (system_prompt, text.to_string())
+}
 
 fn clean_translation_output(raw: &str) -> String {
     let mut output = raw.trim().to_string();
@@ -358,6 +369,7 @@ async fn stream_sse(
     mut on_text: impl FnMut(&str, u64),
     attempt_started: Instant,
     first_word_budget: Duration,
+    cancellation_token: &CancellationToken,
 ) -> Result<(String, u64), String> {
     let mut stream = response.bytes_stream();
     let mut buffer: Vec<u8> = Vec::new();
@@ -367,26 +379,39 @@ async fn stream_sse(
     loop {
         let next_chunk = if first_word_ms.is_none() {
             let Some(remaining) = first_word_budget.checked_sub(attempt_started.elapsed()) else {
-                return Err(format!("first translated word exceeded {}ms", first_word_budget.as_millis()));
+                return Err(format!(
+                    "first translated word exceeded {}ms",
+                    first_word_budget.as_millis()
+                ));
             };
-            timeout(remaining, stream.next())
-                .await
-                .map_err(|_| format!("first translated word exceeded {}ms", first_word_budget.as_millis()))?
+            tokio::select! {
+                _ = cancellation_token.cancelled() => return Err("Live translation was cancelled.".to_string()),
+                next = timeout(remaining, stream.next()) => next
+                    .map_err(|_| format!("first translated word exceeded {}ms", first_word_budget.as_millis()))?,
+            }
         } else {
-            stream.next().await
+            tokio::select! {
+                _ = cancellation_token.cancelled() => return Err("Live translation was cancelled.".to_string()),
+                next = stream.next() => next,
+            }
         };
 
         let Some(chunk) = next_chunk else { break };
         let chunk = chunk.map_err(|error| format!("Translation stream failed: {error}"))?;
         buffer.extend_from_slice(&chunk);
-        while let Some(newline) = buffer.iter().position(|byte| *byte == b'
-') {
+        while let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = buffer.drain(..=newline).collect();
             let line = String::from_utf8_lossy(&line);
-            let Some(data) = line.trim().strip_prefix("data:") else { continue };
+            let Some(data) = line.trim().strip_prefix("data:") else {
+                continue;
+            };
             let data = data.trim();
-            if data.is_empty() || data == "[DONE]" { continue; }
-            let Ok(event) = serde_json::from_str::<Value>(data) else { continue };
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            let Ok(event) = serde_json::from_str::<Value>(data) else {
+                continue;
+            };
             if let Some(delta) = extract(&event)? {
                 if !delta.is_empty() {
                     text.push_str(&delta);
@@ -466,7 +491,9 @@ fn cache_key(
     let mut hasher = DefaultHasher::new();
     provider.hash(&mut hasher);
     model.hash(&mut hasher);
-    source_language.map(|language| language.code).hash(&mut hasher);
+    source_language
+        .map(|language| language.code)
+        .hash(&mut hasher);
     target_language.code.hash(&mut hasher);
     text.hash(&mut hasher);
     context_text.unwrap_or_default().hash(&mut hasher);
@@ -475,9 +502,13 @@ fn cache_key(
     format!("{:016x}", hasher.finish())
 }
 
-
 fn translation_budgets(speed: Option<&str>) -> TranslationBudgets {
-    match speed.unwrap_or("instant").trim().to_ascii_lowercase().as_str() {
+    match speed
+        .unwrap_or("instant")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "accurate" => TranslationBudgets {
             first_word: Duration::from_secs(10),
             attempt: Duration::from_secs(30),
@@ -580,7 +611,8 @@ fn push_unique_candidate(
     candidate: TranslationProviderConfig,
 ) {
     if candidates.iter().any(|existing| {
-        existing.provider_name == candidate.provider_name && existing.model_name == candidate.model_name
+        existing.provider_name == candidate.provider_name
+            && existing.model_name == candidate.model_name
     }) {
         return;
     }
@@ -610,14 +642,19 @@ async fn resolve_provider_candidates(
         }
     } else if engine == "summary" {
         let mut current = resolve_provider_config(pool).await?;
-        if let Some(model) = model_override.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(model) = model_override
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
             current.model_name = model.to_string();
         }
         push_unique_candidate(&mut candidates, current);
     } else if ["groq", "openai", "claude"].contains(&engine.as_str()) {
         let requested = resolve_fast_cloud_candidate(pool, &engine, model_override)
             .await?
-            .ok_or_else(|| format!("{engine} is selected for live translation but no API key is configured"))?;
+            .ok_or_else(|| {
+                format!("{engine} is selected for live translation but no API key is configured")
+            })?;
         push_unique_candidate(&mut candidates, requested);
         if let Ok(current) = resolve_provider_config(pool).await {
             push_unique_candidate(&mut candidates, current);
@@ -680,16 +717,16 @@ async fn translate_with_candidate<R: Runtime>(
     };
 
     let attempt_started = Instant::now();
-    let (system_prompt, user_prompt) = build_translation_prompts(
-        text,
-        source,
-        target,
-        context_text,
-        glossary,
-        context_hint,
-    );
+    let (system_prompt, user_prompt) =
+        build_translation_prompts(text, source, target, context_text, glossary, context_hint);
     let app_data_dir = app.path().app_data_dir().ok();
-    let max_tokens = Some(LIVE_TRANSLATION_MAX_TOKENS);
+    let max_tokens = Some(
+        config
+            .max_tokens
+            .map_or(LIVE_TRANSLATION_MAX_TOKENS, |value| {
+                value.min(LIVE_TRANSLATION_MAX_TOKENS)
+            }),
+    );
     let provider_name = config.provider_name.clone();
     let model_name = config.model_name.clone();
     let emit_request_id = request_id.to_string();
@@ -727,18 +764,21 @@ async fn translate_with_candidate<R: Runtime>(
             app_data_dir.as_ref(),
             None,
         );
-        let result = timeout(budgets.first_word, future)
-            .await
-            .map_err(|_| format!("first translated word exceeded {}ms", budgets.first_word.as_millis()))??;
+        let result = timeout(budgets.first_word, future).await.map_err(|_| {
+            format!(
+                "first translated word exceeded {}ms",
+                budgets.first_word.as_millis()
+            )
+        })??;
         let first = attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         emit_text(&result, first);
         return Ok((result, first));
     }
 
     if config.provider == LLMProvider::OpenAICodex {
-        let dir = app_data_dir.as_deref().ok_or_else(|| {
-            "app_data_dir is required for OpenAI Codex provider".to_string()
-        })?;
+        let dir = app_data_dir
+            .as_deref()
+            .ok_or_else(|| "app_data_dir is required for OpenAI Codex provider".to_string())?;
         let response = timeout(
             budgets.first_word,
             crate::openai_codex::open_codex_stream(
@@ -751,13 +791,19 @@ async fn translate_with_candidate<R: Runtime>(
             ),
         )
         .await
-        .map_err(|_| format!("first translated word exceeded {}ms", budgets.first_word.as_millis()))??;
+        .map_err(|_| {
+            format!(
+                "first translated word exceeded {}ms",
+                budgets.first_word.as_millis()
+            )
+        })??;
         return stream_sse(
             response,
             codex_delta,
             &mut emit_text,
             attempt_started,
             budgets.first_word,
+            cancellation_token,
         )
         .await;
     }
@@ -782,24 +828,34 @@ async fn translate_with_candidate<R: Runtime>(
     )?;
     let response = timeout(budgets.first_word, request.send())
         .await
-        .map_err(|_| format!("first translated word exceeded {}ms", budgets.first_word.as_millis()))?
+        .map_err(|_| {
+            format!(
+                "first translated word exceeded {}ms",
+                budgets.first_word.as_millis()
+            )
+        })?
         .map_err(|error| format!("Failed to send translation request: {error}"))?;
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         return Err(format!("translation provider returned {status}: {body}"));
     }
-    let extract: fn(&Value) -> Result<Option<String>, String> = if config.provider == LLMProvider::Claude {
-        claude_delta
-    } else {
-        chat_delta
-    };
+    let extract: fn(&Value) -> Result<Option<String>, String> =
+        if config.provider == LLMProvider::Claude {
+            claude_delta
+        } else {
+            chat_delta
+        };
     stream_sse(
         response,
         extract,
         &mut emit_text,
         attempt_started,
         budgets.first_word,
+        cancellation_token,
     )
     .await
 }
@@ -937,10 +993,9 @@ pub async fn api_prepare_live_translation(
 }
 
 #[tauri::command]
-pub async fn api_warm_live_translation(
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
-    let prepared = api_prepare_live_translation(state, Some("summary".to_string()), None, None).await?;
+pub async fn api_warm_live_translation(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let prepared =
+        api_prepare_live_translation(state, Some("summary".to_string()), None, None).await?;
     Ok(prepared.warmed)
 }
 
@@ -965,7 +1020,9 @@ pub async fn api_translate_live_text<R: Runtime>(
     }
     let text = text.trim();
     if text.chars().count() > MAX_LIVE_TEXT_CHARS {
-        return Err(format!("Live translation segments are limited to {MAX_LIVE_TEXT_CHARS} characters."));
+        return Err(format!(
+            "Live translation segments are limited to {MAX_LIVE_TEXT_CHARS} characters."
+        ));
     }
     let target = resolve_language(&target_language)?;
     let source = resolve_source_language(source_language.as_deref())?;
@@ -1012,7 +1069,10 @@ pub async fn api_translate_live_text<R: Runtime>(
 
     for (index, config) in candidates.iter().enumerate() {
         if total_started.elapsed() >= budgets.total {
-            last_error = Some(format!("live translation exceeded total {}ms latency budget", budgets.total.as_millis()));
+            last_error = Some(format!(
+                "live translation exceeded total {}ms latency budget",
+                budgets.total.as_millis()
+            ));
             break;
         }
 
@@ -1091,7 +1151,10 @@ pub async fn api_translate_live_text<R: Runtime>(
                     continue;
                 }
                 record_provider_success(config, first_word_ms).await;
-                TRANSLATION_CACHE.lock().await.insert(key, translated_text.clone());
+                TRANSLATION_CACHE
+                    .lock()
+                    .await
+                    .insert(key, translated_text.clone());
                 cleanup_translation(&request_id, generation).await;
                 return Ok(LiveTranslationResponse {
                     request_id,
@@ -1132,26 +1195,27 @@ pub async fn api_translate_live_text<R: Runtime>(
     }
 
     cleanup_translation(&request_id, generation).await;
-    Err(last_error.unwrap_or_else(|| "All configured live translation providers failed.".to_string()))
+    Err(last_error
+        .unwrap_or_else(|| "All configured live translation providers failed.".to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-#[test]
-fn instant_mode_has_tight_first_word_budget() {
-    let budget = translation_budgets(Some("instant"));
-    assert_eq!(budget.first_word, Duration::from_millis(1800));
-    assert_eq!(budget.total, Duration::from_secs(12));
-}
+    #[test]
+    fn instant_mode_has_tight_first_word_budget() {
+        let budget = translation_budgets(Some("instant"));
+        assert_eq!(budget.first_word, Duration::from_millis(1800));
+        assert_eq!(budget.total, Duration::from_secs(12));
+    }
 
-#[test]
-fn fast_translation_models_are_not_summary_models() {
-    assert_eq!(fast_default_model("groq"), Some(FAST_GROQ_MODEL));
-    assert_eq!(fast_default_model("openai"), Some(FAST_OPENAI_MODEL));
-    assert_eq!(fast_default_model("claude"), Some(FAST_CLAUDE_MODEL));
-}
+    #[test]
+    fn fast_translation_models_are_not_summary_models() {
+        assert_eq!(fast_default_model("groq"), Some(FAST_GROQ_MODEL));
+        assert_eq!(fast_default_model("openai"), Some(FAST_OPENAI_MODEL));
+        assert_eq!(fast_default_model("claude"), Some(FAST_CLAUDE_MODEL));
+    }
 
     #[test]
     fn resolves_codes_and_names() {
@@ -1181,10 +1245,13 @@ fn fast_translation_models_are_not_summary_models() {
             "Hello Mayur",
             Some(resolve_language("en").unwrap()),
             resolve_language("th").unwrap(),
+            None,
+            None,
+            None,
         );
         assert!(system.contains("English"));
         assert!(system.contains("Thai"));
-        assert!(system.contains("Return only the translated text"));
+        assert!(system.contains("Return ONLY the translation"));
         assert_eq!(user, "Hello Mayur");
     }
 
