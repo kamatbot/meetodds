@@ -111,6 +111,8 @@ export function TranscriptPanel({
                   lastProvider={liveTranslation.lastProvider}
                   lastModel={liveTranslation.lastModel}
                   lastLatencyMs={liveTranslation.lastLatencyMs}
+                  lastFirstWordLatencyMs={liveTranslation.lastFirstWordLatencyMs}
+                  lastFallbackReason={liveTranslation.lastFallbackReason}
                 />
               </ButtonGroup>
             </div>

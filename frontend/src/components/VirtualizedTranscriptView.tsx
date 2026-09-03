@@ -189,6 +189,9 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         >
                             <p className="text-base font-medium leading-relaxed text-gray-900">
                                 {translatedText}
+                                {translationStatus === 'translating' && (
+                                    <span className="ml-0.5 animate-pulse text-gray-400">▍</span>
+                                )}
                             </p>
                         </div>
                     )}

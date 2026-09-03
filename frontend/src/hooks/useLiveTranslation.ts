@@ -1,3 +1,4 @@
+\
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -15,9 +16,9 @@ import {
 } from '@/lib/live-translation';
 
 const MAX_CONCURRENT_TRANSLATIONS = 2;
-const MAX_QUEUED_TRANSLATIONS = 48;
-const BACKFILL_SEGMENT_LIMIT = 8;
-const RESULT_CACHE_LIMIT = 300;
+const MAX_QUEUED_TRANSLATIONS = 24;
+const BACKFILL_SEGMENT_LIMIT = 3;
+const RESULT_CACHE_LIMIT = 200;
 
 interface TranslationJob {
   segmentKey: string;
@@ -27,6 +28,12 @@ interface TranslationJob {
   sourceLanguage: 'auto';
   targetLanguage: string;
   generation: number;
+  translationEngine: LiveTranslationSettings['engine'];
+  speedMode: LiveTranslationSettings['speed'];
+  modelOverride: string;
+  contextText: string;
+  glossary: string;
+  contextHint: string;
 }
 
 interface LiveTranslationState {
@@ -41,17 +48,24 @@ interface LiveTranslationState {
   lastProvider: string | null;
   lastModel: string | null;
   lastLatencyMs: number | null;
+  lastFirstWordLatencyMs: number | null;
+  lastFallbackReason: string | null;
 }
 
-function translationCacheKey(
-  sourceLanguage: string,
-  targetLanguage: string,
-  text: string
-): string {
-  return `${sourceLanguage}\u0000${targetLanguage}\u0000${text}`;
+function cacheKey(job: TranslationJob): string {
+  return [
+    job.sourceLanguage,
+    job.targetLanguage,
+    job.translationEngine,
+    job.modelOverride,
+    job.contextText,
+    job.glossary,
+    job.contextHint,
+    job.text,
+  ].join('\u0000');
 }
 
-function trimResultCache(cache: Map<string, LiveTranslationResponse>): void {
+function trimCache(cache: Map<string, LiveTranslationResponse>): void {
   while (cache.size > RESULT_CACHE_LIMIT) {
     const firstKey = cache.keys().next().value as string | undefined;
     if (!firstKey) return;
@@ -59,10 +73,21 @@ function trimResultCache(cache: Map<string, LiveTranslationResponse>): void {
   }
 }
 
+function speakerLabel(transcript: Transcript): string {
+  return transcript.speaker_label || transcript.speaker || 'Speaker';
+}
+
+function contextForTurn(transcripts: Transcript[], index: number, turns: 0 | 2 | 4): string {
+  if (turns === 0 || index <= 0) return '';
+  return transcripts
+    .slice(Math.max(0, index - turns), index)
+    .map((turn) => `${speakerLabel(turn)}: ${turn.text.trim()}`)
+    .filter((line) => line.trim().length > 0)
+    .join('\n');
+}
+
 export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationState {
-  const [settings, setSettings] = useState<LiveTranslationSettings>(
-    DEFAULT_LIVE_TRANSLATION_SETTINGS
-  );
+  const [settings, setSettings] = useState<LiveTranslationSettings>(DEFAULT_LIVE_TRANSLATION_SETTINGS);
   const [translations, setTranslations] = useState<Record<string, LiveTranslationEntry>>({});
   const [queuedCount, setQueuedCount] = useState(0);
   const [activeCount, setActiveCount] = useState(0);
@@ -70,6 +95,8 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
   const [lastProvider, setLastProvider] = useState<string | null>(null);
   const [lastModel, setLastModel] = useState<string | null>(null);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
+  const [lastFirstWordLatencyMs, setLastFirstWordLatencyMs] = useState<number | null>(null);
+  const [lastFallbackReason, setLastFallbackReason] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
   const queueRef = useRef<TranslationJob[]>([]);
@@ -88,13 +115,11 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     setActiveCount(activeCountRef.current);
   }, []);
 
-  const isCurrentJob = useCallback((job: TranslationJob): boolean => {
-    return (
-      mountedRef.current &&
-      job.generation === generationRef.current &&
-      latestRevisionRef.current.get(job.segmentKey) === job.revision
-    );
-  }, []);
+  const isCurrentJob = useCallback((job: TranslationJob): boolean => (
+    mountedRef.current
+    && job.generation === generationRef.current
+    && latestRevisionRef.current.get(job.segmentKey) === job.revision
+  ), []);
 
   const cancelNativeRequest = useCallback((requestId: string | undefined) => {
     if (!requestId) return;
@@ -102,66 +127,46 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
   }, []);
 
   const drainQueue = useCallback(() => {
-    while (
-      activeCountRef.current < MAX_CONCURRENT_TRANSLATIONS &&
-      queueRef.current.length > 0
-    ) {
+    while (activeCountRef.current < MAX_CONCURRENT_TRANSLATIONS && queueRef.current.length > 0) {
       const job = queueRef.current.shift()!;
       if (!isCurrentJob(job)) continue;
-
       activeCountRef.current += 1;
       activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
       activeJobsRef.current.set(job.requestId, job);
       updateCounts();
-
-      setTranslations((previous) => {
-        const previousEntry = previous[job.segmentKey];
-        const sourceMatches =
-          previousEntry?.sourceText === job.text &&
-          previousEntry?.targetLanguage === job.targetLanguage;
-
-        return {
-          ...previous,
-          [job.segmentKey]: {
-            segmentKey: job.segmentKey,
-            sourceText: job.text,
-            targetLanguage: job.targetLanguage,
-            status: 'translating',
-            translatedText: sourceMatches ? previousEntry?.translatedText : undefined,
-            provider: sourceMatches ? previousEntry?.provider : undefined,
-            model: sourceMatches ? previousEntry?.model : undefined,
-            latencyMs: sourceMatches ? previousEntry?.latencyMs : undefined,
-            cached: sourceMatches ? previousEntry?.cached : undefined,
-          },
-        };
-      });
+      setTranslations((previous) => ({
+        ...previous,
+        [job.segmentKey]: {
+          segmentKey: job.segmentKey,
+          sourceText: job.text,
+          targetLanguage: job.targetLanguage,
+          status: 'translating',
+        },
+      }));
 
       void (async () => {
         try {
-          const cacheKey = translationCacheKey(
-            job.sourceLanguage,
-            job.targetLanguage,
-            job.text
-          );
-          const cached = resultCacheRef.current.get(cacheKey);
-          const response = cached ?? await invoke<LiveTranslationResponse>(
-            'api_translate_live_text',
-            {
-              requestId: job.requestId,
-              text: job.text,
-              sourceLanguage: job.sourceLanguage,
-              targetLanguage: job.targetLanguage,
-            }
-          );
-
+          const key = cacheKey(job);
+          const cached = resultCacheRef.current.get(key);
+          const response = cached ?? await invoke<LiveTranslationResponse>('api_translate_live_text', {
+            requestId: job.requestId,
+            text: job.text,
+            sourceLanguage: job.sourceLanguage,
+            targetLanguage: job.targetLanguage,
+            translationEngine: job.translationEngine,
+            speedMode: job.speedMode,
+            modelOverride: job.modelOverride || null,
+            contextText: job.contextText || null,
+            glossary: job.glossary || null,
+            contextHint: job.contextHint || null,
+          });
           if (!cached) {
-            resultCacheRef.current.set(cacheKey, response);
-            trimResultCache(resultCacheRef.current);
+            resultCacheRef.current.set(key, response);
+            trimCache(resultCacheRef.current);
           }
-
-          const latencyMs = cached ? 0 : response.latencyMs;
           if (!isCurrentJob(job)) return;
-
+          const totalLatency = cached ? 0 : response.latencyMs;
+          const firstWordLatency = cached ? 0 : response.firstWordLatencyMs;
           setTranslations((previous) => ({
             ...previous,
             [job.segmentKey]: {
@@ -172,20 +177,22 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
               status: 'translated',
               provider: response.provider,
               model: response.model,
-              latencyMs,
+              latencyMs: totalLatency,
+              firstWordLatencyMs: firstWordLatency,
+              fallbackReason: response.fallbackReason ?? undefined,
               cached: response.cached || Boolean(cached),
             },
           }));
           setLastError(null);
           setLastProvider(response.provider);
           setLastModel(response.model);
-          setLastLatencyMs(latencyMs);
+          setLastLatencyMs(totalLatency);
+          setLastFirstWordLatencyMs(firstWordLatency);
+          setLastFallbackReason(response.fallbackReason ?? null);
         } catch (error) {
           if (!isCurrentJob(job)) return;
-
           const message = error instanceof Error ? error.message : String(error);
           if (/cancelled/i.test(message)) return;
-
           setTranslations((previous) => ({
             ...previous,
             [job.segmentKey]: {
@@ -209,7 +216,6 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
         }
       })();
     }
-
     updateCounts();
   }, [isCurrentJob, updateCounts]);
 
@@ -217,33 +223,19 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
 
   const enqueueJob = useCallback((job: TranslationJob) => {
     if (!isCurrentJob(job)) return;
-
-    queueRef.current = queueRef.current.filter(
-      (queued) => queued.segmentKey !== job.segmentKey
-    );
-
-    if (queueRef.current.length >= MAX_QUEUED_TRANSLATIONS) {
-      queueRef.current.pop();
-    }
-
-    // Newest speech first: the queue is ordered newest -> oldest so the live
-    // edge always beats historical catch-up work.
+    queueRef.current = queueRef.current.filter((queued) => queued.segmentKey !== job.segmentKey);
+    if (queueRef.current.length >= MAX_QUEUED_TRANSLATIONS) queueRef.current.pop();
     queueRef.current.unshift(job);
-
     updateCounts();
-    // Let a synchronous backfill enqueue all candidates before taking worker
-    // slots; otherwise its oldest two items start before newer ones are added.
     queueMicrotask(() => drainQueueRef.current());
   }, [isCurrentJob, updateCounts]);
 
   const clearPendingWork = useCallback(() => {
     generationRef.current += 1;
     queueRef.current = [];
-
-    for (const requestId of activeRequestIdsRef.current.values()) {
-      cancelNativeRequest(requestId);
-    }
+    for (const requestId of activeRequestIdsRef.current.values()) cancelNativeRequest(requestId);
     activeRequestIdsRef.current.clear();
+    activeJobsRef.current.clear();
     latestRevisionRef.current.clear();
     updateCounts();
   }, [cancelNativeRequest, updateCounts]);
@@ -253,48 +245,85 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     setTranslations({});
     setLastError(null);
     setLastLatencyMs(null);
+    setLastFirstWordLatencyMs(null);
+    setLastFallbackReason(null);
   }, [clearPendingWork]);
 
   const updateSettings = useCallback((update: Partial<LiveTranslationSettings>) => {
     setSettings((previous) => {
-      const next: LiveTranslationSettings = {
-        ...previous,
-        ...update,
-        sourceLanguage: 'auto',
-      };
+      const next = { ...previous, ...update, sourceLanguage: 'auto' as const };
       saveLiveTranslationSettings(next);
       return next;
     });
   }, []);
 
-  // Streamed partial translations. The view renders translatedText whenever it
-  // is present, so first words appear at time-to-first-token.
   useEffect(() => {
     let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void listen<{ requestId: string; text: string }>('live-translation-delta', (event) => {
-      const job = activeJobsRef.current.get(event.payload.requestId);
-      if (!job || !event.payload.text || !isCurrentJob(job)) return;
-      setTranslations((previous) => {
-        if (previous[job.segmentKey]?.status === 'translated') return previous;
-        return {
+    let disposeDelta: (() => void) | undefined;
+    let disposeStatus: (() => void) | undefined;
+    void listen<{ requestId: string; text: string; provider?: string; model?: string; firstWordLatencyMs?: number }>(
+      'live-translation-delta',
+      (event) => {
+        const job = activeJobsRef.current.get(event.payload.requestId);
+        if (!job || !isCurrentJob(job)) return;
+        setTranslations((previous) => ({
           ...previous,
           [job.segmentKey]: {
+            ...(previous[job.segmentKey] ?? {}),
             segmentKey: job.segmentKey,
             sourceText: job.text,
             targetLanguage: job.targetLanguage,
             status: 'translating',
             translatedText: event.payload.text,
+            provider: event.payload.provider,
+            model: event.payload.model,
+            firstWordLatencyMs: event.payload.firstWordLatencyMs,
           },
-        };
-      });
-    }).then((dispose) => {
-      if (disposed) dispose();
-      else unlisten = dispose;
-    });
+        }));
+        if (event.payload.provider) setLastProvider(event.payload.provider);
+        if (event.payload.model) setLastModel(event.payload.model);
+        if (event.payload.firstWordLatencyMs !== undefined) setLastFirstWordLatencyMs(event.payload.firstWordLatencyMs);
+      }
+    ).then((dispose) => disposed ? dispose() : (disposeDelta = dispose));
+
+    void listen<{
+      requestId: string;
+      event: 'started' | 'fallback';
+      provider?: string;
+      model?: string;
+      reason?: string;
+      nextProvider?: string;
+      nextModel?: string;
+    }>('live-translation-status', (event) => {
+      const job = activeJobsRef.current.get(event.payload.requestId);
+      if (!job || !isCurrentJob(job)) return;
+      if (event.payload.event === 'started') {
+        if (event.payload.provider) setLastProvider(event.payload.provider);
+        if (event.payload.model) setLastModel(event.payload.model);
+        return;
+      }
+      const reason = event.payload.reason ?? 'Provider was too slow or unavailable';
+      setLastFallbackReason(reason);
+      setTranslations((previous) => ({
+        ...previous,
+        [job.segmentKey]: {
+          ...(previous[job.segmentKey] ?? {}),
+          segmentKey: job.segmentKey,
+          sourceText: job.text,
+          targetLanguage: job.targetLanguage,
+          status: 'translating',
+          translatedText: undefined,
+          fallbackReason: reason,
+          provider: event.payload.nextProvider,
+          model: event.payload.nextModel,
+        },
+      }));
+    }).then((dispose) => disposed ? dispose() : (disposeStatus = dispose));
+
     return () => {
       disposed = true;
-      unlisten?.();
+      disposeDelta?.();
+      disposeStatus?.();
     };
   }, [isCurrentJob]);
 
@@ -312,76 +341,68 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     setTranslations({});
     setLastError(null);
     if (settings.enabled) {
-      // Load the local model (Ollama) before the first segment needs it.
-      void invoke('api_warm_live_translation').catch(() => undefined);
-    }
-  }, [settings.enabled, settings.sourceLanguage, settings.targetLanguage, clearPendingWork]);
-
-  useEffect(() => {
-    if (!settings.enabled || transcripts.length === 0) return;
-
-    // Every transcript segment is final: `is_partial` only means the chunk was
-    // shorter than 15s, and segments are never revised (unique sequence_id).
-    // So there is nothing to debounce; translate each segment immediately.
-    // Iterate oldest -> newest; enqueueJob unshifts, so the queue ends newest-first.
-    const candidates = transcripts.slice(-BACKFILL_SEGMENT_LIMIT);
-
-    for (const transcript of candidates) {
-      const text = transcript.text.trim();
-      if (!text) continue;
-
-      const segmentKey = liveTranslationSegmentKey(transcript);
-      const revision = [
-        generationRef.current,
-        settings.sourceLanguage,
-        settings.targetLanguage,
-        text,
-      ].join('\u0001');
-
-      if (latestRevisionRef.current.get(segmentKey) === revision) continue;
-      latestRevisionRef.current.set(segmentKey, revision);
-
-      const job: TranslationJob = {
-        segmentKey,
-        text,
-        revision,
-        requestId: `live-${Date.now()}-${requestCounterRef.current++}`,
-        sourceLanguage: settings.sourceLanguage,
-        targetLanguage: settings.targetLanguage,
-        generation: generationRef.current,
-      };
-
-      setTranslations((previous) => {
-        const previousEntry = previous[segmentKey];
-        const sourceMatches =
-          previousEntry?.sourceText === text &&
-          previousEntry?.targetLanguage === settings.targetLanguage;
-
-        return {
-          ...previous,
-          [segmentKey]: {
-            segmentKey,
-            sourceText: text,
-            targetLanguage: settings.targetLanguage,
-            status: 'queued',
-            translatedText: sourceMatches ? previousEntry?.translatedText : undefined,
-            provider: sourceMatches ? previousEntry?.provider : undefined,
-            model: sourceMatches ? previousEntry?.model : undefined,
-            latencyMs: sourceMatches ? previousEntry?.latencyMs : undefined,
-            cached: sourceMatches ? previousEntry?.cached : undefined,
-          },
-        };
-      });
-
-      enqueueJob(job);
+      void invoke('api_prepare_live_translation', {
+        translationEngine: settings.engine,
+        speedMode: settings.speed,
+        modelOverride: settings.modelOverride || null,
+      }).catch(() => undefined);
     }
   }, [
-    transcripts,
     settings.enabled,
     settings.sourceLanguage,
     settings.targetLanguage,
-    enqueueJob,
+    settings.engine,
+    settings.speed,
+    settings.modelOverride,
+    settings.contextTurns,
+    settings.glossary,
+    settings.contextHint,
+    clearPendingWork,
   ]);
+
+  useEffect(() => {
+    if (!settings.enabled || transcripts.length === 0) return;
+    const start = Math.max(0, transcripts.length - BACKFILL_SEGMENT_LIMIT);
+    const candidates = transcripts.slice(start);
+    candidates.forEach((transcript, offset) => {
+      const text = transcript.text.trim();
+      if (!text) return;
+      const index = start + offset;
+      const segmentKey = liveTranslationSegmentKey(transcript);
+      const contextText = contextForTurn(transcripts, index, settings.contextTurns);
+      const revision = [
+        generationRef.current,
+        settings.targetLanguage,
+        settings.engine,
+        settings.speed,
+        settings.modelOverride,
+        settings.contextTurns,
+        settings.glossary,
+        settings.contextHint,
+        contextText,
+        text,
+      ].join('\u0001');
+      if (latestRevisionRef.current.get(segmentKey) === revision) return;
+      latestRevisionRef.current.set(segmentKey, revision);
+      const activeRequestId = activeRequestIdsRef.current.get(segmentKey);
+      if (activeRequestId) cancelNativeRequest(activeRequestId);
+      enqueueJob({
+        segmentKey,
+        text,
+        revision,
+        requestId: `live-v2-${Date.now()}-${requestCounterRef.current++}`,
+        sourceLanguage: 'auto',
+        targetLanguage: settings.targetLanguage,
+        generation: generationRef.current,
+        translationEngine: settings.engine,
+        speedMode: settings.speed,
+        modelOverride: settings.modelOverride,
+        contextText,
+        glossary: settings.glossary,
+        contextHint: settings.contextHint,
+      });
+    });
+  }, [transcripts, settings, cancelNativeRequest, enqueueJob]);
 
   const translatedCount = useMemo(
     () => Object.values(translations).filter((entry) => entry.status === 'translated').length,
@@ -400,5 +421,7 @@ export function useLiveTranslation(transcripts: Transcript[]): LiveTranslationSt
     lastProvider,
     lastModel,
     lastLatencyMs,
+    lastFirstWordLatencyMs,
+    lastFallbackReason,
   };
 }

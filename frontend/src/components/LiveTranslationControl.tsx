@@ -1,16 +1,12 @@
+\
 'use client';
 
 import { Languages, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import {
   getLiveTranslationLanguage,
@@ -29,6 +25,8 @@ interface LiveTranslationControlProps {
   lastProvider: string | null;
   lastModel: string | null;
   lastLatencyMs: number | null;
+  lastFirstWordLatencyMs: number | null;
+  lastFallbackReason: string | null;
 }
 
 export function LiveTranslationControl({
@@ -42,9 +40,12 @@ export function LiveTranslationControl({
   lastProvider,
   lastModel,
   lastLatencyMs,
+  lastFirstWordLatencyMs,
+  lastFallbackReason,
 }: LiveTranslationControlProps) {
   const target = getLiveTranslationLanguage(settings.targetLanguage);
   const isWorking = activeCount > 0 || queuedCount > 0;
+  const slowerCompatibilityPath = ['openai-codex', 'ollama', 'builtin-ai'].includes(lastProvider ?? '');
 
   return (
     <Popover>
@@ -56,38 +57,53 @@ export function LiveTranslationControl({
           aria-label={`Live translation${settings.enabled && target ? ` to ${target.name}` : ''}`}
         >
           {isWorking ? <Loader2 className="animate-spin" /> : <Languages />}
-          <span className="hidden md:inline">
-            {settings.enabled && target ? target.name : 'Translate'}
-          </span>
+          <span className="hidden md:inline">{settings.enabled && target ? target.name : 'Translate'}</span>
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent className="w-80" align="center">
+      <PopoverContent className="w-96" align="center">
         <div className="space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h4 className="font-semibold">Live translation</h4>
+              <h4 className="font-semibold">Live translation · V2</h4>
               <p className="mt-1 text-xs text-muted-foreground">
-                Translates completed speech turns immediately. Partial speech is briefly debounced so it does not flood the model.
+                Streams translated words immediately and fails over when a provider misses its first-word latency budget.
               </p>
             </div>
-            <Switch
-              checked={settings.enabled}
-              onCheckedChange={(enabled) => updateSettings({ enabled })}
-              aria-label="Enable live translation"
-            />
+            <Switch checked={settings.enabled} onCheckedChange={(enabled) => updateSettings({ enabled })} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Speed</Label>
+              <Select value={settings.speed} onValueChange={(speed: 'instant' | 'balanced' | 'accurate') => updateSettings({ speed })} disabled={!settings.enabled}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="instant">Instant</SelectItem>
+                  <SelectItem value="balanced">Balanced</SelectItem>
+                  <SelectItem value="accurate">Accurate</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Translation engine</Label>
+              <Select value={settings.engine} onValueChange={(engine: 'auto' | 'summary' | 'groq' | 'openai' | 'claude') => updateSettings({ engine })} disabled={!settings.enabled}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto · fastest configured</SelectItem>
+                  <SelectItem value="groq">Groq · instant</SelectItem>
+                  <SelectItem value="openai">OpenAI · fast</SelectItem>
+                  <SelectItem value="claude">Claude · Haiku</SelectItem>
+                  <SelectItem value="summary">Current summary provider</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="live-translation-language">Translate to</Label>
-            <Select
-              value={settings.targetLanguage}
-              onValueChange={(targetLanguage) => updateSettings({ targetLanguage })}
-              disabled={!settings.enabled}
-            >
-              <SelectTrigger id="live-translation-language">
-                <SelectValue placeholder="Choose a language" />
-              </SelectTrigger>
+            <Label>Translate to</Label>
+            <Select value={settings.targetLanguage} onValueChange={(targetLanguage) => updateSettings({ targetLanguage })} disabled={!settings.enabled}>
+              <SelectTrigger><SelectValue placeholder="Choose a language" /></SelectTrigger>
               <SelectContent className="max-h-72">
                 {LIVE_TRANSLATION_LANGUAGES.map((language) => (
                   <SelectItem key={language.code} value={language.code}>
@@ -98,68 +114,71 @@ export function LiveTranslationControl({
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="live-translation-display">Display</Label>
-            <Select
-              value={settings.displayMode}
-              onValueChange={(displayMode: 'bilingual' | 'translated') =>
-                updateSettings({ displayMode })
-              }
-              disabled={!settings.enabled}
-            >
-              <SelectTrigger id="live-translation-display">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="bilingual">Original + translation</SelectItem>
-                <SelectItem value="translated">Translation only</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Context</Label>
+              <Select value={String(settings.contextTurns)} onValueChange={(value) => updateSettings({ contextTurns: Number(value) as 0 | 2 | 4 })} disabled={!settings.enabled}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Current turn only</SelectItem>
+                  <SelectItem value="2">2 prior turns</SelectItem>
+                  <SelectItem value="4">4 prior turns</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Display</Label>
+              <Select value={settings.displayMode} onValueChange={(displayMode: 'bilingual' | 'translated') => updateSettings({ displayMode })} disabled={!settings.enabled}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bilingual">Original + translation</SelectItem>
+                  <SelectItem value="translated">Translation only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+
+          <details className="rounded-md border p-3 text-xs">
+            <summary className="cursor-pointer font-medium">Accuracy hints & advanced model</summary>
+            <div className="mt-3 space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Keywords / names</Label>
+                <Input value={settings.glossary} onChange={(event) => updateSettings({ glossary: event.target.value })} placeholder="N26, MeetOdds, EBITDA, Mayur" disabled={!settings.enabled} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Meeting context</Label>
+                <Input value={settings.contextHint} onChange={(event) => updateSettings({ contextHint: event.target.value })} placeholder="Product review for a fintech team" disabled={!settings.enabled} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Model override</Label>
+                <Input value={settings.modelOverride} onChange={(event) => updateSettings({ modelOverride: event.target.value })} placeholder="Leave blank for translation-optimized default" disabled={!settings.enabled || settings.engine === 'auto'} />
+              </div>
+            </div>
+          </details>
 
           {settings.enabled && (
             <div className="rounded-md border bg-muted/30 p-3 text-xs">
               <div className="flex items-center justify-between gap-3">
                 <span className="font-medium">
-                  {isWorking
-                    ? `${activeCount} translating · ${queuedCount} queued`
-                    : translatedCount > 0
-                      ? `${translatedCount} turns translated`
-                      : 'Ready for the next speech turn'}
+                  {isWorking ? `${activeCount} translating · ${queuedCount} queued` : translatedCount > 0 ? `${translatedCount} turns translated` : 'Ready for the next speech turn'}
                 </span>
-                {lastLatencyMs !== null && (
-                  <span className="text-muted-foreground">
-                    {lastLatencyMs === 0 ? 'cached' : `${(lastLatencyMs / 1000).toFixed(1)}s`}
-                  </span>
-                )}
+                <div className="text-right text-muted-foreground">
+                  {lastFirstWordLatencyMs !== null && <div>first word {(lastFirstWordLatencyMs / 1000).toFixed(1)}s</div>}
+                  {lastLatencyMs !== null && <div>{lastLatencyMs === 0 ? 'cached' : `complete ${(lastLatencyMs / 1000).toFixed(1)}s`}</div>}
+                </div>
               </div>
-
-              {lastProvider && (
-                <p className="mt-1 truncate text-muted-foreground" title={`${lastProvider} / ${lastModel ?? ''}`}>
-                  {lastProvider}{lastModel ? ` / ${lastModel}` : ''}
-                </p>
-              )}
-
-              {lastError && (
-                <p className="mt-2 line-clamp-3 text-destructive" title={lastError}>
-                  {lastError}
-                </p>
-              )}
+              {lastProvider && <p className="mt-1 truncate text-muted-foreground">{lastProvider}{lastModel ? ` / ${lastModel}` : ''}</p>}
+              {lastFallbackReason && <p className="mt-2 line-clamp-2 text-amber-700">Fallback: {lastFallbackReason}</p>}
+              {slowerCompatibilityPath && <p className="mt-2 text-amber-700">This is a compatibility path. Auto with Groq/OpenAI/Claude is usually faster for live captions.</p>}
+              {lastError && <p className="mt-2 line-clamp-3 text-destructive">{lastError}</p>}
             </div>
           )}
 
           <div className="flex items-center justify-between gap-3 border-t pt-3">
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Uses the summarization provider selected in Model Settings. Cloud providers receive only the text being translated.
+              Auto uses a dedicated fast translation model instead of the larger meeting-summary model. Cloud providers receive only transcript text and the small context window above.
             </p>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={clearTranslations}
-              disabled={translatedCount === 0 && !isWorking}
-              title="Clear live translations"
-            >
+            <Button type="button" variant="ghost" size="icon" onClick={clearTranslations} disabled={translatedCount === 0 && !isWorking} title="Clear live translations">
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
