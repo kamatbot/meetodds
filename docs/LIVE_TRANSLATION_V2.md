@@ -37,9 +37,9 @@ streamed SSE deltas ----------> translated caption
 
 | Mode | First-word budget | Provider attempt | Total fallback chain |
 | --- | ---: | ---: | ---: |
-| Instant | 1.8 s | 8 s | 12 s |
-| Balanced | 3.2 s | 15 s | 22 s |
-| Accurate | 10 s | 30 s | 32 s |
+| Instant | 2.8 s (12s local) | 10 s (25s local) | 15 s (30s local) |
+| Balanced | 4.5 s (12s local) | 16 s (25s local) | 24 s (30s local) |
+| Accurate | 10 s (12s local) | 30 s (25s local) | 35 s (30s local) |
 
 A provider that repeatedly misses the first-word budget is temporarily cooled down. The next configured fast provider is attempted automatically.
 
