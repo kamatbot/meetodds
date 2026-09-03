@@ -144,12 +144,22 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
 
       if (liveIndex !== -1) {
         jobIndex = liveIndex;
-      } else if (
-        activeBackfillCountRef.current < MAX_CONCURRENT_BACKFILL
-        && !previewInFlightRef.current
-        && !pendingPreviewRef.current
-      ) {
-        jobIndex = queueRef.current.findIndex((job) => isCurrentJob(job));
+      } else {
+        if (
+          pendingPreviewRef.current
+          && !previewInFlightRef.current
+          && activeCountRef.current < MAX_CONCURRENT_TRANSLATIONS
+        ) {
+          runPreviewTranslationRef.current();
+        }
+        if (
+          activeBackfillCountRef.current < MAX_CONCURRENT_BACKFILL
+          && !previewInFlightRef.current
+          && !pendingPreviewRef.current
+          && activeCountRef.current < MAX_CONCURRENT_TRANSLATIONS
+        ) {
+          jobIndex = queueRef.current.findIndex((job) => isCurrentJob(job));
+        }
       }
 
       if (jobIndex === -1) {
@@ -249,6 +259,9 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
             activeBackfillCountRef.current = Math.max(0, activeBackfillCountRef.current - 1);
           }
           updateCounts();
+          if (pendingPreviewRef.current) {
+            queueMicrotask(() => runPreviewTranslationRef.current());
+          }
           queueMicrotask(() => drainQueueRef.current());
         }
       })();
