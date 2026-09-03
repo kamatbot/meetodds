@@ -49,7 +49,7 @@ pub fn start_live_preview_task<R: Runtime>(
             }
 
             let revision = chunk.chunk_id;
-            let source = match chunk.device_type {
+            let source = match &chunk.device_type {
                 DeviceType::Microphone => "microphone",
                 DeviceType::System => "system",
             };
