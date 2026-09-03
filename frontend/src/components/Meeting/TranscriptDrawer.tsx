@@ -63,6 +63,12 @@ export default function TranscriptDrawer({
     }
   }, [storageReady, visible, width]);
 
+  useEffect(() => {
+    const toggleFromCommandPalette = () => setVisible((current) => !current);
+    window.addEventListener('meetodds:toggle-transcript-drawer', toggleFromCommandPalette);
+    return () => window.removeEventListener('meetodds:toggle-transcript-drawer', toggleFromCommandPalette);
+  }, []);
+
   const segments = useMemo(() => transcripts.map((transcript) => {
     const translation = liveTranslation.translations[liveTranslationSegmentKey(transcript)];
     return {

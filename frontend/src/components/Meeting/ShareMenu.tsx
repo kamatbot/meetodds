@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { Clipboard, Download, FileText, FolderOpen, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -50,9 +51,12 @@ function preferredMarkdownSelection(info: MeetingExportInfo): MeetingExportSelec
 }
 
 export default function ShareMenu({ meetingId }: ShareMenuProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [exportOpen, setExportOpen] = useState(false);
   const [info, setInfo] = useState<MeetingExportInfo | null>(null);
   const [copying, setCopying] = useState(false);
+  const openedFromQueryRef = useRef(false);
 
   const loadInfo = useCallback(async (): Promise<MeetingExportInfo> => {
     if (info?.meetingId === meetingId) return info;
@@ -138,6 +142,26 @@ export default function ShareMenu({ meetingId }: ShareMenuProps) {
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
   }, [copyAsMarkdown, openExport]);
+
+  useEffect(() => {
+    const requestedExport = searchParams.get('export') === '1';
+    if (!requestedExport || openedFromQueryRef.current) return;
+    openedFromQueryRef.current = true;
+    void openExport();
+
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('export');
+    const query = next.toString();
+    router.replace(query ? `/meeting?${query}` : `/meeting?id=${encodeURIComponent(meetingId)}`, {
+      scroll: false,
+    });
+  }, [meetingId, openExport, router, searchParams]);
+
+  useEffect(() => {
+    if (searchParams.get('export') !== '1') {
+      openedFromQueryRef.current = false;
+    }
+  }, [searchParams]);
 
   return (
     <>
