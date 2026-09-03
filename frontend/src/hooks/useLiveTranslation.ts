@@ -144,7 +144,11 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
 
       if (liveIndex !== -1) {
         jobIndex = liveIndex;
-      } else if (activeBackfillCountRef.current < MAX_CONCURRENT_BACKFILL) {
+      } else if (
+        activeBackfillCountRef.current < MAX_CONCURRENT_BACKFILL
+        && !previewInFlightRef.current
+        && !pendingPreviewRef.current
+      ) {
         jobIndex = queueRef.current.findIndex((job) => isCurrentJob(job));
       }
 
@@ -282,13 +286,12 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
   const clearPendingWork = useCallback(() => {
     generationRef.current += 1;
     queueRef.current = [];
-    for (const requestId of activeRequestIdsRef.current.values()) cancelNativeRequest(requestId);
-    activeRequestIdsRef.current.clear();
-    activeJobsRef.current.clear();
-    previewInFlightRef.current = null;
     pendingPreviewRef.current = null;
-    activeBackfillCountRef.current = 0;
     latestRevisionRef.current.clear();
+    for (const requestId of activeRequestIdsRef.current.values()) {
+      cancelNativeRequest(requestId);
+    }
+    activeRequestIdsRef.current.clear();
     updateCounts();
   }, [cancelNativeRequest, updateCounts]);
 
@@ -312,6 +315,7 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
 
 const runPreviewTranslation = useCallback(() => {
   if (previewInFlightRef.current || !pendingPreviewRef.current) return;
+  if (activeCountRef.current >= MAX_CONCURRENT_TRANSLATIONS) return;
   const job = pendingPreviewRef.current;
   pendingPreviewRef.current = null;
   if (!mountedRef.current || job.generation !== generationRef.current) return;
@@ -320,6 +324,8 @@ const runPreviewTranslation = useCallback(() => {
   previewInFlightRef.current = job;
   activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
   activeJobsRef.current.set(job.requestId, job);
+  activeCountRef.current += 1;
+  updateCounts();
   setTranslations((previous) => ({
     ...previous,
     [job.segmentKey]: {
@@ -391,12 +397,15 @@ const runPreviewTranslation = useCallback(() => {
       if (previewInFlightRef.current?.requestId === job.requestId) {
         previewInFlightRef.current = null;
       }
+      activeCountRef.current = Math.max(0, activeCountRef.current - 1);
+      updateCounts();
       if (pendingPreviewRef.current) {
         queueMicrotask(() => runPreviewTranslationRef.current());
       }
+      queueMicrotask(() => drainQueueRef.current());
     }
   })();
-}, [isCurrentJob]);
+}, [isCurrentJob, updateCounts]);
 
 runPreviewTranslationRef.current = runPreviewTranslation;
 
