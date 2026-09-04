@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
+  FolderOpen,
   MoreHorizontal,
   Pencil,
   Star,
@@ -257,6 +258,17 @@ export default function MeetingHeader({
     }
   };
 
+  const openMeetingFolder = async () => {
+    try {
+      await invoke<void>('open_meeting_folder', { meetingId });
+    } catch (error) {
+      console.error('[MeetingHeader] Failed to open meeting folder:', error);
+      toast.error('Could not open meeting folder', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const durationLabel = formatDuration(durationMs);
 
   return (
@@ -312,6 +324,15 @@ export default function MeetingHeader({
             className={`inline-grid h-8 w-8 place-items-center rounded-control border border-border bg-surface transition-colors duration-150 hover:bg-bg disabled:opacity-40 ${starred ? 'text-accent' : 'text-2'}`}
           >
             <Star className="h-4 w-4" fill={starred ? 'currentColor' : 'none'} strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void openMeetingFolder()}
+            className="inline-flex h-8 items-center gap-1.5 rounded-control border border-border bg-surface px-2.5 text-ui font-medium text-text transition-colors duration-150 hover:bg-bg"
+            title="Open meeting folder in Finder"
+          >
+            <FolderOpen className="h-4 w-4" strokeWidth={1.75} />
+            <span className="hidden lg:inline">Open folder</span>
           </button>
           <ShareMenu meetingId={meetingId} />
           <DropdownMenu>
