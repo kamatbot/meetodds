@@ -234,17 +234,15 @@ impl HardwareProfile {
 
         #[cfg(not(target_os = "windows"))]
         {
-            // M-series Macs already use Metal and Core ML at compile time. The
-            // remaining decoder work is CPU-bound, so reserve four cores for
-            // capture, rendering, and the OS while keeping inference bounded.
-            // Beam 3 retains meeting-quality output without the expensive beam
-            // 5 setting previously selected for high-memory Apple Silicon.
+            // Keep local transcription thermally safe during a meeting. Metal and
+            // Core ML handle acceleration, while two CPU decoder threads and beam
+            // search two leave enough headroom for capture, rendering, and the OS.
             if apple_silicon && self.gpu_type == GpuType::Metal {
                 return AdaptiveWhisperConfig {
-                    beam_size: if self.memory_gb >= 16 { 3 } else { 2 },
+                    beam_size: 2,
                     temperature: 0.2,
                     use_gpu: true,
-                    max_threads: Some(Self::recommended_meeting_threads(self.cpu_cores)),
+                    max_threads: Some(2),
                     chunk_size_preference: ChunkSizePreference::Balanced,
                 };
             }
@@ -364,20 +362,20 @@ mod tests {
     }
 
     #[test]
-    fn apple_silicon_profile_reserves_ui_capacity_and_avoids_beam_five() {
+    fn apple_silicon_profile_caps_decoder_work_for_thermal_headroom() {
         let m_series = profile(12, 24, GpuType::Metal, PerformanceTier::Ultra);
         let config = m_series.whisper_config_for_platform(true);
 
-        assert_eq!(config.beam_size, 3);
-        assert_eq!(config.max_threads, Some(6));
+        assert_eq!(config.beam_size, 2);
+        assert_eq!(config.max_threads, Some(2));
         assert!(config.use_gpu);
         assert_eq!(config.chunk_size_preference, ChunkSizePreference::Balanced);
 
-        for (cpu_cores, expected_threads) in [(8, 4), (10, 6), (12, 6)] {
+        for cpu_cores in [8, 10, 12] {
             let m_series = profile(cpu_cores, 24, GpuType::Metal, PerformanceTier::Ultra);
             assert_eq!(
                 m_series.whisper_config_for_platform(true).max_threads,
-                Some(expected_threads)
+                Some(2)
             );
         }
     }
