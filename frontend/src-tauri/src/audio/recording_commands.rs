@@ -38,7 +38,6 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-static LIVE_PREVIEW_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
@@ -248,7 +247,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     });
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
-    let (transcription_receiver, live_preview_receiver) = manager
+    let transcription_receiver = manager
         .start_recording(microphone_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
@@ -274,18 +273,6 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         *global_task = Some(task_handle);
-    }
-
-    // The subtitle preview task is disposable and latest-only. It never writes to
-    // transcript history and is aborted before canonical shutdown processing.
-    let preview_task = transcription::start_live_preview_task(
-        app.clone(),
-        live_preview_receiver,
-        has_separate_system_audio,
-    );
-    {
-        let mut global_preview_task = LIVE_PREVIEW_TASK.lock().unwrap();
-        *global_preview_task = Some(preview_task);
     }
 
     // CRITICAL: Listen for transcript-update events and save to recording manager
@@ -448,7 +435,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     });
 
     // Start recording with specified devices and auto_save setting
-    let (transcription_receiver, live_preview_receiver) = manager
+    let transcription_receiver = manager
         .start_recording(mic_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
@@ -474,18 +461,6 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         *global_task = Some(task_handle);
-    }
-
-    // The subtitle preview task is disposable and latest-only. It never writes to
-    // transcript history and is aborted before canonical shutdown processing.
-    let preview_task = transcription::start_live_preview_task(
-        app.clone(),
-        live_preview_receiver,
-        has_separate_system_audio,
-    );
-    {
-        let mut global_preview_task = LIVE_PREVIEW_TASK.lock().unwrap();
-        *global_preview_task = Some(preview_task);
     }
 
     // CRITICAL: Listen for transcript-update events and save to recording manager
@@ -611,16 +586,6 @@ pub async fn stop_recording<R: Runtime>(
             info!("✅ Transcript-update listener removed");
         }
     }
-
-    // Speculative subtitles are disposable; stop them before canonical shutdown so
-    // the ASR model is fully available to the final transcript queue.
-    if let Some(preview_task) = LIVE_PREVIEW_TASK.lock().unwrap().take() {
-        preview_task.abort();
-    }
-    let _ = app.emit(
-        "live-transcript-preview-clear",
-        serde_json::json!({ "source": null }),
-    );
 
     // Step 2: Signal transcription workers to finish processing ALL queued chunks
     let _ = app.emit(

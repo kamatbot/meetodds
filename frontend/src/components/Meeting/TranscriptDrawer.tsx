@@ -200,7 +200,7 @@ export default function TranscriptDrawer({
             isPaused={isPaused}
             isProcessing={isProcessingStop}
             isStopping={isStopping}
-            enableStreaming={isRecording}
+            enableStreaming={false}
             showConfidence={true}
             translationEnabled={liveTranslation.settings.enabled}
             translationDisplayMode={liveTranslation.settings.displayMode}

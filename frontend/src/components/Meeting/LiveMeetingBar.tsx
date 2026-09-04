@@ -1,10 +1,7 @@
 'use client';
 
 import { Pause, Play, Square } from 'lucide-react';
-import type { LiveTranscriptPreview } from '@/types';
-
 interface LiveMeetingBarProps {
-  preview: LiveTranscriptPreview | null;
   isPaused: boolean;
   isBusy: boolean;
   onPauseResume: () => void;
@@ -12,7 +9,6 @@ interface LiveMeetingBarProps {
 }
 
 export default function LiveMeetingBar({
-  preview,
   isPaused,
   isBusy,
   onPauseResume,
@@ -20,7 +16,7 @@ export default function LiveMeetingBar({
 }: LiveMeetingBarProps) {
   const status = isPaused
     ? 'Recording paused'
-    : preview?.text || 'Listening for speech…';
+    : 'Recording in progress';
 
   return (
     <div className="flex min-h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-slate-950 px-5 py-2 text-white shadow-sm">

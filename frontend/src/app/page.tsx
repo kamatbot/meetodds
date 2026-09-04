@@ -10,7 +10,6 @@ import StopProgressStrip from '@/components/Meeting/StopProgressStrip';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
-import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import Analytics from '@/lib/analytics';
@@ -31,7 +30,6 @@ export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
   const [isHomeControlBusy, setIsHomeControlBusy] = useState(false);
 
-  const { livePreview } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { openImportDialog } = useImportDialog();
   const recordingState = useRecordingState();
@@ -239,7 +237,6 @@ export default function Home() {
 
       {inAppRecording && (
         <LiveMeetingBar
-          preview={livePreview}
           isPaused={recordingState.isPaused}
           isBusy={isHomeControlBusy || isStopping || isProcessingStop}
           onPauseResume={() => void handleHomePauseResume()}

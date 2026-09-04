@@ -142,16 +142,10 @@ export function useAutoScroll({
         // Update the ref for next comparison
         prevSegmentCountRef.current = segmentCount;
 
-        // Only scroll if new segments arrived AND user is currently at bottom
-        // Check isNearBottom() immediately to avoid race conditions with the debounced scroll handler
+        // The post-render scroll height includes the new segment, so checking the
+        // current geometry here would falsely classify an untouched view as scrolled up.
+        // `autoScrollRef` is updated only from deliberate user scrolling.
         if (hasNewSegments && autoScrollRef.current && isRecording && !isPaused && segmentCount > 0) {
-            // Check if user is at bottom RIGHT NOW before scrolling
-            const isCurrentlyAtBottom = isNearBottom();
-            if (!isCurrentlyAtBottom) {
-                // User has scrolled up - don't auto-scroll
-                return;
-            }
-
             isProgrammaticScrollRef.current = true;
 
             if (useVirtualization && virtualizer) {

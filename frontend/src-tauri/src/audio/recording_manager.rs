@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 
 use super::devices::{list_audio_devices, AudioDevice};
 
@@ -65,21 +65,13 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
-    ) -> Result<(
-        mpsc::UnboundedReceiver<AudioChunk>,
-        watch::Receiver<Option<AudioChunk>>,
-    )> {
+    ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
         // Set up transcription channel
 
         let (transcription_sender, transcription_receiver) =
             mpsc::unbounded_channel::<AudioChunk>();
-        // Preview captions are latest-only by design. A slow speculative decoder
-        // must never delay or back up the canonical transcript queue.
-        let (live_preview_sender, live_preview_receiver) =
-            watch::channel::<Option<AudioChunk>>(None);
-
         // CRITICAL FIX: Create recording sender for pre-mixed audio from pipeline
         // Pipeline will mix mic + system audio professionally and send to this channel
         // Pass auto_save to control whether audio checkpoints are created
@@ -126,7 +118,7 @@ impl RecordingManager {
         self.pipeline_manager.start(
             self.state.clone(),
             transcription_sender,
-            Some(live_preview_sender),
+            None,
             0,                      // Ignored - using dynamic sizing internally
             48000,                  // 48kHz sample rate
             Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
@@ -160,7 +152,7 @@ impl RecordingManager {
             self.stream_manager.active_stream_count()
         );
 
-        Ok((transcription_receiver, live_preview_receiver))
+        Ok(transcription_receiver)
     }
 
     /// Start recording with default devices and auto_save setting
@@ -192,10 +184,7 @@ impl RecordingManager {
     pub async fn start_recording_with_defaults_and_auto_save(
         &mut self,
         auto_save: bool,
-    ) -> Result<(
-        mpsc::UnboundedReceiver<AudioChunk>,
-        watch::Receiver<Option<AudioChunk>>,
-    )> {
+    ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         #[cfg(target_os = "macos")]
         {
             info!("🎙️ [macOS] Starting recording with smart device selection (Bluetooth override enabled)");
