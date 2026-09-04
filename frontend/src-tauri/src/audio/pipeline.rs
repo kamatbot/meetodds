@@ -792,12 +792,10 @@ impl AudioPipeline {
             system_device_kind,
         );
 
-        // Create VAD processor with balanced redemption time for speech accumulation
-        // The VAD processor now handles 48kHz->16kHz resampling internally
-        // This bridges natural pauses without excessive fragmentation
-        // For mac os core audio, 900ms, for windows 400ms seems good
-
-        let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
+        // Give macOS speakers time for natural pauses before finalizing a segment.
+        // Fewer, larger Whisper jobs reduce sustained CPU and thermal load; Windows
+        // retains its shorter threshold because its audio stack benefits from it.
+        let redemption_time = if cfg!(target_os = "macos") { 1_200 } else { 400 };
 
         let create_vad_processor =
             |source: &str| match ContinuousVadProcessor::new(sample_rate, redemption_time) {
