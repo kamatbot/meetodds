@@ -23,19 +23,19 @@ export default function LiveMeetingBar({
     : preview?.text || 'Listening for speech…';
 
   return (
-    <div className="flex h-14 shrink-0 items-center gap-3 border-b border-record/30 bg-surface px-5 shadow-sm">
-      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${isPaused ? 'bg-warn' : 'bg-record animate-pulse'}`} aria-hidden="true" />
-      <span className="shrink-0 text-ui font-semibold text-text">
+    <div className="flex min-h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-slate-950 px-5 py-2 text-white shadow-sm">
+      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${isPaused ? 'bg-amber-400' : 'bg-record animate-pulse'}`} aria-hidden="true" />
+      <span className="shrink-0 text-ui font-semibold text-white">
         {isPaused ? 'Paused' : 'Recording'}
       </span>
-      <span className="min-w-0 flex-1 truncate text-ui text-2" aria-live="polite">
+      <span className="min-w-0 flex-1 truncate text-ui text-slate-100" aria-live="polite">
         {status}
       </span>
       <button
         type="button"
         onClick={onPauseResume}
         disabled={isBusy}
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-border bg-bg px-2.5 text-caption font-semibold text-text transition-colors hover:bg-surface disabled:opacity-40"
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-white/20 bg-white/10 px-2.5 text-caption font-semibold text-white transition-colors hover:bg-white/20 disabled:opacity-40"
         aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
       >
         {isPaused ? <Play className="h-3.5 w-3.5" fill="currentColor" strokeWidth={1.75} /> : <Pause className="h-3.5 w-3.5" fill="currentColor" strokeWidth={1.75} />}

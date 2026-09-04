@@ -8,8 +8,6 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::watch;
 
-const MAX_STALE_REVISIONS: u64 = 2;
-
 #[derive(Debug)]
 struct LastEmittedPreview {
     text: String,
@@ -80,18 +78,6 @@ pub fn start_live_preview_task<R: Runtime>(
                 }
             };
             if text.is_empty() || canonical_transcription_busy() {
-                continue;
-            }
-
-            // If capture moved several snapshots ahead while inference was running, this
-            // result is no longer a useful subtitle. A one/two-revision lag is still shown
-            // because slightly-old text is preferable to a blank subtitle.
-            let latest_revision = receiver
-                .borrow()
-                .as_ref()
-                .map(|latest| latest.chunk_id)
-                .unwrap_or(revision);
-            if latest_revision.saturating_sub(revision) > MAX_STALE_REVISIONS {
                 continue;
             }
 
