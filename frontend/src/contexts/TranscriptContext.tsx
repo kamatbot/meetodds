@@ -48,11 +48,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   }, [transcripts]);
 
 
-// Ephemeral subtitle stream. These events never enter IndexedDB/SQLite and are
-// replaced by the canonical transcript once VAD closes the sentence.
+// Ephemeral subtitle stream. The top recording bar keeps the last caption visible
+// between VAD sentence boundaries; it resets only when recording starts or stops.
 useEffect(() => {
   let unlistenPreview: (() => void) | undefined;
-  let unlistenClear: (() => void) | undefined;
   let disposed = false;
 
   void listen<LiveTranscriptPreview>('live-transcript-preview', (event) => {
@@ -62,24 +61,9 @@ useEffect(() => {
     else unlistenPreview = dispose;
   });
 
-  void listen<{ source?: 'microphone' | 'system' | null }>(
-    'live-transcript-preview-clear',
-    (event) => {
-      setLivePreview((current) => {
-        const source = event.payload?.source;
-        if (!source || current?.source === source) return null;
-        return current;
-      });
-    }
-  ).then((dispose) => {
-    if (disposed) dispose();
-    else unlistenClear = dispose;
-  });
-
   return () => {
     disposed = true;
     unlistenPreview?.();
-    unlistenClear?.();
   };
 }, []);
 
