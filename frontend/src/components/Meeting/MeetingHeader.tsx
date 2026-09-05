@@ -364,7 +364,7 @@ export default function MeetingHeader({
         </div>
       </div>
 
-      <nav className="flex h-9 items-end gap-1 px-5 md:px-6" aria-label="Meeting detail sections">
+      <nav role="tablist" className="flex h-9 items-end gap-1 px-5 md:px-6" aria-label="Meeting detail sections">
         {tabs.map((tab) => {
           const selected = activeTab === tab.id;
           return (
@@ -372,7 +372,15 @@ export default function MeetingHeader({
               key={tab.id}
               type="button"
               role="tab"
+              id={`meeting-tab-${tab.id}`}
+              aria-controls={`meeting-panel-${tab.id}`}
+              tabIndex={selected ? 0 : -1}
               aria-selected={selected}
+              onKeyDown={(event) => {
+                const index = tabs.findIndex(candidate => candidate.id === tab.id);
+                const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : -1;
+                if (next >= 0) { event.preventDefault(); onTabChange(tabs[next].id); document.getElementById(`meeting-tab-${tabs[next].id}`)?.focus(); }
+              }}
               onClick={() => onTabChange(tab.id)}
               className={`relative h-9 rounded-t-control px-3 text-ui font-medium transition-colors duration-150 ${
                 selected ? 'text-text' : 'text-3 hover:text-text'

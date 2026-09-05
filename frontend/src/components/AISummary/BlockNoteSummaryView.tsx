@@ -15,7 +15,7 @@ const Editor = dynamic(() => import('../BlockNoteEditor/Editor'), { ssr: false }
 
 interface BlockNoteSummaryViewProps {
   summaryData: SummaryDataResponse | Summary | null;
-  onSave?: (data: { markdown?: string; summary_json?: BlockNoteBlock[] }) => void;
+  onSave?: (data: { markdown?: string; summary_json?: BlockNoteBlock[] }) => void | Promise<void>;
   onSummaryChange?: (summary: Summary) => void;
   status?: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   error?: string | null;
@@ -80,6 +80,9 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const [currentBlocks, setCurrentBlocks] = useState<Block[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const isContentLoaded = useRef(false);
+  const editRevision = useRef(0);
+  const hasEdited = useRef(false);
+  const savePending = useRef(false);
 
   // Create BlockNote editor for markdown parsing
   const editor = useCreateBlockNote({
@@ -121,6 +124,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const handleEditorChange = useCallback((blocks: Block[]) => {
     // Only set dirty flag if content has finished loading
     if (isContentLoaded.current) {
+      editRevision.current += 1; hasEdited.current = true;
       setCurrentBlocks(blocks);
       setIsDirty(true);
     }
@@ -135,7 +139,9 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
 
   const handleSave = useCallback(async () => {
     if (!onSave || !isDirty) return;
-
+    if (savePending.current) throw new Error("A summary save is still running. Try again after it finishes.");
+    savePending.current = true;
+    const revision = editRevision.current;
     setIsSaving(true);
     try {
       console.log('💾 Saving BlockNote content...');
@@ -153,14 +159,15 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
         saveData.markdown = markdownResult.markdown;
       }
 
-      onSave(saveData);
-
+      await onSave(saveData);
+      if (revision !== editRevision.current) throw new Error("New edits were made while saving. Save them before continuing.");
       setIsDirty(false);
       console.log('✅ Save successful');
     } catch (err) {
       console.error('❌ Save failed:', err);
-      alert('Failed to save changes. Please try again.');
+      throw err;
     } finally {
+      savePending.current = false;
       setIsSaving(false);
     }
   }, [onSave, isDirty, currentBlocks, editor]);
@@ -172,14 +179,13 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
       try {
         console.log('🔍 getMarkdown called, format:', format);
         console.log('🔍 currentBlocks length:', currentBlocks.length);
-        console.log('🔍 data:', data);
 
         // For markdown format - use the main editor
         if (format === 'markdown' && editor) {
           console.log('📝 Using markdown editor, blocks:', editor.document.length);
           const markdownResult = await blocksToMarkdownSafely(editor, editor.document, {
             source: 'BlockNoteSummaryView.getMarkdown.markdown',
-            fallbackMarkdown: data?.markdown,
+            fallbackMarkdown: hasEdited.current ? undefined : data?.markdown,
           });
           console.log('📝 Generated markdown length:', markdownResult.markdown?.length || 0);
           return markdownResult.markdown || '';
@@ -188,20 +194,20 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
         // For blocknote format - use currentBlocks state
         if (format === 'blocknote') {
           console.log('📝 BlockNote format, currentBlocks:', currentBlocks.length);
-          const blocks = currentBlocks.length > 0
+          const blocks = hasEdited.current || currentBlocks.length > 0
             ? currentBlocks
             : (data?.summary_json as unknown as Block[] | undefined) || [];
 
           if (blocks.length > 0 && editor) {
             const markdownResult = await blocksToMarkdownSafely(editor, blocks, {
               source: 'BlockNoteSummaryView.getMarkdown.blocknote',
-              fallbackMarkdown: data?.markdown,
+              fallbackMarkdown: hasEdited.current ? undefined : data?.markdown,
             });
             console.log('📝 Generated markdown from blocks, length:', markdownResult.markdown?.length || 0);
             return markdownResult.markdown || '';
           }
           // Fallback: if we have the original data with markdown
-          if (data?.markdown) {
+          if (!hasEdited.current && data?.markdown) {
             console.log('📝 Using fallback markdown from data');
             return data.markdown;
           }

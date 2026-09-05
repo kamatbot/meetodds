@@ -16,7 +16,8 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
-import { exportMeetingSummary, type MeetingExportFormat } from '@/lib/meeting-export';
+import type { MeetingExportFormat } from '@/lib/meeting-export';
+import ExportSheet from '@/components/Meeting/ExportSheet';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
@@ -102,6 +103,8 @@ export function SummaryPanel({
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<MeetingExportFormat | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<MeetingExportFormat>("markdown");
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -225,38 +228,25 @@ export function SummaryPanel({
   };
 
   const handleExport = async (format: MeetingExportFormat) => {
-  if (exportingFormat) return;
-  setExportingFormat(format);
+    if (exportingFormat) return;
+    setExportingFormat(format);
+    try {
+      await onSaveAll();
+      setExportFormat(format);
+      setExportOpen(true);
+    } catch {
+      toast.error('Save your current summary edits before exporting');
+    } finally { setExportingFormat(null); }
+  };
 
-  try {
-    const editorMarkdown = await summaryRef.current?.getMarkdown();
-    const rawPersistedMarkdown = (aiSummary as unknown as { markdown?: unknown } | null)?.markdown;
-    const persistedMarkdown = typeof rawPersistedMarkdown === 'string' ? rawPersistedMarkdown : '';
-    const markdown = (editorMarkdown || persistedMarkdown).trim();
-
-    if (!markdown) {
-      throw new Error('No summary content is available to export.');
-    }
-
-    const result = await exportMeetingSummary({
-      format,
-      title: meetingTitle,
-      createdAt: meeting.created_at,
-      markdown,
-    });
-
-    toast.success(`Exported ${result.filename}`, {
-      description: result.path ?? `Saved through ${result.destination}.`,
-    });
-  } catch (error) {
-    console.error(`Failed to export ${format}:`, error);
-    toast.error(`Failed to export ${format.toUpperCase()}`, {
-      description: error instanceof Error ? error.message : String(error),
-    });
-  } finally {
-    setExportingFormat(null);
-  }
-};
+  const generateSafely = async (prompt: string) => {
+    try { if (aiSummary) await onSaveAll(); await onGenerateSummary(prompt); }
+    catch { toast.error("Save your summary edits before generating again"); }
+  };
+  const regenerateSafely = async () => {
+    try { if (aiSummary) await onSaveAll(); await onRegenerateSummary(); }
+    catch { toast.error("Save your summary edits before regenerating"); }
+  };
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
@@ -289,9 +279,10 @@ export function SummaryPanel({
   );
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+    <div className="flex-1 min-w-0 flex flex-col bg-bg overflow-hidden">
+      <ExportSheet meetingId={meeting.id} open={exportOpen} onOpenChange={setExportOpen} initialFormat={exportFormat} />
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="p-4 border-b border-border">
         {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}
@@ -309,7 +300,7 @@ export function SummaryPanel({
                 modelConfig={modelConfig}
                 setModelConfig={setModelConfig}
                 onSaveModelConfig={onSaveModelConfig}
-                onGenerateSummary={onGenerateSummary}
+                onGenerateSummary={generateSafely}
                 onStopGeneration={onStopGeneration}
                 customPrompt={customPrompt}
                 summaryStatus={summaryStatus}
@@ -329,7 +320,7 @@ export function SummaryPanel({
               <SummaryUpdaterButtonGroup
                 isSaving={isSaving}
                 isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
-                onSave={onSaveAll}
+                onSave={() => onSaveAll().catch(() => undefined)}
                 onCopy={onCopySummary}
                 onFind={() => {
                   // TODO: Implement find in summary functionality
@@ -345,7 +336,9 @@ export function SummaryPanel({
         )}
       </div>
 
-      {isSummaryLoading ? (
+      {summaryError && <div role="alert" className="mx-4 my-3 rounded-control border border-border bg-surface p-3 text-ui text-danger">{summaryError}</div>}
+      {isSummaryLoading && aiSummary && <div role="status" className="flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3 text-ui text-2"><span>{getSummaryStatusMessage(summaryStatus)} Your previous summary remains available.</span><button type="button" onClick={onStopGeneration} className="rounded-control border border-border px-3 py-1.5">Cancel</button></div>}
+      {isSummaryLoading && !aiSummary ? (
         <div className="flex flex-col h-full">
           {/* Show button group during generation */}
           <div className="flex items-center justify-center pt-8 pb-4">
@@ -353,7 +346,7 @@ export function SummaryPanel({
               modelConfig={modelConfig}
               setModelConfig={setModelConfig}
               onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
+              onGenerateSummary={generateSafely}
               onStopGeneration={onStopGeneration}
               customPrompt={customPrompt}
               summaryStatus={summaryStatus}
@@ -369,7 +362,7 @@ export function SummaryPanel({
           <div className="flex items-center justify-center flex-1">
             <div className="text-center">
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-600">Generating AI Summary...</p>
+              <p className="text-2">Generating AI Summary...</p>
             </div>
           </div>
         </div>
@@ -381,7 +374,7 @@ export function SummaryPanel({
               modelConfig={modelConfig}
               setModelConfig={setModelConfig}
               onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
+              onGenerateSummary={generateSafely}
               onStopGeneration={onStopGeneration}
               customPrompt={customPrompt}
               summaryStatus={summaryStatus}
@@ -397,7 +390,7 @@ export function SummaryPanel({
           </div>
           {/* Empty state message */}
           <EmptyStateSummary
-            onGenerate={() => onGenerateSummary(customPrompt)}
+            onGenerate={() => generateSafely(customPrompt)}
             hasModel={modelConfig.provider !== null && modelConfig.model !== null}
             isGenerating={isSummaryLoading}
           />
@@ -449,8 +442,9 @@ export function SummaryPanel({
               ) : null}
             </div>
           )}
-          <div className="p-6 w-full">
+          <div className="p-6 w-full" aria-busy={isSummaryLoading} style={isSummaryLoading ? { pointerEvents: "none" } : undefined}>
             <BlockNoteSummaryView
+              key={meeting.id}
               ref={summaryRef}
               summaryData={aiSummary}
               onSave={onSaveSummary}
@@ -460,7 +454,7 @@ export function SummaryPanel({
               error={summaryError}
               onRegenerateSummary={() => {
                 Analytics.trackButtonClick('regenerate_summary', 'meeting_details');
-                onRegenerateSummary();
+                void regenerateSafely();
               }}
               meeting={{
                 id: meeting.id,

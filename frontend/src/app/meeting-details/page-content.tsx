@@ -55,6 +55,10 @@ export default function PageContent({
     transcriptsCount: meeting.transcripts?.length
   });
 
+  const [visitedTabs, setVisitedTabs] = useState<Set<MeetingDetailTab>>(() => new Set([activeTab]));
+  useEffect(() => { setVisitedTabs(new Set([activeTab])); }, [meeting.id]);
+  useEffect(() => { setVisitedTabs(previous => new Set([...previous, activeTab])); }, [activeTab]);
+
   // State
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
@@ -221,20 +225,20 @@ export default function PageContent({
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
       <div className="min-h-0 flex-1 overflow-hidden">
-        {activeTab === 'summary' && (
-          <div className="flex h-full min-h-0 [&>div]:!bg-bg">
+        {(activeTab === 'summary' || visitedTabs.has('summary')) && (
+          <div id="meeting-panel-summary" role="tabpanel" aria-labelledby="meeting-tab-summary" hidden={activeTab !== "summary"} className={activeTab === "summary" ? "flex h-full min-h-0 [&>div]:!bg-bg" : "hidden"}>
             {summaryPanel}
           </div>
         )}
 
-        {activeTab === 'transcript' && (
-          <div className="flex h-full min-h-0 [&>div]:!flex [&>div]:!w-full [&>div]:!border-r-0 [&>div]:!bg-bg">
+        {(activeTab === 'transcript' || visitedTabs.has('transcript')) && (
+          <div id="meeting-panel-transcript" role="tabpanel" aria-labelledby="meeting-tab-transcript" hidden={activeTab !== "transcript"} className={activeTab === "transcript" ? "flex h-full min-h-0 [&>div]:!flex [&>div]:!w-full [&>div]:!border-r-0 [&>div]:!bg-bg" : "hidden"}>
             {transcriptPanel}
           </div>
         )}
 
-        {activeTab === 'notes' && (
-          <NotesEditor meetingId={meeting.id} />
+        {(activeTab === 'notes' || visitedTabs.has('notes')) && (
+          <div id="meeting-panel-notes" role="tabpanel" aria-labelledby="meeting-tab-notes" hidden={activeTab !== 'notes'} className={activeTab === 'notes' ? 'h-full' : 'hidden'}><NotesEditor meetingId={meeting.id} /></div>
         )}
       </div>
     </div>

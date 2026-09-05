@@ -1,4 +1,5 @@
 import { downloadDir, join } from '@tauri-apps/api/path';
+import { isTauri } from '@tauri-apps/api/core';
 import { exists, writeFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { buildDocx, buildPdf } from './meeting-export-formats';
 
@@ -155,6 +156,7 @@ export async function exportMeetingSummary(input: MeetingExportInput): Promise<M
       bytes,
     };
   } catch (desktopError) {
+    if (isTauri()) throw desktopError;
     console.warn('Desktop export was unavailable; falling back to browser download.', desktopError);
     triggerBrowserDownload(filename, data, MIME_TYPES[input.format]);
     return {

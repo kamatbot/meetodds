@@ -1,306 +1,144 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Check, FileAudio, FileJson, FileText, LoaderCircle } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import type {
-  MeetingExportFormat,
-  MeetingExportInfo,
-  MeetingExportRequest,
-  MeetingExportResult,
-  MeetingExportSelection,
-} from '@/types/meeting';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
+import type { MeetingExportInfo, MeetingExportResult, MeetingExportSelection } from '@/types/meeting';
+import { canExportSrt, isFormattedDocument, privateExportDefaults, runExportSteps, selectedSectionCount, selectionKey, type ExportFormatChoice } from '@/lib/export-selection';
 
-interface ExportSheetProps {
-  meetingId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  initialInfo?: MeetingExportInfo | null;
-}
-
-interface SectionOption {
-  key: keyof MeetingExportSelection;
-  label: string;
-  description: string;
-}
-
-const sectionOptions: SectionOption[] = [
-  { key: 'includeSummary', label: 'Summary', description: 'Current saved AI summary' },
-  { key: 'includeNotes', label: 'Notes', description: 'Markdown meeting notes' },
-  { key: 'includeTranscript', label: 'Transcript', description: 'Full saved transcript' },
+interface ExportSheetProps { meetingId: string; open: boolean; onOpenChange: (open: boolean) => void; initialInfo?: MeetingExportInfo | null; initialFormat?: ExportFormatChoice }
+const options: { key: keyof MeetingExportSelection; label: string; availability: 'hasSummary' | 'hasNotes' | 'hasTranscript' }[] = [
+  { key: 'includeSummary', label: 'Saved summary', availability: 'hasSummary' },
+  { key: 'includeNotes', label: 'Personal notes', availability: 'hasNotes' },
+  { key: 'includeTranscript', label: 'Full transcript', availability: 'hasTranscript' },
+];
+const formats: { value: ExportFormatChoice; label: string }[] = [
+  { value: 'markdown', label: 'Markdown' }, { value: 'pdf', label: 'PDF' }, { value: 'docx', label: 'Word' },
+  { value: 'text', label: 'Text' }, { value: 'json', label: 'JSON' }, { value: 'srt', label: 'Subtitles' },
 ];
 
-const formatOptions: Array<{ value: MeetingExportFormat; label: string; icon: typeof FileText }> = [
-  { value: 'markdown', label: 'Markdown', icon: FileText },
-  { value: 'text', label: 'Text', icon: FileText },
-  { value: 'json', label: 'JSON', icon: FileJson },
-  { value: 'srt', label: 'SRT', icon: FileText },
-];
-
-function messageFromError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function selectionFromInfo(info: MeetingExportInfo): MeetingExportSelection {
-  return {
-    includeSummary: info.hasSummary,
-    includeNotes: info.hasNotes,
-    includeTranscript: info.hasTranscript,
-  };
-}
-
-export default function ExportSheet({
-  meetingId,
-  open,
-  onOpenChange,
-  initialInfo = null,
-}: ExportSheetProps) {
-  const [info, setInfo] = useState<MeetingExportInfo | null>(initialInfo);
-  const [isLoading, setIsLoading] = useState(!initialInfo);
-  const [error, setError] = useState<string | null>(null);
-  const [selection, setSelection] = useState<MeetingExportSelection>({
-    includeSummary: false,
-    includeNotes: false,
-    includeTranscript: false,
-  });
+export default function ExportSheet({ meetingId, open, onOpenChange, initialFormat = 'markdown' }: ExportSheetProps) {
+  const [info, setInfo] = useState<MeetingExportInfo | null>(null);
+  const [selection, setSelection] = useState<MeetingExportSelection>(privateExportDefaults({ hasSummary: false }));
+  const [format, setFormat] = useState<ExportFormatChoice>('markdown');
   const [includeAudio, setIncludeAudio] = useState(false);
-  const [format, setFormat] = useState<MeetingExportFormat>('markdown');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [preview, setPreview] = useState<{ key: string; text: string } | null>(null);
+  const [previewError, setPreviewError] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const exporting = useRef(false);
+  const count = selectedSectionCount(selection);
+  const key = selectionKey(meetingId, selection);
+  const previewReady = count === 0 || preview?.key === key;
+  const srtAllowed = Boolean(info?.transcriptHasTiming && canExportSrt(info.transcriptHasTiming, selection));
 
   useEffect(() => {
     if (!open) return;
-
-    let cancelled = false;
-    const loadInfo = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response = initialInfo ?? await invoke<MeetingExportInfo>('api_get_meeting_export_info', {
-          meetingId,
-        });
-        if (cancelled) return;
-        setInfo(response);
-        setSelection(selectionFromInfo(response));
-        setIncludeAudio(false);
-        setFormat('markdown');
-      } catch (loadError) {
-        if (cancelled) return;
-        console.error('[ExportSheet] Failed to load export availability:', loadError);
-        setInfo(null);
-        setError(messageFromError(loadError));
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
-
-    void loadInfo();
-    return () => {
-      cancelled = true;
-    };
-  }, [initialInfo, meetingId, open]);
-
-  const availableSections = useMemo(() => {
-    if (!info) return [];
-    return sectionOptions.filter((option) => {
-      if (option.key === 'includeSummary') return info.hasSummary;
-      if (option.key === 'includeNotes') return info.hasNotes;
-      return info.hasTranscript;
-    });
-  }, [info]);
-
-  const selectedTextCount = Object.values(selection).filter(Boolean).length;
-  const srtAllowed = Boolean(
-    info?.transcriptHasTiming &&
-    selection.includeTranscript &&
-    !selection.includeSummary &&
-    !selection.includeNotes,
-  );
+    let disposed = false;
+    setLoading(true); setError(null); setInfo(null); setPreview(null); setPreviewError(false); setIncludeAudio(false); setFormat(initialFormat);
+    // Always refresh. A cached Share menu can predate a new summary or a notes edit.
+    void invoke<MeetingExportInfo>('api_get_meeting_export_info', { meetingId }).then((result) => {
+      if (disposed) return;
+      if (result.meetingId !== meetingId) throw new Error('Meeting mismatch');
+      setInfo(result); setSelection(privateExportDefaults(result));
+    }).catch(() => { if (!disposed) setError('Saved content could not be loaded. Retry before exporting.'); })
+      .finally(() => { if (!disposed) setLoading(false); });
+    return () => { disposed = true; };
+  }, [meetingId, open, retry, initialFormat]);
 
   useEffect(() => {
-    if (format === 'srt' && !srtAllowed) {
-      setFormat('markdown');
-    }
-  }, [format, srtAllowed]);
-
-  const toggleSection = (key: keyof MeetingExportSelection) => {
-    setSelection((current) => ({ ...current, [key]: !current[key] }));
-  };
+    if (!open || !info || !count) { setPreview(null); setPreviewError(false); return; }
+    let disposed = false;
+    setPreview(null); setPreviewError(false);
+    void invoke<string>('api_get_meeting_markdown', { meetingId, selection }).then((text) => {
+      if (!disposed) setPreview({ key, text });
+    }).catch(() => { if (!disposed) setPreviewError(true); });
+    return () => { disposed = true; };
+  }, [count, info, key, meetingId, open, selection]);
+  useEffect(() => { if (format === 'srt' && !srtAllowed) setFormat('markdown'); }, [format, srtAllowed]);
 
   const runExport = async () => {
-    if (!info || isExporting) return;
-    if (selectedTextCount === 0 && !includeAudio) {
-      toast.error('Choose something to export');
-      return;
-    }
-
-    setIsExporting(true);
+    if (!info || exporting.current || !previewReady || (!count && !includeAudio)) return;
+    exporting.current = true; setIsExporting(true); setError(null);
     try {
-      const exportedPaths: string[] = [];
-
-      if (selectedTextCount > 0) {
-        const request: MeetingExportRequest = {
-          meetingId,
-          format,
-          selection,
-        };
-        const result = await invoke<MeetingExportResult>('api_export_meeting', { request });
-        if (!result.cancelled && result.path) {
-          exportedPaths.push(result.path);
-        } else if (result.cancelled && !includeAudio) {
+      const snapshot = preview?.text ?? '';
+      if (count) {
+        const current = await invoke<string>('api_get_meeting_markdown', { meetingId, selection });
+        if (current !== snapshot) {
+          setPreview({ key, text: current });
+          setError('Saved content changed since the preview. Review the updated preview and export again.');
           return;
         }
       }
-
-      if (includeAudio) {
-        const audioResult = await invoke<MeetingExportResult>('api_export_meeting_audio', {
-          meetingId,
-        });
-        if (!audioResult.cancelled && audioResult.path) {
-          exportedPaths.push(audioResult.path);
-        }
-      }
-
-      if (exportedPaths.length > 0) {
-        onOpenChange(false);
-        toast.success(exportedPaths.length === 1 ? 'Meeting exported' : 'Meeting files exported', {
-          description: exportedPaths.length === 1
-            ? exportedPaths[0]
-            : `${exportedPaths.length} files saved`,
-        });
-      }
-    } catch (exportError) {
-      console.error('[ExportSheet] Export failed:', exportError);
-      toast.error('Could not export meeting', {
-        description: messageFromError(exportError),
+      const outcome = await runExportSteps({
+        text: count ? async () => {
+          if (isFormattedDocument(format)) {
+            // Reuse the existing tested serializers; do not add a second PDF/DOCX implementation.
+            const { exportMeetingSummary } = await import('@/lib/meeting-export');
+            const result = await exportMeetingSummary({ format, title: info.title, createdAt: info.createdAt, markdown: snapshot });
+            return { cancelled: false, label: result.path ?? `Download requested: ${result.filename}` };
+          }
+          const result = await invoke<MeetingExportResult>('api_export_meeting', { request: { meetingId, format, selection, expectedMarkdown: snapshot } });
+          return { cancelled: result.cancelled, label: result.path };
+        } : undefined,
+        audio: includeAudio ? async () => {
+          const result = await invoke<MeetingExportResult>('api_export_meeting_audio', { meetingId });
+          return { cancelled: result.cancelled, label: result.path };
+        } : undefined,
       });
-    } finally {
-      setIsExporting(false);
-    }
+      if (outcome.failed) {
+        setError(outcome.saved.length ? `Part of the export succeeded (${outcome.saved.join('; ')}). The remaining file could not be exported.` : 'Export failed. Check the destination and available disk space, then retry.');
+      } else if (outcome.saved.length) {
+        toast.success(outcome.cancelled ? 'Partial export complete' : 'Export complete', { description: outcome.saved.join('\n') });
+        onOpenChange(false);
+      }
+    } catch { setError('The saved-content check failed. Nothing new was exported. Retry when the meeting is available.'); }
+    finally { exporting.current = false; setIsExporting(false); }
   };
-
+  const button = 'rounded-control border border-border px-3 py-2 text-ui font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40';
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !isExporting && onOpenChange(nextOpen)}>
-      <DialogContent className="border-border bg-surface text-text sm:max-w-[520px]">
+    <Dialog open={open} onOpenChange={(next) => { if (!exporting.current) onOpenChange(next); }}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto border-border bg-surface text-text sm:max-w-[620px]">
         <DialogTitle className="text-title">Export meeting</DialogTitle>
-
-        {isLoading ? (
-          <div className="flex min-h-[220px] items-center justify-center text-ui text-3">
-            <LoaderCircle className="mr-2 h-4 w-4 animate-spin" strokeWidth={1.75} />
-            Checking saved content…
-          </div>
-        ) : error ? (
-          <div className="rounded-card border border-border bg-bg p-4 text-ui text-danger">
-            Export options could not be loaded: {error}
-          </div>
-        ) : info ? (
-          <div className="space-y-5 py-1">
-            <section>
-              <h3 className="mb-2 text-ui font-semibold text-2">Include</h3>
-              <div className="overflow-hidden rounded-card border border-border bg-bg">
-                {availableSections.map((option) => {
-                  const selected = selection[option.key];
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      onClick={() => toggleSection(option.key)}
-                      className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-b-0 hover:bg-surface"
-                    >
-                      <span className={`inline-grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border ${selected ? 'border-accent bg-accent text-white' : 'border-border bg-surface text-transparent'}`}>
-                        <Check className="h-3 w-3" strokeWidth={2} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-ui font-medium text-text">{option.label}</span>
-                        <span className="block text-caption text-3">{option.description}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-
-                {info.hasAudio && (
-                  <button
-                    type="button"
-                    onClick={() => setIncludeAudio((current) => !current)}
-                    className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-b-0 hover:bg-surface"
-                  >
-                    <span className={`inline-grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border ${includeAudio ? 'border-accent bg-accent text-white' : 'border-border bg-surface text-transparent'}`}>
-                      <Check className="h-3 w-3" strokeWidth={2} />
-                    </span>
-                    <FileAudio className="h-4 w-4 shrink-0 text-3" strokeWidth={1.75} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-ui font-medium text-text">Audio</span>
-                      <span className="block text-caption text-3">Original saved MP4 recording</span>
-                    </span>
-                  </button>
-                )}
-              </div>
-              {availableSections.length === 0 && !info.hasAudio && (
-                <p className="mt-2 text-caption text-3">This meeting has no saved content to export.</p>
-              )}
-              {includeAudio && selectedTextCount > 0 && (
-                <p className="mt-2 text-caption text-3">
-                  Audio is a separate file, so macOS will ask where to save it after the content export.
-                </p>
-              )}
-            </section>
-
-            {selectedTextCount > 0 && (
-              <section>
-                <h3 className="mb-2 text-ui font-semibold text-2">Format</h3>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {formatOptions.map((option) => {
-                    const disabled = option.value === 'srt' && !srtAllowed;
-                    const Icon = option.icon;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => setFormat(option.value)}
-                        className={`flex h-16 flex-col items-center justify-center gap-1 rounded-card border text-caption font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-35 ${format === option.value ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-bg text-2 hover:text-text'}`}
-                      >
-                        <Icon className="h-4 w-4" strokeWidth={1.75} />
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                {!srtAllowed && selection.includeTranscript && (
-                  <p className="mt-2 text-caption text-3">
-                    SRT is available only for transcript-only exports when every segment has real timing.
-                  </p>
-                )}
-              </section>
-            )}
-          </div>
-        ) : null}
-
+        <DialogDescription className="text-ui text-2">Exports use saved content. Save current editor changes first. Personal notes, the transcript, and audio are never included automatically.</DialogDescription>
+        {loading ? <p role="status" className="flex items-center gap-2 py-8 text-ui text-2"><LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> Checking saved content…</p> : info && (
+          <fieldset disabled={isExporting} className="space-y-4">
+            <legend className="sr-only">Choose content and format</legend>
+            <div className="space-y-2 rounded-card border border-border p-3">
+              {options.filter(option => info[option.availability]).map((option) => (
+                <label key={option.key} className="flex cursor-pointer items-center gap-3 py-1.5 text-ui"><input type="checkbox" checked={selection[option.key]} onChange={(event) => setSelection((current) => ({ ...current, [option.key]: event.target.checked }))} />{option.label}</label>
+              ))}
+              {info.hasAudio && <label className="flex cursor-pointer items-center gap-3 py-1.5 text-ui"><input type="checkbox" checked={includeAudio} onChange={(event) => setIncludeAudio(event.target.checked)} /> Saved audio · separate file</label>}
+              {!info.hasSummary && !info.hasNotes && !info.hasTranscript && !info.hasAudio && <p className="text-ui text-2">No saved content is available for this meeting.</p>}
+            </div>
+            {count > 0 && <>
+              <fieldset><legend className="mb-2 text-ui font-semibold">Format</legend>
+                <div className="grid grid-cols-3 gap-2">{formats.map((option) => (
+                  <label key={option.value} className={`flex items-center gap-2 rounded-control border p-2.5 text-caption ${format === option.value ? 'border-accent bg-accent-soft' : 'border-border'} ${option.value === 'srt' && !srtAllowed ? 'opacity-40' : 'cursor-pointer'}`}>
+                    <input type="radio" name={`export-format-${meetingId}`} value={option.value} checked={format === option.value} disabled={option.value === 'srt' && !srtAllowed} onChange={() => setFormat(option.value)} />{option.label}
+                  </label>
+                ))}</div>
+                <p className="mt-2 text-caption text-2">{isFormattedDocument(format) ? 'PDF and Word use the existing formatted exporter and save to Downloads.' : 'Choose a save location in the system dialog.'}</p>
+                {!srtAllowed && selection.includeTranscript && <p className="mt-1 text-caption text-2">Subtitles require transcript-only selection and real timing for every segment.</p>}
+              </fieldset>
+              <details className="rounded-card border border-border p-3"><summary className="cursor-pointer text-ui font-medium">Preview selected saved content</summary>
+                {previewError ? <p role="alert" className="mt-2 text-caption text-danger">Preview could not be loaded. Retry before exporting.</p> : preview?.key === key
+                  ? <pre className="mt-3 max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-caption leading-6">{preview.text}</pre>
+                  : <p role="status" className="mt-2 text-caption text-2">Loading preview…</p>}
+              </details>
+            </>}
+            {includeAudio && count > 0 && <p className="text-caption text-2">Audio is saved separately. Canceling either file dialog stops the remaining export steps.</p>}
+          </fieldset>
+        )}
+        {error && <p role="alert" className="rounded-control border border-border p-3 text-ui text-danger">{error}</p>}
         <DialogFooter>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            disabled={isExporting}
-            className="h-8 rounded-control border border-border bg-surface px-3 text-ui font-medium text-text hover:bg-bg disabled:opacity-40"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void runExport()}
-            disabled={isLoading || Boolean(error) || isExporting || (selectedTextCount === 0 && !includeAudio)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-control border border-accent bg-accent px-3 text-ui font-semibold text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
-          >
-            {isExporting && <LoaderCircle className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />}
-            Export…
-          </button>
+          {(error || previewError) && <button type="button" className={button} disabled={isExporting} onClick={() => setRetry((value) => value + 1)}>Reload saved content</button>}
+          <button type="button" className={button} disabled={isExporting} onClick={() => onOpenChange(false)}>Cancel</button>
+          <button type="button" className={`${button} bg-accent text-white`} disabled={loading || !info || isExporting || !previewReady || previewError || (!count && !includeAudio)} onClick={() => void runExport()}>{isExporting ? 'Exporting…' : 'Export…'}</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
