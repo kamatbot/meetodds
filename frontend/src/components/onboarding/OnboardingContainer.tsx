@@ -10,6 +10,7 @@ import type { OnboardingContainerProps } from '@/types/onboarding';
 export function OnboardingContainer({
   title,
   description,
+  hero,
   children,
   step,
   totalSteps = 4,
@@ -81,18 +82,22 @@ export function OnboardingContainer({
           </div>
         )}
 
-        <header className="mb-6 shrink-0 text-center">
-          <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-accent" aria-hidden="true" />
-          <h1 className="text-display text-text">{title}</h1>
-          {description && (
-            <p className="mx-auto mt-2 max-w-lg text-body leading-6 text-2">
-              {description}
-            </p>
-          )}
-        </header>
+        {hero ? (
+          hero
+        ) : (
+          <header className="mb-6 shrink-0 text-center">
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-accent" aria-hidden="true" />
+            <h1 className="text-display text-text">{title}</h1>
+            {description && (
+              <p className="mx-auto mt-2 max-w-lg text-body leading-6 text-2">
+                {description}
+              </p>
+            )}
+          </header>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
-          <div className="pb-6">{children}</div>
+          <div className="flex min-h-full flex-col pb-6">{children}</div>
         </div>
       </div>
     </div>

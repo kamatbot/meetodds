@@ -11,6 +11,7 @@ export interface OnboardingPermissions {
 export interface OnboardingContainerProps {
   title: string;
   description?: React.ReactNode;
+  hero?: React.ReactNode;
   children: React.ReactNode;
   step?: number;
   totalSteps?: number;
