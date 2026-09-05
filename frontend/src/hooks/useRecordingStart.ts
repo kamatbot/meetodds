@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -22,6 +22,8 @@ export function useRecordingStart(
   showModal?: (name: 'modelSelector', message?: string) => void,
 ): UseRecordingStartReturn {
   const [isAutoStarting, setIsAutoStarting] = useState(false);
+  const activeStart = useRef<AbortController | null>(null);
+  useEffect(() => () => activeStart.current?.abort(), []);
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
   const { selectedDevices } = useConfig();
@@ -39,6 +41,11 @@ export function useRecordingStart(
           setIsMeetingActive(true);
           return;
         }
+        const abort = new AbortController();
+        activeStart.current = abort;
+        const { reviewCaptureStart } = await import('@/components/Meeting/CapturePreflightReview');
+        const capture = await reviewCaptureStart(selectedDevices?.micDevice || null, selectedDevices?.systemDevice || null, abort.signal);
+        if (!capture || abort.signal.aborted) return;
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, '0');
         const title = `Meeting ${pad(now.getDate())}_${pad(now.getMonth() + 1)}_${String(now.getFullYear()).slice(-2)}_${pad(now.getHours())}_${pad(now.getMinutes())}_${pad(now.getSeconds())}`;
@@ -48,8 +55,8 @@ export function useRecordingStart(
         setMeetingTitle(title);
         clearTranscripts();
         await recordingService.startRecordingWithDevices(
-          selectedDevices?.micDevice || null,
-          selectedDevices?.systemDevice || null,
+          capture.microphone,
+          capture.systemAudio,
           title,
         );
         nativeStarted = true;
@@ -81,6 +88,7 @@ export function useRecordingStart(
           throw new Error(message);
         }
       } finally {
+        activeStart.current = null;
         setIsAutoStarting(false);
       }
     });

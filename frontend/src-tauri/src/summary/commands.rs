@@ -18,6 +18,8 @@ use tauri::{AppHandle, Runtime};
 
 #[path = "execution_gate.rs"]
 mod execution_gate;
+#[path = "execution_config.rs"]
+pub(super) mod execution_config;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SummaryResponse {
@@ -329,6 +331,7 @@ pub async fn api_process_transcript<R: Runtime>(
     model: String,
     model_name: String,
     meeting_id: Option<String>,
+    approved_target: Option<execution_config::DestinationApproval>,
     _chunk_size: Option<i32>,
     _overlap: Option<i32>,
     custom_prompt: Option<String>,
@@ -341,6 +344,10 @@ pub async fn api_process_transcript<R: Runtime>(
     let m_id = meeting_id.unwrap_or_else(|| format!("meeting-{}", Uuid::new_v4()));
     if text.trim().is_empty() || model_name.trim().is_empty() {
         return Err("A saved transcript and selected model are required".to_string());
+    }
+    let execution = execution_config::resolve(state.db_manager.pool(), &model, &model_name, approved_target.as_ref()).await?;
+    if execution.local && crate::audio::recording_commands::is_recording().await {
+        return Err("Finish recording before starting a local summary".to_string());
     }
     // Acquire before any database reset. React state is not a cross-view job lock.
     // The owned lease moves into the native task and drops on all exit/unwind paths.
@@ -404,6 +411,7 @@ pub async fn api_process_transcript<R: Runtime>(
             final_prompt,
             final_template_id,
             summary_language,
+            execution,
         )
         .await;
         drop(lease);

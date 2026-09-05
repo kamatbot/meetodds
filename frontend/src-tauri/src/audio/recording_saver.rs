@@ -75,6 +75,7 @@ pub struct RecordingSaver {
     failure_callback: Arc<Mutex<Option<FailureCallback>>>,
     worker: Option<JoinHandle<Result<(), String>>>, shutdown: Option<oneshot::Sender<()>>,
     capture_session_id: String,
+    recording_folder: Option<PathBuf>,
     finalized_audio: Option<String>, saved_result: Option<Option<String>>,
 }
 
@@ -85,10 +86,11 @@ impl RecordingSaver {
             transcript_segments: Arc::new(Mutex::new(Vec::new())), transcript_write_lock: Mutex::new(()),
             failure: Arc::new(Mutex::new(None)), failure_callback: Arc::new(Mutex::new(None)),
             worker: None, shutdown: None, capture_session_id: uuid::Uuid::new_v4().to_string(),
-            finalized_audio: None, saved_result: None,
+            finalized_audio: None, saved_result: None, recording_folder: None,
         }
     }
     pub fn set_meeting_name(&mut self, name: Option<String>) { self.meeting_name = name; }
+    pub fn set_recording_folder(&mut self, folder: PathBuf) { self.recording_folder = Some(folder); }
     pub fn set_failure_callback(&self, callback: impl Fn() + Send + Sync + 'static) {
         if let Ok(mut stored) = self.failure_callback.lock() { *stored = Some(Arc::new(callback)); }
     }
@@ -166,7 +168,7 @@ impl RecordingSaver {
     }
     fn initialize_meeting_folder(&mut self, name: &str, audio: bool) -> Result<()> {
         // This preserves the existing effective location. Configured-folder routing is a separate migration.
-        let base = super::recording_preferences::get_default_recordings_folder();
+        let base = self.recording_folder.clone().unwrap_or_else(super::recording_preferences::get_default_recordings_folder);
         let folder = create_meeting_folder(&base, name, audio)?;
         let metadata = MeetingMetadata {
             version: "1.0".to_string(), meeting_id: None, meeting_name: Some(name.to_string()),
@@ -243,8 +245,13 @@ impl RecordingSaver {
         if let Some(metadata) = self.metadata.as_mut() {
             metadata.status = "completed".to_string(); metadata.completed_at = Some(chrono::Utc::now().to_rfc3339());
             metadata.duration_seconds = duration.filter(|d| d.is_finite() && *d >= 0.0);
+            metadata.audio_file = audio.as_ref().and_then(|path| Path::new(path).file_name()).map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
         }
         if let Some(metadata) = &self.metadata { self.write_metadata(&folder, metadata).map_err(|_| "Final recording metadata could not be saved".to_string())?; }
+        if let Some(saver) = self.incremental_saver.clone() {
+            let cleanup = tokio::task::spawn_blocking(move || saver.blocking_lock().finish_commit()).await;
+            if !matches!(cleanup, Ok(Ok(()))) { warn!("Recording committed; recovery checkpoints could not be removed"); }
+        }
         let receipt = serde_json::json!({
             "audio_file": audio.clone().unwrap_or_default(), "audio_retained": audio.is_some(),
             "transcript_file": folder.join("transcripts.json").to_string_lossy(),

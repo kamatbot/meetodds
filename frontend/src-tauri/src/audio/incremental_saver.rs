@@ -115,6 +115,11 @@ impl IncrementalAudioSaver {
         self.journal.as_ref().map(|journal| journal.receipt().frames.min(u32::MAX as u64) as u32).unwrap_or(0)
     }
     pub fn get_meeting_folder(&self) -> &PathBuf { &self.meeting_folder }
+    pub fn finish_commit(&mut self) -> Result<()> {
+        if self.finalized.is_none() { return Err(anyhow!("Audio has not been finalized")); }
+        self.journal.take();
+        cleanup_committed_checkpoints(&self.meeting_folder)
+    }
     pub async fn finalize(&mut self) -> Result<PathBuf> {
         if let Some(path) = &self.finalized { return Ok(path.clone()); }
         let expected = self.journal.as_ref().ok_or_else(|| anyhow!("Recording journal unavailable"))?.receipt();

@@ -97,13 +97,8 @@ pub async fn load_recording_preferences<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<RecordingPreferences> {
     // Try to load from Tauri store
-    let store = match app.store("recording_preferences.json") {
-        Ok(store) => store,
-        Err(e) => {
-            warn!("Failed to access store: {}, using defaults", e);
-            return Ok(RecordingPreferences::default());
-        }
-    };
+    let store = app.store("recording_preferences.json")
+        .map_err(|_| anyhow::anyhow!("Recording preferences unavailable; recording was not started"))?;
 
     // Try to get the preferences from store
     let prefs = if let Some(value) = store.get("preferences") {
@@ -119,8 +114,7 @@ pub async fn load_recording_preferences<R: Runtime>(
                 p
             }
             Err(e) => {
-                warn!("Failed to deserialize preferences: {}, using defaults", e);
-                RecordingPreferences::default()
+                return Err(anyhow::anyhow!("Recording preferences are invalid; audio retention was not changed: {}", e));
             }
         }
     } else {

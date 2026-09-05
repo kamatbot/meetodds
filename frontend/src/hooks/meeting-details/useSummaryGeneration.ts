@@ -156,6 +156,7 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       setSummaryStatus(regeneration ? 'regenerating' : 'summarizing');
       const result = await invoke<{ process_id: string }>('api_process_transcript', {
         text: approved.text, model: target.provider, modelName: target.model, meetingId: id,
+        approvedTarget: { provider: target.provider, model: target.model, destination: target.destination },
         chunkSize: 40000, overlap: 1000, customPrompt: approved.customPrompt, templateId: selectedTemplate, summaryLanguage: language,
       });
       if (request.current?.token === token) request.current.accepted = true;

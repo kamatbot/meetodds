@@ -619,6 +619,7 @@ pub fn run() {
             trigger_microphone_permission,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
+            audio::capture_preflight::run_capture_preflight,
             start_audio_level_monitoring,
             stop_audio_level_monitoring,
             is_audio_level_monitoring,

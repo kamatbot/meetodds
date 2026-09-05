@@ -93,7 +93,7 @@ export default function Home() {
         }
 
         try {
-          await indexedDBService.deleteOldMeetings(7);
+          // Interrupted meetings remain until explicit recovery or deletion.
         } catch (error) {
           console.warn('⚠️ Failed to clean up old meetings:', error);
         }

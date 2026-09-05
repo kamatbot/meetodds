@@ -232,6 +232,7 @@ pub fn build_chat_request(
         .post(api_url)
         .headers(headers)
         .json(&request_body)
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(REQUEST_TIMEOUT_DURATION))
 }
 

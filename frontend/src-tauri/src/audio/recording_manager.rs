@@ -173,6 +173,7 @@ impl RecordingManager {
     pub fn set_error_callback<F>(&self, callback: F) where F: Fn(&AudioError) + Send + Sync + 'static { self.state.set_error_callback(callback); }
     pub fn has_fatal_error(&self) -> bool { self.recording_saver.last_failure().is_some() || self.state.has_fatal_error() }
     pub fn set_meeting_name(&mut self, name: Option<String>) { self.recording_saver.set_meeting_name(name); }
+    pub fn set_recording_folder(&mut self, folder: std::path::PathBuf) { self.recording_saver.set_recording_folder(folder); }
     pub fn add_transcript_segment(&self, segment: super::recording_saver::TranscriptSegment) { self.recording_saver.add_transcript_segment(segment); }
     pub fn add_transcript_chunk(&self, text: String) { self.recording_saver.add_transcript_chunk(text); }
     pub fn get_transcript_segments(&self) -> Vec<super::recording_saver::TranscriptSegment> { self.recording_saver.get_transcript_segments() }
