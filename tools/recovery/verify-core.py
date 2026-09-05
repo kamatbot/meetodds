@@ -3,13 +3,19 @@ Tauri command wrappers are excluded; SQLite, journal, codec and queue algorithms
 This is not a full Tauri build or a hardware capture test.
 """
 from pathlib import Path
+import json
 import os
+import shutil
 import subprocess
 import tempfile
 
 root = Path.cwd()
 crate = Path(tempfile.mkdtemp(prefix='meetodds-core-'))
 (crate/'src'/'audio').mkdir(parents=True)
+ffmpeg = os.environ.get('MEETODDS_FFMPEG') or shutil.which('ffmpeg')
+if not ffmpeg:
+    raise RuntimeError('FFmpeg is required for the real-codec finalization check; set MEETODDS_FFMPEG to its executable path.')
+ffmpeg_literal = json.dumps(ffmpeg)
 (crate/'Cargo.toml').write_text('''[package]
 name = "meetodds-core-verification"
 version = "0.1.0"
@@ -22,6 +28,8 @@ serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 once_cell = "1"
+chrono = "0.4"
+tokio-util = "0.7"
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
@@ -40,14 +48,21 @@ if (audio/'pcm_journal.rs').exists():
             pub chunk_id: u64, pub device_type: DeviceType,
         }
     }
-    pub mod ffmpeg { pub fn find_ffmpeg_path() -> Option<std::path::PathBuf> { Some("/usr/bin/ffmpeg".into()) } }
+    pub mod ffmpeg { pub fn find_ffmpeg_path() -> Option<std::path::PathBuf> { Some(__FFMPEG__.into()) } }
     pub mod incremental_saver;
     pub mod save_worker;
-}''')
+    pub mod recovery_catalog;
+}'''.replace('__FFMPEG__', ffmpeg_literal))
+catalog = (audio/'recovery_catalog.rs').read_text()
+core_catalog = catalog[:catalog.index('async fn roots<')]+catalog[catalog.index('#[cfg(test)]'):]
+core_catalog = core_catalog.replace('use tauri::{AppHandle, Runtime, State};\n', '').replace('use crate::state::AppState;\n', '')
+(crate/'src/audio/recovery_catalog.rs').write_text(core_catalog)
 summary = root/'frontend/src-tauri/src/summary'
 if (summary/'execution_config.rs').exists():
     (crate/'src/execution_config.rs').write_text((summary/'execution_config.rs').read_text())
     (crate/'src/execution_gate.rs').write_text((summary/'execution_gate.rs').read_text())
+    (crate/'src/inference_priority.rs').write_text((summary/'inference_priority.rs').read_text())
+    modules.append('mod inference_priority;')
     llm = (summary/'llm_client.rs').read_text()
     provider = llm[llm.index('#[derive(Debug, Clone, PartialEq)]\npub enum LLMProvider'):llm.index('/// Build the HTTP request')]
     modules.append('pub mod summary { pub mod llm_client {\n'+provider+'\n} }')

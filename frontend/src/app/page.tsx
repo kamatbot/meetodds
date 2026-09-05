@@ -93,7 +93,7 @@ export default function Home() {
         }
 
         try {
-          await indexedDBService.deleteOldMeetings(7);
+          // Interrupted meetings remain until explicit recovery or deletion.
         } catch (error) {
           console.warn('⚠️ Failed to clean up old meetings:', error);
         }
@@ -119,7 +119,7 @@ export default function Home() {
 
       if (result.success) {
         toast.success('Meeting recovered successfully!', {
-          description: result.audioRecoveryStatus?.status === 'success'
+          description: result.audioRecoveryStatus?.audio_file_path
             ? 'Transcripts and audio recovered'
             : 'Transcripts recovered (no audio available)',
           action: result.meetingId ? {

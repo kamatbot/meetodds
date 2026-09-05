@@ -193,8 +193,7 @@ pub struct SummaryService;
 
 impl SummaryService {
     /// Registers a new cancellation token for a meeting
-    fn register_cancellation_token(meeting_id: &str) -> CancellationToken {
-        let token = CancellationToken::new();
+    fn register_cancellation_token(meeting_id: &str, token: CancellationToken) -> CancellationToken {
         if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
             registry.insert(meeting_id.to_string(), token.clone());
             info!("Registered cancellation token for meeting: {}", meeting_id);
@@ -306,6 +305,8 @@ impl SummaryService {
         custom_prompt: String,
         template_id: String,
         summary_language: Option<String>,
+        execution: crate::summary::commands::execution_config::ResolvedSummaryConfig,
+        supplied_cancellation_token: CancellationToken,
     ) {
         let start_time = Instant::now();
         info!(
@@ -314,96 +315,22 @@ impl SummaryService {
         );
 
         // Register cancellation token for this meeting
-        let cancellation_token = Self::register_cancellation_token(&meeting_id);
+        let cancellation_token = Self::register_cancellation_token(&meeting_id, supplied_cancellation_token);
 
-        // Parse provider
-        let provider = match LLMProvider::from_str(&model_provider) {
-            Ok(p) => p,
-            Err(e) => {
-                Self::update_process_failed(&pool, &meeting_id, &e).await;
-                return;
-            }
-        };
+        if cancellation_token.is_cancelled() {
+            let _ = SummaryProcessesRepository::update_process_cancelled(&pool, &meeting_id).await;
+            Self::cleanup_cancellation_token(&meeting_id);
+            return;
+        }
 
-        // Validate and setup api_key, Flexible for Ollama, BuiltInAI, and CustomOpenAI
-        let api_key = if provider == LLMProvider::Ollama
-            || provider == LLMProvider::BuiltInAI
-            || provider == LLMProvider::CustomOpenAI
-            || provider == LLMProvider::OpenAICodex
-        {
-            // These providers don't require API keys from the standard database column
-            String::new()
-        } else {
-            match SettingsRepository::get_api_key(&pool, &model_provider).await {
-                Ok(Some(key)) if !key.is_empty() => key,
-                Ok(None) | Ok(Some(_)) => {
-                    let err_msg = format!("API key not found for {}", &model_provider);
-                    Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
-                    return;
-                }
-                Err(e) => {
-                    let err_msg =
-                        format!("Failed to retrieve API key for {}: {}", &model_provider, e);
-                    Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
-                    return;
-                }
-            }
-        };
-
-        // Get Ollama endpoint if provider is Ollama
-        let ollama_endpoint = if provider == LLMProvider::Ollama {
-            match SettingsRepository::get_model_config(&pool).await {
-                Ok(Some(config)) => config.ollama_endpoint,
-                Ok(None) => None,
-                Err(e) => {
-                    info!("Failed to retrieve Ollama endpoint: {}, using default", e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        // Get CustomOpenAI config if provider is CustomOpenAI
-        let (
-            custom_openai_endpoint,
-            custom_openai_api_key,
-            custom_openai_max_tokens,
-            custom_openai_temperature,
-            custom_openai_top_p,
-        ) = if provider == LLMProvider::CustomOpenAI {
-            match SettingsRepository::get_custom_openai_config(&pool).await {
-                Ok(Some(config)) => {
-                    info!("✓ Using custom OpenAI endpoint: {}", config.endpoint);
-                    (
-                        Some(config.endpoint),
-                        config.api_key,
-                        config.max_tokens.map(|t| t as u32),
-                        config.temperature,
-                        config.top_p,
-                    )
-                }
-                Ok(None) => {
-                    let err_msg = "Custom OpenAI provider selected but no configuration found";
-                    Self::update_process_failed(&pool, &meeting_id, err_msg).await;
-                    return;
-                }
-                Err(e) => {
-                    let err_msg = format!("Failed to retrieve custom OpenAI config: {}", e);
-                    Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
-                    return;
-                }
-            }
-        } else {
-            (None, None, None, None, None)
-        };
-
-        // For CustomOpenAI, use its API key (if any) instead of the empty string
-        let final_api_key = if provider == LLMProvider::CustomOpenAI {
-            custom_openai_api_key.unwrap_or_default()
-        } else {
-            api_key
-        };
+        // Frozen before dispatch: never re-read mutable destinations inside the job.
+        let provider = execution.provider;
+        let final_api_key = execution.api_key;
+        let ollama_endpoint = execution.ollama_endpoint;
+        let custom_openai_endpoint = execution.custom_openai_endpoint;
+        let custom_openai_max_tokens = execution.max_tokens;
+        let custom_openai_temperature = execution.temperature;
+        let custom_openai_top_p = execution.top_p;
 
         // Dynamically fetch context size based on provider and model
         let token_threshold = if provider == LLMProvider::Ollama {

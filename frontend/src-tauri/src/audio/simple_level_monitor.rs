@@ -1,92 +1,29 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, Runtime};
-use anyhow::Result;
-use log::{error, info};
-use serde::Serialize;
+//! Compatibility meter backed by bounded real-source probes; never synthesizes activity.
+use anyhow::{anyhow, Result};
+use once_cell::sync::Lazy;
+use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
+use tauri::{AppHandle, Runtime};
+use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Serialize, Clone)]
-pub struct AudioLevelData {
-    pub device_name: String,
-    pub device_type: String, // "input" or "output"
-    pub rms_level: f32,     // RMS level (0.0 to 1.0)
-    pub peak_level: f32,    // Peak level (0.0 to 1.0)
-    pub is_active: bool,    // Whether audio is being detected
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct AudioLevelUpdate {
-    pub timestamp: u64,
-    pub levels: Vec<AudioLevelData>,
-}
-
-// Simple global monitoring state
 static IS_MONITORING: AtomicBool = AtomicBool::new(false);
+static SESSION: Lazy<Mutex<Option<CancellationToken>>> = Lazy::new(|| Mutex::new(None));
 
-/// Start audio level monitoring for specified devices
-pub async fn start_monitoring<R: Runtime>(
-    app_handle: AppHandle<R>,
-    device_names: Vec<String>,
-) -> Result<()> {
-    info!("Starting simplified audio level monitoring for devices: {:?}", device_names);
-
-    // Stop any existing monitoring
+pub async fn start_monitoring<R: Runtime>(app: AppHandle<R>, device_names: Vec<String>) -> Result<()> {
+    if IS_MONITORING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return Err(anyhow!("An audio test is already running. Stop it before testing again."));
+    }
+    let token = CancellationToken::new();
+    if let Ok(mut session) = SESSION.lock() { *session = Some(token.clone()); }
+    else { IS_MONITORING.store(false, Ordering::SeqCst); return Err(anyhow!("Audio test state unavailable")); }
+    // A bounded test is not a continuing recording. Every stream is dropped when the probe ends.
+    let result = super::capture_preflight::probe_named_sources(&app, device_names, token).await;
+    if let Ok(mut session) = SESSION.lock() { session.take(); }
     IS_MONITORING.store(false, Ordering::SeqCst);
-
-    // Wait a bit for any existing tasks to stop
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    // Start new monitoring
-    IS_MONITORING.store(true, Ordering::SeqCst);
-
-    // For now, create fake level data to test the UI
-    let app_handle_clone = app_handle.clone();
-    tokio::spawn(async move {
-        let mut counter: f32 = 0.0;
-
-        while IS_MONITORING.load(Ordering::SeqCst) {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            counter += 0.1;
-            let fake_level = (counter.sin().abs() * 0.8) as f32; // Simulate varying levels
-
-            let levels: Vec<AudioLevelData> = device_names.iter().map(|name| {
-                AudioLevelData {
-                    device_name: name.clone(),
-                    device_type: "input".to_string(),
-                    rms_level: fake_level,
-                    peak_level: fake_level * 1.2,
-                    is_active: fake_level > 0.1,
-                }
-            }).collect();
-
-            let update = AudioLevelUpdate {
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64,
-                levels,
-            };
-
-            if let Err(e) = app_handle_clone.emit("audio-levels", &update) {
-                error!("Failed to emit audio levels: {}", e);
-                break;
-            }
-        }
-
-        info!("Audio level monitoring task ended");
-    });
-
-    Ok(())
+    result
 }
-
-/// Stop audio level monitoring
 pub async fn stop_monitoring() -> Result<()> {
-    info!("Stopping simplified audio level monitoring");
-    IS_MONITORING.store(false, Ordering::SeqCst);
+    if let Ok(session) = SESSION.lock() { if let Some(token) = session.as_ref() { token.cancel(); } }
+    // The in-flight probe owns cleanup and changes the flag after releasing its streams.
     Ok(())
 }
-
-/// Check if currently monitoring
-pub fn is_monitoring() -> bool {
-    IS_MONITORING.load(Ordering::SeqCst)
-}
+pub fn is_monitoring() -> bool { IS_MONITORING.load(Ordering::SeqCst) }
