@@ -19,6 +19,7 @@ actor LocalTranscription {
         if let download = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
             try await download.downloadAndInstall()
         }
+        try Task.checkCancellation()
         return module
     }
     func cancel() async {
@@ -37,7 +38,8 @@ actor LocalTranscription {
         let reader = Task {
             for try await output in module.results {
                 let start = output.range.start.seconds; let end = output.range.end.seconds
-                await result(TranscriptTurn(id: "T\(Int64(max(0, start) * 1000))", start: start, end: end, text: String(output.text.characters)), output.isFinal)
+                guard start.isFinite, end.isFinite, start >= 0, end >= start, end < 315_360_000 else { continue }
+                await result(TranscriptTurn(id: "T\(Int64(start * 1000))", start: start, end: end, text: String(output.text.characters)), output.isFinal)
             }
         }
         do {
@@ -83,6 +85,7 @@ actor LocalTranscription {
         var all: [TranscriptTurn] = []; var offset = 0.0
         for url in files {
             try Task.checkCancellation()
+            if cancelled { throw CancellationError() }
             let module = try await Self.prepare(localeID: localeID)
             let analyzer = SpeechAnalyzer(modules: [module]); self.analyzer = analyzer
             let base = offset
@@ -90,7 +93,8 @@ actor LocalTranscription {
                 var turns: [TranscriptTurn] = []
                 for try await output in module.results where output.isFinal {
                     let start = base + output.range.start.seconds; let end = base + output.range.end.seconds
-                    turns.append(.init(id: "T\(Int64(max(0, start) * 1000))", start: start, end: end, text: String(output.text.characters)))
+                    guard start.isFinite, end.isFinite, start >= 0, end >= start, end < 315_360_000 else { continue }
+                    turns.append(.init(id: "T\(Int64(start * 1000))", start: start, end: end, text: String(output.text.characters)))
                 }
                 return turns
             }

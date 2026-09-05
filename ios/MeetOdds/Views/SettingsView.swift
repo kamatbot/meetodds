@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pairingText = ""
     @State private var pairing = false
+    @State private var preparingSpeech = false
     @State private var message: String?
     @State private var locales: [Locale] = []
     var body: some View {
@@ -22,7 +23,15 @@ struct SettingsView: View {
                             ForEach(locales, id: \.identifier) { locale in Text(Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier).tag(locale.identifier) }
                         }
                     }
-                    Text("Speech models may download on first use. Meeting audio is never sent for transcription. Local summaries depend on device and Apple Intelligence availability.").font(.caption).foregroundStyle(.secondary)
+                    Button(preparingSpeech ? "Preparing offline transcription…" : "Prepare transcription for offline use") {
+                        preparingSpeech = true
+                        Task {
+                            do { _ = try await LocalTranscription.prepare(localeID: model.localeID); message = "The transcription model is ready for this language." }
+                            catch { message = error.localizedDescription }
+                            preparingSpeech = false
+                        }
+                    }.disabled(preparingSpeech)
+                    Text("Speech models may download on first use. Preparing them here avoids setup during an important meeting. Meeting audio is never sent for transcription.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
                     if let configured = model.pairing {
@@ -50,8 +59,8 @@ struct SettingsView: View {
                             }
                         }.disabled(pairing || pairingText.isEmpty)
                     }
-                    if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 } header: { Text("ChatGPT subscription") } footer: { Text("Uses Codex account access, not OpenAI API credits. No password scraping, shared API key or unapproved fallback.") }
+                if let message { Section { Text(message).font(.subheadline).accessibilityAddTraits(.updatesFrequently) } }
                 Section("Recording & privacy") {
                     Text("Microphone only. iOS does not give this app access to another app’s call audio. Use it for in-person conversations or permitted speakerphone capture.")
                     Text("Recordings stay in protected, backup-excluded local storage. Deleting a meeting removes its audio, transcript, notes and summaries. Uninstalling the app deletes its local library.")

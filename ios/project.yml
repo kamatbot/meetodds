@@ -21,10 +21,12 @@ targets:
   MeetOdds:
     type: application
     platform: iOS
-    sources: [MeetOdds, Shared]
-    resources:
+    sources:
+      - path: MeetOdds
+      - path: Shared
       - path: ../frontend/src-tauri/templates
         type: folder
+        buildPhase: resources
     dependencies:
       - package: MeetOddsCore
       - target: MeetOddsLiveActivity
