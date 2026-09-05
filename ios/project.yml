@@ -1,0 +1,70 @@
+name: MeetOdds
+options:
+  bundleIdPrefix: com.meetodds
+  deploymentTarget:
+    iOS: '26.0'
+  xcodeVersion: '26.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    SWIFT_STRICT_CONCURRENCY: complete
+    IPHONEOS_DEPLOYMENT_TARGET: '26.0'
+    TARGETED_DEVICE_FAMILY: '1,2'
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    MARKETING_VERSION: '0.1.0'
+    CURRENT_PROJECT_VERSION: '1'
+    GENERATE_INFOPLIST_FILE: NO
+packages:
+  MeetOddsCore:
+    path: MeetOddsCore
+targets:
+  MeetOdds:
+    type: application
+    platform: iOS
+    sources: [MeetOdds, Shared]
+    resources:
+      - path: ../frontend/src-tauri/templates
+        type: folder
+    dependencies:
+      - package: MeetOddsCore
+      - target: MeetOddsLiveActivity
+    info:
+      path: Config/Info.plist
+      properties:
+        CFBundleDisplayName: MeetOdds
+        UILaunchScreen: {}
+        NSMicrophoneUsageDescription: Record meetings you choose, entirely on this iPhone.
+        NSSpeechRecognitionUsageDescription: Create an on-device transcript of your recorded meetings.
+        NSLocalNetworkUsageDescription: Connect to your explicitly paired Mac for ChatGPT subscription summaries.
+        NSSupportsLiveActivities: true
+        UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        'UISupportedInterfaceOrientations~ipad': [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [meetodds]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.meetodds.ios
+  MeetOddsLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources: [MeetOddsLiveActivity, Shared]
+    info:
+      path: Config/WidgetInfo.plist
+      properties:
+        CFBundleDisplayName: MeetOdds Recording
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.meetodds.ios.liveactivity
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+schemes:
+  MeetOdds:
+    build:
+      targets:
+        MeetOdds: all
+        MeetOddsLiveActivity: all
