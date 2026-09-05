@@ -203,10 +203,15 @@ pub fn start_transcription_task<R: Runtime>(
                                 }
                                 crate::audio::recording_state::DeviceType::System => "system",
                             };
+                            // Inference blocks for seconds; keep it off the tokio worker
+                            // threads so the audio pipeline task keeps draining.
                             let transcription_result = {
                                 let _canonical_guard = CanonicalTranscriptionGuard::new();
-                                transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone)
-                                    .await
+                                tokio::task::block_in_place(|| {
+                                    tokio::runtime::Handle::current().block_on(
+                                        transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone),
+                                    )
+                                })
                             };
                             let _ = app_clone.emit(
                                 "live-transcript-preview-clear",
@@ -527,7 +532,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             let language = crate::get_language_preference_internal();
 
             match whisper_engine
-                .transcribe_audio_with_confidence(speech_samples, language)
+                .transcribe_live(speech_samples, language)
                 .await
             {
                 Ok((text, confidence, is_partial)) => {
