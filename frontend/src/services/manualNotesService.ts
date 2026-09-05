@@ -9,6 +9,10 @@ export async function saveManualNotes(meetingId: string, content: string): Promi
   await invoke<void>('api_save_manual_notes', { meetingId, content });
 }
 
+export async function linkManualNotes(draftMeetingId: string, meetingId: string): Promise<void> {
+  await invoke<void>('api_link_manual_notes', { draftMeetingId, meetingId });
+}
+
 export async function openManualNotesWindow(meetingId: string): Promise<void> {
   await invoke<void>('open_manual_notes_window', { meetingId });
 }

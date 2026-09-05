@@ -7,6 +7,7 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
+import { linkManualNotes } from '@/services/manualNotesService';
 import Analytics from '@/lib/analytics';
 import {
   applyPinnedSummaryLanguageToMeeting,
@@ -56,6 +57,7 @@ export function useRecordingStop(
     flushBuffer,
     clearTranscripts,
     meetingTitle,
+    currentMeetingId,
     markMeetingAsSaved,
   } = useTranscripts();
 
@@ -265,6 +267,20 @@ export function useRecordingStop(
             throw new Error('No meeting ID received from save operation');
           }
 
+          const draftMeetingId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
+          if (draftMeetingId) {
+            try {
+              // Link rather than move: the popup's final hide-save can arrive after
+              // this point, and the saved meeting must always read the latest draft.
+              await linkManualNotes(draftMeetingId, meetingId);
+            } catch (error) {
+              console.warn('Failed to attach meeting notes:', error);
+              toast.warning('Meeting notes could not be attached', {
+                description: 'The meeting was saved. Its notes remain available in this app session.',
+              });
+            }
+          }
+
           let shouldDetectSummaryLanguage = false;
           try {
             shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
@@ -428,6 +444,7 @@ export function useRecordingStop(
     flushBuffer,
     clearTranscripts,
     meetingTitle,
+    currentMeetingId,
     markMeetingAsSaved,
     refetchMeetings,
     setCurrentMeeting,

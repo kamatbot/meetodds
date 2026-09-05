@@ -676,6 +676,7 @@ pub fn run() {
             api::api_save_meeting_notes,
             api::api_get_manual_notes,
             api::api_save_manual_notes,
+            api::api_link_manual_notes,
             manual_notes_window::open_manual_notes_window,
             manual_notes_window::close_manual_notes_window,
             api::api_get_meeting_export_info,
