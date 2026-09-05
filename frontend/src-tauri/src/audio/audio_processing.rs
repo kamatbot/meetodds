@@ -162,8 +162,14 @@ impl LoudnessNormalizer {
         const TRUE_PEAK_LIMIT: f64 = -1.0;
         const ANALYZE_CHUNK_SIZE: usize = 512;
 
-        let ebur128 = ebur128::EbuR128::new(channels, sample_rate, ebur128::Mode::I | ebur128::Mode::TRUE_PEAK)
+        let mut ebur128 = ebur128::EbuR128::new(channels, sample_rate, ebur128::Mode::I | ebur128::Mode::TRUE_PEAK)
             .map_err(|e| anyhow::anyhow!("Failed to create EBU R128 normalizer: {}", e))?;
+        // loudness_global() walks every 100 ms block ever seen and is called ~94x/s.
+        // Unbounded history made that cost grow for the whole meeting; 60 s of
+        // history is plenty for a speech gain estimate.
+        ebur128
+            .set_max_history(60_000)
+            .map_err(|e| anyhow::anyhow!("Failed to bound EBU R128 history: {}", e))?;
 
         let true_peak_limit = 10_f32.powf(TRUE_PEAK_LIMIT as f32 / 20.0);
 

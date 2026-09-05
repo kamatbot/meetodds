@@ -339,26 +339,40 @@ impl CoreAudioStream {
     }
 }
 
+/// Largest batch handed out per poll (samples). One poll per 1024 samples instead
+/// of one poll per sample: 48k future polls/s was measurable CPU on the runtime.
+pub const CORE_AUDIO_BATCH_SAMPLES: usize = 1024;
+
+#[cfg(target_os = "macos")]
+impl CoreAudioStream {
+    fn pop_batch(&mut self) -> Option<Vec<f32>> {
+        let mut batch = vec![0.0f32; CORE_AUDIO_BATCH_SAMPLES];
+        let n = self.consumer.pop_slice(&mut batch);
+        if n == 0 {
+            return None;
+        }
+        batch.truncate(n);
+        Some(batch)
+    }
+}
+
 #[cfg(target_os = "macos")]
 impl Stream for CoreAudioStream {
-    type Item = f32;
+    type Item = Vec<f32>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        // Try to pop a sample from the ring buffer
-        if let Some(sample) = self.consumer.try_pop() {
-            return Poll::Ready(Some(sample));
+        // Drain a batch from the ring buffer
+        if let Some(batch) = self.pop_batch() {
+            return Poll::Ready(Some(batch));
         }
 
         // Check if we should terminate
         if self._ctx.should_terminate.load(Ordering::Acquire) {
             warn!("Stream terminating due to buffer pressure");
-            return match self.consumer.try_pop() {
-                Some(sample) => Poll::Ready(Some(sample)),
-                None => Poll::Ready(None),
-            };
+            return Poll::Ready(self.pop_batch());
         }
 
         // No data available, register waker and return pending
@@ -407,7 +421,7 @@ impl CoreAudioStream {
 
 #[cfg(not(target_os = "macos"))]
 impl Stream for CoreAudioStream {
-    type Item = f32;
+    type Item = Vec<f32>;
 
     fn poll_next(
         self: Pin<&mut Self>,
@@ -435,8 +449,8 @@ mod tests {
         // Collect some samples
         let mut sample_count = 0;
         while sample_count < 48000 { // 1 second at 48kHz
-            if let Some(_sample) = stream.next().await {
-                sample_count += 1;
+            if let Some(batch) = stream.next().await {
+                sample_count += batch.len();
             }
         }
 

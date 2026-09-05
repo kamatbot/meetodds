@@ -66,13 +66,12 @@ impl SystemAudioCapture {
 
                     // Poll the Core Audio stream
                     match stream.next().await {
-                        Some(sample) => {
-                            buffer.push(sample);
+                        Some(batch) => {
+                            buffer.extend_from_slice(&batch);
                             if buffer.len() >= chunk_size {
-                                if tx.unbounded_send(buffer.clone()).is_err() {
+                                if tx.unbounded_send(std::mem::take(&mut buffer)).is_err() {
                                     break;
                                 }
-                                buffer.clear();
                             }
                         }
                         None => break,
