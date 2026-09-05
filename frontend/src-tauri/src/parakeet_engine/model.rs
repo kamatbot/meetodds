@@ -121,15 +121,19 @@ impl ParakeetModel {
             regular_name
         };
 
+        // Sequential execution: the Parakeet graphs have no independent branches,
+        // so inter-op threads only add idle pool threads. Spin-waiting is disabled
+        // so intra-op threads sleep between decodes instead of burning CPU while
+        // the recorder waits for the next VAD segment.
         let mut builder = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_execution_providers(providers)?
-            .with_parallel_execution(true)?;
+            .with_parallel_execution(false)?
+            .with_inter_threads(1)?
+            .with_config_entry("session.intra_op.allow_spinning", "0")?;
 
         if let Some(threads) = intra_threads {
-            builder = builder
-                .with_intra_threads(threads)?
-                .with_inter_threads(threads)?;
+            builder = builder.with_intra_threads(threads)?;
         }
 
         let session = builder.commit_from_file(model_dir.as_ref().join(&model_filename))?;
