@@ -41,6 +41,10 @@ pub struct ModelInfo {
 pub struct WhisperEngine {
     models_dir: PathBuf,
     current_context: Arc<RwLock<Option<WhisperContext>>>,
+    // Reusable decoder state for the live path. create_state() reallocates KV
+    // caches and GPU buffers, which is pure latency when called per segment.
+    // Cleared whenever the context changes because a state pins its own model.
+    live_state: Arc<std::sync::Mutex<Option<whisper_rs::WhisperState>>>,
     current_model: Arc<RwLock<Option<String>>>,
     available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     // State tracking for smart logging
@@ -169,6 +173,7 @@ impl WhisperEngine {
         let engine = Self {
             models_dir,
             current_context: Arc::new(RwLock::new(None)),
+            live_state: Arc::new(std::sync::Mutex::new(None)),
             current_model: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
             // Initialize state tracking
@@ -345,6 +350,7 @@ impl WhisperEngine {
                 };
 
                 // Update current context and model
+                self.clear_live_state();
                 *self.current_context.write().await = Some(ctx);
                 *self.current_model.write().await = Some(model_name.to_string());
 
@@ -368,8 +374,15 @@ impl WhisperEngine {
         }
     }
 
+    fn clear_live_state(&self) {
+        if let Ok(mut slot) = self.live_state.lock() {
+            slot.take();
+        }
+    }
+
     pub async fn unload_model(&self) -> bool {
         let mut ctx_guard = self.current_context.write().await;
+        self.clear_live_state();
         let unloaded = ctx_guard.take().is_some();
         if unloaded {
             log::info!("📉Whisper model unloaded");
@@ -609,11 +622,30 @@ impl WhisperEngine {
         Ok(Self::clean_repetitive_text(result.trim()))
     }
 
-    /// Transcribe audio with streaming support for partial results and adaptive quality
+    /// Batch-quality transcription (beam search). Used by import and retranscription.
     pub async fn transcribe_audio_with_confidence(
         &self,
         audio_data: Vec<f32>,
         language: Option<String>,
+    ) -> Result<(String, f32, bool)> {
+        self.transcribe_with_mode(audio_data, language, false).await
+    }
+
+    /// Live-recording transcription: greedy decoding, no token timestamps, and a
+    /// reused decoder state. Roughly a third of the decoder work of beam search.
+    pub async fn transcribe_live(
+        &self,
+        audio_data: Vec<f32>,
+        language: Option<String>,
+    ) -> Result<(String, f32, bool)> {
+        self.transcribe_with_mode(audio_data, language, true).await
+    }
+
+    async fn transcribe_with_mode(
+        &self,
+        audio_data: Vec<f32>,
+        language: Option<String>,
+        live: bool,
     ) -> Result<(String, f32, bool)> {
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock
@@ -625,9 +657,13 @@ impl WhisperEngine {
         let adaptive_config = hardware_profile.get_whisper_config();
 
         // ADAPTIVE parameters - optimized for current hardware
-        let mut params = FullParams::new(SamplingStrategy::BeamSearch {
-            beam_size: adaptive_config.beam_size as i32,
-            patience: 1.0,
+        let mut params = FullParams::new(if live {
+            SamplingStrategy::Greedy { best_of: 1 }
+        } else {
+            SamplingStrategy::BeamSearch {
+                beam_size: adaptive_config.beam_size as i32,
+                patience: 1.0,
+            }
         });
 
         // Configure with adaptive settings
@@ -645,8 +681,8 @@ impl WhisperEngine {
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
         // The "single timestamp ending - skip entire chunk" optimization incorrectly discards
         // complete, valid transcriptions. Disabling timestamps forces whisper to return ALL text.
-        params.set_no_timestamps(true); // Prevent timestamp-based segment skipping
-        params.set_token_timestamps(true); // Keep for any timestamp-aware features
+        params.set_no_timestamps(true);     // Prevent timestamp-based segment skipping
+        params.set_token_timestamps(!live); // Timestamps are disabled anyway; skip the DTW work live
 
         // PERFORMANCE: Disable ALL whisper.cpp internal printing
         // This reduces C library log spam significantly
@@ -680,21 +716,26 @@ impl WhisperEngine {
 
         // PERFORMANCE: Suppress verbose C library logs during transcription
         // This hides whisper_full_with_state debug logs and beam search details
-        let (num_segments, state) = {
-            // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
-
-            let mut state = ctx.create_state()?;
-            state.full(params, &audio_data)?;
-            let num_segments = state.full_n_segments();
-
-            (num_segments, state)
-            // Suppressor dropped here, stderr restored
+        // Live path reuses one decoder state; if it is busy (concurrent caller) or
+        // this is a batch call, fall back to a fresh state.
+        let mut cached_slot = if live { self.live_state.try_lock().ok() } else { None };
+        let mut fresh_state = None;
+        let state: &mut whisper_rs::WhisperState = match cached_slot.as_deref_mut() {
+            Some(slot) => {
+                if slot.is_none() {
+                    *slot = Some(ctx.create_state()?);
+                }
+                slot.as_mut().expect("state inserted above")
+            }
+            None => fresh_state.insert(ctx.create_state()?),
         };
+        state.full(params, &audio_data)?;
+        let num_segments = state.full_n_segments()?;
+
         let mut result = String::new();
         let mut total_confidence = 0.0;
         let mut segment_count = 0;
 
-        let num_segments = num_segments?;
         for i in 0..num_segments {
             let segment_text = match state.full_get_segment_text_lossy(i) {
                 Ok(text) => text,

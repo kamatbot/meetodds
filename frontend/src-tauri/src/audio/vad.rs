@@ -23,10 +23,21 @@ pub struct ContinuousVadProcessor {
     current_speech: Vec<f32>,
     in_speech: bool,
     processed_samples: usize,
-    speech_start_sample: usize,
+    // 16 kHz sample index where the piece currently being accumulated starts.
+    segment_start_sample: usize,
+    // True once the current utterance has been split; later pieces come from
+    // `current_speech` instead of silero's own (pre-padded) speech buffer.
+    has_split: bool,
     // State tracking for smart logging
     last_logged_state: bool,
 }
+
+// ponytail: fixed caps. Long monologues are cut into <= ~6 s pieces at the first
+// VAD-quiet frame (hard cut at 9 s) so text appears while the speaker is still
+// talking. Whisper pads every call to 30 s, so do not lower the soft cap much.
+const SOFT_SEGMENT_CAP_SAMPLES: usize = 6 * 16_000;
+const HARD_SEGMENT_CAP_SAMPLES: usize = 9 * 16_000;
+const SPLIT_QUIET_FRAMES: Duration = Duration::from_millis(60);
 
 impl ContinuousVadProcessor {
     pub fn new(input_sample_rate: u32, redemption_time_ms: u32) -> Result<Self> {
@@ -48,7 +59,7 @@ impl ContinuousVadProcessor {
         // New: Use full redemption_time from pipeline (2000ms) to bridge natural pauses
         config.redemption_time = Duration::from_millis(redemption_time_ms as u64);
         config.pre_speech_pad = Duration::from_millis(300); // Pre-speech padding for context
-        config.post_speech_pad = Duration::from_millis(400); // Increased: more context at end
+        config.post_speech_pad = Duration::from_millis(150); // Short tail: every ms here is added latency
 
         // CRITICAL FIX: Increased min_speech_time to prevent tiny 40ms fragments
         // Previous: 100ms allowed too-short segments that Whisper rejects
@@ -78,7 +89,8 @@ impl ContinuousVadProcessor {
             current_speech: Vec::new(),
             in_speech: false,
             processed_samples: 0,
-            speech_start_sample: 0,
+            segment_start_sample: 0,
+            has_split: false,
             // Initialize state tracking
             last_logged_state: false,
         })
@@ -224,28 +236,28 @@ impl ContinuousVadProcessor {
         }
 
         // Force end any ongoing speech
-        if self.in_speech && !self.current_speech.is_empty() {
-            // processed_samples and speech_start_sample always count 16kHz samples (post-resampling)
-            let start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
-            let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
+        if self.in_speech {
+            let samples = self.take_open_speech();
+            if !samples.is_empty() {
+                // processed_samples and segment_start_sample always count 16kHz samples (post-resampling)
+                let start_ms = (self.segment_start_sample as f64 / 16000.0) * 1000.0;
+                let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
 
             debug!(
                 "VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
                 start_ms,
                 end_ms,
                 end_ms - start_ms,
-                self.current_speech.len()
+                samples.len()
             );
 
-            let segment = SpeechSegment {
-                samples: self.current_speech.clone(),
-                start_timestamp_ms: start_ms,
-                end_timestamp_ms: end_ms,
-                confidence: 0.8, // Estimated confidence for forced end
-            };
-
-            self.speech_segments.push_back(segment);
-            self.current_speech.clear();
+                self.speech_segments.push_back(SpeechSegment {
+                    samples,
+                    start_timestamp_ms: start_ms,
+                    end_timestamp_ms: end_ms,
+                    confidence: 0.8, // Estimated confidence for forced end
+                });
+            }
             self.in_speech = false;
         }
 
@@ -255,6 +267,18 @@ impl ContinuousVadProcessor {
         }
 
         Ok(completed_segments)
+    }
+
+    /// Audio of the open utterance piece. The first piece of an utterance comes from
+    /// silero's buffer (it includes pre-speech padding and the samples before the
+    /// SpeechStart transition); pieces after a split are our own accumulation.
+    fn take_open_speech(&mut self) -> Vec<f32> {
+        if self.has_split {
+            std::mem::take(&mut self.current_speech)
+        } else {
+            self.current_speech.clear();
+            self.session.get_current_speech().to_vec()
+        }
     }
 
     fn process_chunk(&mut self, chunk: &[f32]) -> Result<()> {
@@ -290,9 +314,9 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample =
-                        self.processed_samples + (timestamp_ms * 16000 / 1000);
+                    // timestamp_ms is absolute session time at 16 kHz
+                    self.segment_start_sample = timestamp_ms * 16;
+                    self.has_split = false;
                     self.current_speech.clear();
                 }
                 VadTransition::SpeechEnd {
@@ -311,11 +335,17 @@ impl ContinuousVadProcessor {
                     }
                     self.in_speech = false;
 
-                    // Use samples from VAD transition if available, otherwise use accumulated samples
-                    let speech_samples = if !samples.is_empty() {
-                        samples
+                    // After a split only the tail since the last cut is new; otherwise
+                    // prefer silero's padded buffer, falling back to our accumulation.
+                    let (speech_samples, start_timestamp_ms) = if self.has_split {
+                        (
+                            std::mem::take(&mut self.current_speech),
+                            self.segment_start_sample / 16,
+                        )
+                    } else if !samples.is_empty() {
+                        (samples, start_timestamp_ms)
                     } else {
-                        self.current_speech.clone()
+                        (self.current_speech.clone(), start_timestamp_ms)
                     };
 
                     if !speech_samples.is_empty() {
@@ -343,6 +373,32 @@ impl ContinuousVadProcessor {
         // Accumulate speech if we're currently in a speech state
         if self.in_speech {
             self.current_speech.extend_from_slice(chunk);
+
+            // Cap utterance length so long monologues are transcribed incrementally.
+            let end_sample = self.processed_samples + chunk.len();
+            let piece_len = end_sample.saturating_sub(self.segment_start_sample);
+            let quiet = self.session.current_silence_duration() >= SPLIT_QUIET_FRAMES;
+            if piece_len >= HARD_SEGMENT_CAP_SAMPLES
+                || (piece_len >= SOFT_SEGMENT_CAP_SAMPLES && quiet)
+            {
+                let samples = self.take_open_speech();
+                let start_ms = (self.segment_start_sample / 16) as f64;
+                let end_ms = (end_sample / 16) as f64;
+                info!(
+                    "VAD: Splitting long utterance at {:.1}ms ({} samples, quiet={})",
+                    end_ms,
+                    samples.len(),
+                    quiet
+                );
+                self.speech_segments.push_back(SpeechSegment {
+                    samples,
+                    start_timestamp_ms: start_ms,
+                    end_timestamp_ms: end_ms,
+                    confidence: 0.85,
+                });
+                self.segment_start_sample = end_sample;
+                self.has_split = true;
+            }
         }
 
         self.processed_samples += chunk.len();
@@ -542,6 +598,114 @@ mod tests {
         }
 
         samples
+    }
+
+    /// Real speech with its pauses removed, looped to `seconds` at 16 kHz.
+    fn continuous_speech_16k(seconds: usize) -> Option<Vec<f32>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/jfk.wav");
+        let bytes = std::fs::read(path).ok()?;
+        let data_at = bytes.windows(4).position(|w| w == b"data")? + 8;
+        let pcm: Vec<f32> = bytes[data_at..]
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / i16::MAX as f32)
+            .collect();
+        let voiced: Vec<f32> = pcm
+            .chunks(320)
+            .filter(|f| (f.iter().map(|x| x * x).sum::<f32>() / f.len() as f32).sqrt() > 0.02)
+            .flatten()
+            .copied()
+            .collect();
+        if voiced.is_empty() {
+            return None;
+        }
+        Some(voiced.iter().copied().cycle().take(seconds * 16000).collect())
+    }
+
+    /// Speech seconds Silero emits for the JFK meeting (3 repeats, 1.5 s gaps at
+    /// 48 kHz) after the microphone DSP at a given loudness target, or raw.
+    fn detected_speech_secs(target_lufs: Option<f64>) -> Option<f64> {
+        use crate::audio::audio_processing::{resample_audio, HighPassFilter, LoudnessNormalizer};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jfk.wav");
+        let bytes = std::fs::read(path).ok()?;
+        let data_at = bytes.windows(4).position(|w| w == b"data")? + 8;
+        let pcm: Vec<f32> = bytes[data_at..]
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / i16::MAX as f32)
+            .collect();
+        let clip = resample_audio(&pcm, 16000, 48000);
+        let gap = vec![0.0f32; 48000 * 3 / 2];
+        let mut meeting = Vec::new();
+        for _ in 0..3 {
+            meeting.extend_from_slice(&clip);
+            meeting.extend_from_slice(&gap);
+        }
+        let mut hpf = HighPassFilter::new(48000, 80.0);
+        let mut norm = target_lufs.map(|t| LoudnessNormalizer::new(1, 48000).unwrap().with_target_lufs(t));
+        let mut vad = ContinuousVadProcessor::new(48000, 300).expect("vad");
+        let mut samples = 0usize;
+        for chunk in meeting.chunks(1024) {
+            let x = hpf.process(chunk);
+            let x = match norm.as_mut() { Some(n) => n.normalize_loudness(&x), None => x };
+            samples += vad.process_audio(&x).expect("vad").iter().map(|s| s.samples.len()).sum::<usize>();
+        }
+        samples += vad.flush().expect("flush").iter().map(|s| s.samples.len()).sum::<usize>();
+        Some(samples as f64 / 16000.0)
+    }
+
+    #[test]
+    fn vad_detection_vs_normalizer_target() {
+        use crate::audio::audio_processing::TARGET_LUFS;
+        let Some(raw) = detected_speech_secs(None) else { return };
+        let normalized = detected_speech_secs(Some(TARGET_LUFS)).unwrap();
+        println!("raw: {:.1}s, normalized to {} LUFS: {:.1}s", raw, TARGET_LUFS, normalized);
+        // At -23 LUFS this was 7.7 s against 13.8 s raw: the normalizer must not
+        // starve the VAD of speech.
+        assert!(
+            normalized >= raw * 0.9,
+            "normalizer target {} LUFS starves the VAD: {:.1}s vs {:.1}s raw",
+            TARGET_LUFS, normalized, raw
+        );
+    }
+
+    #[test]
+    fn test_vad_caps_long_utterances() {
+        // 24 s of continuous speech must be emitted as several bounded pieces.
+        let Some(audio) = continuous_speech_16k(24) else {
+            eprintln!("jfk.wav fixture missing, skipping");
+            return;
+        };
+        let total = audio.len();
+
+        let mut processor = ContinuousVadProcessor::new(16000, 300).expect("processor");
+        let mut segments = Vec::new();
+        for chunk in audio.chunks(1024) {
+            segments.extend(processor.process_audio(chunk).expect("process"));
+        }
+        segments.extend(processor.flush().expect("flush"));
+        for s in &segments {
+            println!("segment {}..{} ms, {} samples", s.start_timestamp_ms, s.end_timestamp_ms, s.samples.len());
+        }
+
+        assert!(segments.len() >= 3, "expected the utterance to be split, got {} segments", segments.len());
+        // Silero may still call part of the looped stimulus silence; the check that
+        // matters is that split pieces are contiguous (nothing lost at a cut).
+        let emitted: usize = segments.iter().map(|s| s.samples.len()).sum();
+        assert!(emitted >= total * 8 / 10, "lost audio: {} of {}", emitted, total);
+        for pair in segments.windows(2) {
+            if pair[0].samples.len() >= SOFT_SEGMENT_CAP_SAMPLES {
+                assert_eq!(pair[0].end_timestamp_ms, pair[1].start_timestamp_ms, "gap after a split piece");
+            }
+        }
+        for (i, segment) in segments.iter().enumerate() {
+            assert!(
+                segment.samples.len() <= HARD_SEGMENT_CAP_SAMPLES + 16000,
+                "segment {} too long: {} samples",
+                i,
+                segment.samples.len()
+            );
+            assert!(segment.end_timestamp_ms > segment.start_timestamp_ms);
+        }
     }
 
     #[test]

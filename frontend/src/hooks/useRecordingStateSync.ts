@@ -27,10 +27,7 @@ export function useRecordingStateSync(
 
     const checkRecordingState = async () => {
       try {
-        console.log('checkRecordingState called');
-        console.log('About to call is_recording command');
         const isCurrentlyRecording = await recordingService.isRecording();
-        console.log('checkRecordingState: backend recording =', isCurrentlyRecording, 'UI recording =', isRecording);
 
         if (isCurrentlyRecording && !isRecording) {
           console.log('Recording is active in backend but not in UI, synchronizing state...');

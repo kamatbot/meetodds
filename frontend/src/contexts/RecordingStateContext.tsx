@@ -97,7 +97,6 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         activeDuration: backendState.active_duration,
       }));
 
-      console.log('[RecordingStateContext] Synced with backend:', backendState);
     } catch (error) {
       console.error('[RecordingStateContext] Failed to sync with backend:', error);
       // Don't update state on error - keep current state

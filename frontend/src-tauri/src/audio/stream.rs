@@ -197,14 +197,11 @@ impl AudioStream {
                 info!("✅ Stream: Core Audio processing task started for {}", device_name);
 
                 let mut _sample_count = 0u64;
-                while let Some(sample) = stream.next().await {
-                    _sample_count += 1;
-                    // if _sample_count % 48000 == 0 {
-                    //     info!("📊 Stream: Received {} samples from Core Audio stream", _sample_count);
-                    // }
+                while let Some(batch) = stream.next().await {
+                    _sample_count += batch.len() as u64;
 
-                    buffer.push(sample);
-                    frame_count += 1;
+                    buffer.extend_from_slice(&batch);
+                    frame_count += batch.len();
 
                     // Process when we have enough samples
                     if frame_count >= frames_per_chunk {

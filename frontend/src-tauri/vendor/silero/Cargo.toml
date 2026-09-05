@@ -1,0 +1,26 @@
+# Vendored from https://github.com/emotechlab/silero-rs @ 26a6460 (MIT).
+# Local change: ONNX Runtime session uses a single non-spinning intra-op thread.
+# The VAD model is tiny; the upstream 4-thread pool spin-waits between 30 ms
+# frames and burns CPU continuously while recording.
+[package]
+name = "silero"
+version = "0.1.0"
+repository = "https://github.com/emotechlab/Silero"
+readme = "README.md"
+license = "MIT"
+edition = "2021"
+
+[features]
+default = ["static-model", "audio_resampler"]
+static-model = []
+audio_resampler = ["dep:rubato"]
+serde = ["dep:serde"]
+
+[dependencies]
+anyhow = "1.0.86"
+ndarray = "0.16"
+ort = "=2.0.0-rc.10"
+rubato = { version = "0.16.0", optional = true}
+serde = { version = "1.0.208", features = ["derive"], optional = true }
+thiserror = "2.0.4"
+tracing = { version = "0.1.40", default-features = false, features = ["std"] }

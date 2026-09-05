@@ -25,3 +25,14 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+# Dev builds: keep our crate quick to compile but optimize dependencies, so
+# whisper.cpp / ONNX Runtime / DSP crates run at release speed under `tauri dev`.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[patch."https://github.com/emotechlab/silero-rs"]
+silero = { path = "frontend/src-tauri/vendor/silero" }
