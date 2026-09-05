@@ -1,0 +1,33 @@
+name: MeetOdds native compile
+on:
+  push:
+    branches: [feat/p0-capture-summaries]
+    paths:
+      - '.github/workflows/meetodds-native-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: meetodds-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: macos-14
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: '3'
+      CARGO_PROFILE_DEV_OPT_LEVEL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: meetodds-native-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Compile actual desktop command and service integration
+        run: cargo check --manifest-path frontend/src-tauri/Cargo.toml --lib --locked
