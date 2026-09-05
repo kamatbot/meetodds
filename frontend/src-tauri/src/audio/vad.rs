@@ -603,7 +603,7 @@ mod tests {
     /// Real speech with its pauses removed, looped to `seconds` at 16 kHz.
     fn continuous_speech_16k(seconds: usize) -> Option<Vec<f32>> {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../backend/whisper.cpp/samples/jfk.wav");
+            .join("tests/fixtures/jfk.wav");
         let bytes = std::fs::read(path).ok()?;
         let data_at = bytes.windows(4).position(|w| w == b"data")? + 8;
         let pcm: Vec<f32> = bytes[data_at..]
@@ -620,6 +620,52 @@ mod tests {
             return None;
         }
         Some(voiced.iter().copied().cycle().take(seconds * 16000).collect())
+    }
+
+    /// Speech seconds Silero emits for the JFK meeting (3 repeats, 1.5 s gaps at
+    /// 48 kHz) after the microphone DSP at a given loudness target, or raw.
+    fn detected_speech_secs(target_lufs: Option<f64>) -> Option<f64> {
+        use crate::audio::audio_processing::{resample_audio, HighPassFilter, LoudnessNormalizer};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jfk.wav");
+        let bytes = std::fs::read(path).ok()?;
+        let data_at = bytes.windows(4).position(|w| w == b"data")? + 8;
+        let pcm: Vec<f32> = bytes[data_at..]
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / i16::MAX as f32)
+            .collect();
+        let clip = resample_audio(&pcm, 16000, 48000);
+        let gap = vec![0.0f32; 48000 * 3 / 2];
+        let mut meeting = Vec::new();
+        for _ in 0..3 {
+            meeting.extend_from_slice(&clip);
+            meeting.extend_from_slice(&gap);
+        }
+        let mut hpf = HighPassFilter::new(48000, 80.0);
+        let mut norm = target_lufs.map(|t| LoudnessNormalizer::new(1, 48000).unwrap().with_target_lufs(t));
+        let mut vad = ContinuousVadProcessor::new(48000, 300).expect("vad");
+        let mut samples = 0usize;
+        for chunk in meeting.chunks(1024) {
+            let x = hpf.process(chunk);
+            let x = match norm.as_mut() { Some(n) => n.normalize_loudness(&x), None => x };
+            samples += vad.process_audio(&x).expect("vad").iter().map(|s| s.samples.len()).sum::<usize>();
+        }
+        samples += vad.flush().expect("flush").iter().map(|s| s.samples.len()).sum::<usize>();
+        Some(samples as f64 / 16000.0)
+    }
+
+    #[test]
+    fn vad_detection_vs_normalizer_target() {
+        use crate::audio::audio_processing::TARGET_LUFS;
+        let Some(raw) = detected_speech_secs(None) else { return };
+        let normalized = detected_speech_secs(Some(TARGET_LUFS)).unwrap();
+        println!("raw: {:.1}s, normalized to {} LUFS: {:.1}s", raw, TARGET_LUFS, normalized);
+        // At -23 LUFS this was 7.7 s against 13.8 s raw: the normalizer must not
+        // starve the VAD of speech.
+        assert!(
+            normalized >= raw * 0.9,
+            "normalizer target {} LUFS starves the VAD: {:.1}s vs {:.1}s raw",
+            TARGET_LUFS, normalized, raw
+        );
     }
 
     #[test]

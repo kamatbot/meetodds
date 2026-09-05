@@ -140,11 +140,18 @@ impl TruePeakLimiter {
 /// This is a STATEFUL normalizer that tracks cumulative loudness over time
 ///
 /// EBU R128 is the broadcast industry standard for loudness normalization:
-/// - Target: -23 LUFS (Loudness Units relative to Full Scale)
+/// - Target: `TARGET_LUFS` (Loudness Units relative to Full Scale)
 /// - Used by: Netflix, YouTube, Spotify, all professional broadcast
 /// - Perceptually accurate (not just simple RMS)
 ///
+/// Loudness target for microphone audio. -16 LUFS (streaming/podcast level)
+/// rather than -23 (broadcast dialog): Silero VAD missed about half of the
+/// speech at -23, and the microphone is normalized before it reaches the VAD.
+/// Measured in `vad::tests::vad_detection_vs_normalizer_target`.
+pub const TARGET_LUFS: f64 = -16.0;
+
 pub struct LoudnessNormalizer {
+    target_lufs: f64,
     ebur128: ebur128::EbuR128,
     limiter: TruePeakLimiter,
     gain_linear: f32,
@@ -174,6 +181,7 @@ impl LoudnessNormalizer {
         let true_peak_limit = 10_f32.powf(TRUE_PEAK_LIMIT as f32 / 20.0);
 
         Ok(Self {
+            target_lufs: TARGET_LUFS,
             ebur128,
             limiter: TruePeakLimiter::new(sample_rate),
             gain_linear: 1.0,
@@ -187,14 +195,19 @@ impl LoudnessNormalizer {
     /// This maintains cumulative loudness measurements across all processed audio,
     /// resulting in consistent normalization that sounds natural.
     ///
-    /// Target: -23 LUFS (professional broadcast standard for speech/dialog)
+    /// Target: `TARGET_LUFS` (see the constant for why it is above broadcast level)
     /// Applies sample-by-sample with 10ms lookahead limiter to prevent clipping
+    /// Override the loudness target (LUFS). Used by tests and diagnostics.
+    pub fn with_target_lufs(mut self, target_lufs: f64) -> Self {
+        self.target_lufs = target_lufs;
+        self
+    }
+
     pub fn normalize_loudness(&mut self, samples: &[f32]) -> Vec<f32> {
         if samples.is_empty() {
             return Vec::new();
         }
 
-        const TARGET_LUFS: f64 = -23.0;
         const ANALYZE_CHUNK_SIZE: usize = 512;
 
         let mut normalized_samples = Vec::with_capacity(samples.len());
@@ -211,7 +224,7 @@ impl LoudnessNormalizer {
                     // Update gain based on cumulative loudness
                     if let Ok(current_lufs) = self.ebur128.loudness_global() {
                         if current_lufs.is_finite() && current_lufs < 0.0 {
-                            let gain_db = TARGET_LUFS - current_lufs;
+                            let gain_db = self.target_lufs - current_lufs;
                             self.gain_linear = 10_f32.powf(gain_db as f32 / 20.0);
                         }
                     }
@@ -743,3 +756,4 @@ pub fn write_transcript_json_to_file(
 
     Ok(file_path.to_string_lossy().to_string())
 }
+

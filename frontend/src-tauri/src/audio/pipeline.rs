@@ -180,7 +180,7 @@ impl ProfessionalAudioMixer {
 
             // Pre-scale system audio to 70% to leave headroom
             // This prevents constant soft scaling which can cause pumping artifacts
-            // Mic is normalized to -23 LUFS (already optimal), system needs reduction
+            // Mic is normalized to TARGET_LUFS (already optimal), system needs reduction
             let sys_scaled = sys * 1.0;
             let _mic_scaled = mic * 0.8; // Reserved for future mic scaling
 
@@ -318,8 +318,9 @@ impl AudioCapture {
             let norm = match LoudnessNormalizer::new(1, TARGET_SAMPLE_RATE) {
                 Ok(normalizer) => {
                     info!(
-                        "✅ EBU R128 normalizer initialized for microphone '{}' (target: -23 LUFS)",
-                        device.name
+                        "✅ EBU R128 normalizer initialized for microphone '{}' (target: {} LUFS)",
+                        device.name,
+                        super::audio_processing::TARGET_LUFS
                     );
                     Some(normalizer)
                 }
@@ -935,7 +936,7 @@ impl AudioPipeline {
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
-                            // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to -23 LUFS
+                            // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to TARGET_LUFS
                             // This is broadcast-standard loudness (Netflix/YouTube/Spotify level)
                             // System audio at natural levels
                             // Previous 2x gain was causing excessive limiting/distortion
