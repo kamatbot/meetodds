@@ -62,9 +62,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.meetodds.ios.liveactivity
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+  MeetOddsUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [MeetOddsUITests]
+    dependencies:
+      - target: MeetOdds
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.meetodds.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   MeetOdds:
     build:
       targets:
         MeetOdds: all
         MeetOddsLiveActivity: all
+    test:
+      targets: [MeetOddsUITests]
+      gatherCoverageData: false

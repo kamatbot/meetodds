@@ -41,10 +41,12 @@ import MeetOddsCore
     @ObservationIgnored private var savedGeneration = 0
     @ObservationIgnored private var saving = false
     @ObservationIgnored private var needsRepair = false
+    @ObservationIgnored private var launched = false
+    @ObservationIgnored private var lastCheckpoint = 0.0
 
     init() {
         do {
-            let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("MeetOdds", isDirectory: true)
+            let root = try AutomationFixture.storageRoot ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("MeetOdds", isDirectory: true)
             library = try MeetingLibrary(root: root)
             let ids = ["standard_meeting", "daily_standup", "mayur_product_review", "mayur_decision_review", "mayur_pm_one_on_one"]
             templates = try ids.map { id in
@@ -52,13 +54,16 @@ import MeetOddsCore
                 var template = try JSONDecoder().decode(MeetingTemplate.self, from: Data(contentsOf: url)); template.id = id; return template
             }
         } catch { self.error = error.localizedDescription }
-        pairing = PairingKeychain.load()
+        if !AutomationFixture.enabled { pairing = PairingKeychain.load() }
         observeAudio()
     }
     func launch() async {
+        guard !launched else { return }; launched = true
         await activity.clearOrphans()
-        do { headers = try await library?.recoverInterrupted() ?? [] }
-        catch { self.error = "Some saved meetings could not be read. Their files have not been deleted. \(error.localizedDescription)" }
+        do {
+            if let library, AutomationFixture.enabled { try await AutomationFixture.install(into: library) }
+            headers = try await library?.recoverInterrupted() ?? []
+        } catch { self.error = "Some saved meetings could not be read. Their files have not been deleted. \(error.localizedDescription)" }
     }
     func refresh() async { do { headers = try await library?.list() ?? [] } catch { self.error = error.localizedDescription } }
     func open(_ id: UUID) async {
@@ -72,7 +77,7 @@ import MeetOddsCore
     }
     func start() async {
         guard phase == .idle, summaryProgress == nil, let library, selectedTemplate != nil else { return }
-        phase = .preparing; error = nil; speechNotice = nil; preview = ""; duration = 0; needsRepair = false
+        phase = .preparing; error = nil; speechNotice = nil; preview = ""; duration = 0; needsRepair = false; lastCheckpoint = 0
         do {
             try await flush()
             let granted = await AVAudioApplication.requestRecordPermission()
@@ -81,9 +86,8 @@ import MeetOddsCore
             meeting = try await library.create(fresh); generation = 0; savedGeneration = 0
             let folder = await library.directory(for: fresh.id)
             let capture = AudioCapture { [weak self] event in Task { @MainActor in self?.receive(event) } }
-            audio = capture
             let frames = try capture.start(folder: folder)
-            phase = .recording; showRecording = true
+            audio = capture; phase = .recording; showRecording = true
             do { try activity.begin(id: fresh.id) } catch { speechNotice = "Recording is active. Live Activity could not start." }
             let transcriber = LocalTranscription(); speech = transcriber
             speechTask = Task { [weak self] in
@@ -108,11 +112,10 @@ import MeetOddsCore
         case .level(let level, let elapsed):
             guard isCapturing else { return }
             self.level = level; duration = elapsed; meeting?.duration = elapsed
-            // Metadata checkpoints are throttled independently of the visual meter.
-            if Int(elapsed) % 2 == 0 { changed() }
+            if elapsed - lastCheckpoint >= 2 { lastCheckpoint = elapsed; changed() }
             Task { await activity.update(phase: phase == .paused ? "Paused" : "Recording", duration: elapsed) }
         case .transcriptLagged:
-            needsRepair = true; speechNotice = "Audio is safe to keep recording. Live transcription fell behind; rebuild it after the meeting."
+            needsRepair = true; speechNotice = "Audio capture is continuing. Live transcription fell behind; rebuild it after the meeting."
         case .failed(let message):
             error = message
             Task { await stop(interrupted: true) }
@@ -141,14 +144,14 @@ import MeetOddsCore
         catch { interrupted = true; self.error = "The last audio write failed. Keep this meeting for recovery." }
         self.audio = nil
         await activity.end(duration: duration)
-        // A finalizer watchdog does not discard recorded files or pretend partial speech is complete.
         let transcriber = speech
+        let currentSpeechTask = speechTask
         let watchdog = Task { [weak self] in
             try? await Task.sleep(for: .seconds(15))
             guard !Task.isCancelled else { return }
-            self?.needsRepair = true; await transcriber?.cancel()
+            self?.needsRepair = true; currentSpeechTask?.cancel(); await transcriber?.cancel()
         }
-        await speechTask?.value; watchdog.cancel(); speechTask = nil; speech = nil
+        await currentSpeechTask?.value; watchdog.cancel(); speechTask = nil; speech = nil
         meeting?.duration = duration; meeting?.status = interrupted ? .interrupted : .ready
         if needsRepair { meeting?.notices.append("Live transcription was incomplete. Rebuild the transcript from retained audio before relying on a summary.") }
         changed()
@@ -190,38 +193,45 @@ import MeetOddsCore
             guard let self else { return }
             let transcriber = LocalTranscription()
             do {
-                let result = try await transcriber.rebuild(folder: await library.directory(for: snapshot.id), localeID: snapshot.localeID)
+                let folder = await library.directory(for: snapshot.id)
+                let result = try await withTaskCancellationHandler {
+                    try await transcriber.rebuild(folder: folder, localeID: snapshot.localeID)
+                } onCancel: { Task { await transcriber.cancel() } }
                 try Task.checkCancellation()
+                guard !result.turns.isEmpty else { throw MeetingError.failed("No speech could be recovered. Your previous transcript and audio are unchanged.") }
                 self.meeting?.transcript = result.turns; self.meeting?.duration = result.duration
                 self.meeting?.status = .ready; self.meeting?.notices = []
                 self.needsRepair = false; self.speechNotice = nil
                 self.changed(); try await self.flush(); await self.refresh()
-            } catch { self.error = error.localizedDescription }
+            } catch is CancellationError { } catch { self.error = error.localizedDescription }
             await transcriber.cancel()
             self.summaryProgress = nil; self.summaryTask = nil
         }
     }
     func summarize(includeNotes: Bool) {
         guard !isBusy, let template = selectedTemplate else { return }
+        let requestedMode = mode; let requestedPairing = pairing; let requestedModel = selectedRemoteModel
         summaryProgress = "Preparing summary…"
         summaryTask = Task { [weak self] in
             guard let self else { return }
             do {
                 try await self.flush()
                 guard let snapshot = self.meeting else { throw MeetingError.missing }
+                guard snapshot.status == .ready && snapshot.notices.isEmpty else { throw MeetingError.failed("Rebuild the incomplete transcript from saved audio before summarizing. Your prior summaries remain available.") }
                 let input = try SummaryInput.build(meeting: snapshot, includeNotes: includeNotes)
                 let markdown: String
-                if self.mode == .local {
+                if requestedMode == .local {
                     markdown = try await LocalSummary().generate(input: input, template: template) { message in await MainActor.run { self.summaryProgress = message } }
                 } else {
-                    guard let pairing = self.pairing else { throw MeetingError.failed("Pair your Mac to use your ChatGPT subscription, or choose On iPhone.") }
+                    guard let pairing = requestedPairing else { throw MeetingError.failed("Pair your Mac to use your ChatGPT subscription, or choose On iPhone.") }
                     self.summaryProgress = "Summarizing with ChatGPT…"
-                    markdown = try await CompanionClient(pairing: pairing).summarize(input: input, templateID: template.id, model: self.selectedRemoteModel).markdown
+                    markdown = try await CompanionClient(pairing: pairing).summarize(input: input, templateID: template.id, model: requestedModel).markdown
                 }
                 try Task.checkCancellation()
                 guard self.meeting?.id == snapshot.id else { throw MeetingError.conflict }
-                self.meeting?.summaries.append(SummaryVersion(mode: self.mode, templateID: template.id, markdown: markdown, includesPersonalNotes: includeNotes))
-                self.meeting?.mode = self.mode; self.meeting?.templateID = template.id
+                guard !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw MeetingError.failed("An empty summary was returned. Your previous version is unchanged.") }
+                self.meeting?.summaries.append(SummaryVersion(mode: requestedMode, templateID: template.id, markdown: markdown, includesPersonalNotes: includeNotes))
+                self.meeting?.mode = requestedMode; self.meeting?.templateID = template.id
                 self.changed(); try await self.flush(); await self.refresh()
             } catch is CancellationError { } catch { self.error = error.localizedDescription }
             self.summaryProgress = nil; self.summaryTask = nil
