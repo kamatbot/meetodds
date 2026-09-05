@@ -48,10 +48,13 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   }, [transcripts]);
 
 
-// Ephemeral subtitle stream. The top recording bar keeps the last caption visible
-// between VAD sentence boundaries; it resets only when recording starts or stops.
+// Ephemeral subtitle stream. A caption belongs to the sentence in progress: it is
+// replaced by newer previews, cleared when the canonical sentence for its source
+// lands (`live-transcript-preview-clear` from the worker), and dropped if nothing
+// arrives for a while so a stale caption can never sit under fresh transcript rows.
 useEffect(() => {
   let unlistenPreview: (() => void) | undefined;
+  let unlistenClear: (() => void) | undefined;
   let disposed = false;
 
   void listen<LiveTranscriptPreview>('live-transcript-preview', (event) => {
@@ -61,11 +64,33 @@ useEffect(() => {
     else unlistenPreview = dispose;
   });
 
+  void listen<{ source: LiveTranscriptPreview['source'] | null }>(
+    'live-transcript-preview-clear',
+    (event) => {
+      const source = event.payload?.source ?? null;
+      setLivePreview((prev) =>
+        prev && (source === null || prev.source === source) ? null : prev
+      );
+    }
+  ).then((dispose) => {
+    if (disposed) dispose();
+    else unlistenClear = dispose;
+  });
+
   return () => {
     disposed = true;
     unlistenPreview?.();
+    unlistenClear?.();
   };
 }, []);
+
+// Stale guard: no preview for 8 s means the lane is idle or the sentence closed
+// without a clear event; hide rather than show outdated words.
+useEffect(() => {
+  if (!livePreview) return;
+  const timer = setTimeout(() => setLivePreview(null), 8000);
+  return () => clearTimeout(timer);
+}, [livePreview]);
 
   // Smart auto-scroll: Track user scroll position
   useEffect(() => {
