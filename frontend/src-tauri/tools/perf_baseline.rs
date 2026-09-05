@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use app_lib::audio::audio_processing::{resample_audio, HighPassFilter, LoudnessNormalizer};
+use app_lib::audio::pipeline::{LIVE_PREVIEW_INTERVAL, LIVE_PREVIEW_MAX_WINDOW_MS, LIVE_PREVIEW_MIN_SPEECH_MS};
 use app_lib::audio::vad::{ContinuousVadProcessor, SpeechSegment};
 use app_lib::config::DEFAULT_PARAKEET_MODEL;
 use app_lib::parakeet_engine::parakeet_engine::ParakeetEngine;
@@ -76,6 +77,10 @@ struct Args {
     /// does), hpf, norm, or none.
     #[arg(long, default_value = "full")]
     dsp: String,
+
+    /// Also run the display-only caption preview lane, as the app does while recording.
+    #[arg(long, default_value_t = false)]
+    preview: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -372,9 +377,16 @@ async fn live_phase(
     meeting_48k: Vec<f32>,
     redemption_ms: u32,
     dsp: String,
+    preview: bool,
 ) -> Result<Value> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Seg>();
     let audio_secs = meeting_48k.len() as f64 / CAPTURE_RATE as f64;
+
+    // Mirrors the app's preview gate (audio/transcription/live_preview.rs +
+    // worker.rs::canonical_transcription_busy): canonical decode always wins,
+    // and the watch channel keeps only the newest in-progress-utterance snapshot.
+    let canonical_busy = Arc::new(AtomicBool::new(false));
+    let (preview_tx, preview_rx) = tokio::sync::watch::channel::<Option<Vec<f32>>>(None);
 
     let watcher = ThreadWatcher::start();
     let (u0, s0) = cpu_time();
@@ -388,6 +400,8 @@ async fn live_phase(
         let mut vad = ContinuousVadProcessor::new(CAPTURE_RATE, redemption_ms)?;
         let chunk_dur = Duration::from_secs_f64(CHUNK_SAMPLES as f64 / CAPTURE_RATE as f64);
         let mut idx = 0usize;
+        let mut last_snapshot = Instant::now();
+        let preview_tx = preview_tx;
 
         let emit = |segs: Vec<SpeechSegment>, idx: &mut usize| {
             for s in segs {
@@ -412,6 +426,14 @@ async fn live_phase(
                 _ => norm.normalize_loudness(&hpf.process(chunk)),
             };
             emit(vad.process_audio(&processed)?, &mut idx);
+            if preview && last_snapshot.elapsed() >= LIVE_PREVIEW_INTERVAL {
+                if let Some(snapshot) =
+                    vad.live_speech_snapshot(LIVE_PREVIEW_MIN_SPEECH_MS, LIVE_PREVIEW_MAX_WINDOW_MS)
+                {
+                    let _ = preview_tx.send(Some(snapshot.samples));
+                    last_snapshot = Instant::now();
+                }
+            }
             let deadline = t0 + chunk_dur * (i as u32 + 1);
             if let Some(d) = deadline.checked_duration_since(Instant::now()) {
                 std::thread::sleep(d);
@@ -419,7 +441,43 @@ async fn live_phase(
         }
         emit(vad.flush()?, &mut idx);
         Ok(idx)
+        // preview_tx drops here, ending the preview task's rx.changed() loop.
     });
+
+    // Preview task: mirrors audio/transcription/live_preview.rs's duty cycle
+    // (canonical-first gate, block_in_place decode, rest 2x decode time).
+    let preview_task = {
+        let engine = engine.clone();
+        let busy = canonical_busy.clone();
+        let mut rx = preview_rx;
+        tokio::spawn(async move {
+            let mut decode_ms = Vec::new();
+            let mut window_secs = Vec::new();
+            let mut skipped_busy = 0usize;
+            let mut texts: Vec<String> = Vec::new();
+            while rx.changed().await.is_ok() {
+                let Some(samples) = rx.borrow_and_update().clone() else { continue };
+                if busy.load(Ordering::Acquire) {
+                    skipped_busy += 1;
+                    continue;
+                }
+                let secs = samples.len() as f64 / VAD_RATE as f64;
+                let d0 = Instant::now();
+                let text = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(engine.transcribe(samples))
+                })
+                .unwrap_or_default();
+                let elapsed = d0.elapsed();
+                decode_ms.push(elapsed.as_secs_f64() * 1000.0);
+                window_secs.push(secs);
+                if texts.len() < 5 {
+                    texts.push(text);
+                }
+                tokio::time::sleep(elapsed * 2).await;
+            }
+            (decode_ms, window_secs, skipped_busy, texts)
+        })
+    };
 
     // Worker: serial FIFO decode, mirroring audio/transcription/worker.rs.
     let mut records: Vec<Value> = Vec::new();
@@ -433,10 +491,12 @@ async fn live_phase(
     while let Some(seg) = rx.recv().await {
         let picked_up = Instant::now();
         let d0 = Instant::now();
+        canonical_busy.store(true, Ordering::Release);
         let text = engine
             .transcribe(seg.samples)
             .await
             .unwrap_or_else(|e| format!("<error: {}>", e));
+        canonical_busy.store(false, Ordering::Release);
         let decode = d0.elapsed().as_secs_f64() * 1000.0;
         let ready = t0.elapsed().as_secs_f64() * 1000.0;
 
@@ -469,6 +529,9 @@ async fn live_phase(
     }
 
     let emitted = feeder.await.map_err(|e| anyhow!("feeder join: {}", e))??;
+    let (p_decode, p_window, p_skipped, p_texts) = preview_task
+        .await
+        .map_err(|e| anyhow!("preview join: {}", e))?;
     let wall = t0.elapsed().as_secs_f64();
     let (u1, s1) = cpu_time();
     let peak_threads = watcher.stop();
@@ -495,6 +558,14 @@ async fn live_phase(
             "segment_audio_secs": summarize(&records.iter().filter_map(|r| r["audio_secs"].as_f64()).collect::<Vec<_>>()),
         },
         "segments": records,
+        "preview": {
+            "enabled": preview,
+            "decodes": p_decode.len(),
+            "skipped_while_canonical_busy": p_skipped,
+            "decode_ms": summarize(&p_decode),
+            "window_secs": summarize(&p_window),
+            "texts": p_texts,
+        },
     }))
 }
 
@@ -569,7 +640,7 @@ async fn main() -> Result<()> {
 
     println!("[2/3] live simulation ({:.0}s of audio, real-time paced)...", meeting.len() as f64 / CAPTURE_RATE as f64);
     let engine = Arc::new(engine);
-    let live = live_phase(engine.clone(), meeting, args.redemption_ms, args.dsp.clone()).await?;
+    let live = live_phase(engine.clone(), meeting, args.redemption_ms, args.dsp.clone(), args.preview).await?;
 
     println!("[3/3] batch decode x{}...\n", args.batch_iters);
     let batch = batch_phase(&engine, &clip_16k, args.batch_iters).await?;
@@ -583,6 +654,7 @@ async fn main() -> Result<()> {
             "model_load_ms": model_load_ms,
             "redemption_ms": args.redemption_ms,
             "dsp": args.dsp,
+            "preview": args.preview,
             "capture_rate_hz": CAPTURE_RATE,
             "chunk_samples": CHUNK_SAMPLES,
             "fixture": wav_path.display().to_string(),
@@ -616,6 +688,15 @@ async fn main() -> Result<()> {
     for k in ["segment_audio_secs", "queue_wait_ms", "decode_ms", "rtf",
               "vad_close_to_text_ms", "speech_end_to_text_ms", "speech_start_to_text_ms"] {
         println!("{}", row(k, &live["stats"][k], if k == "rtf" { 4 } else { 1 }));
+    }
+
+    if live["preview"]["enabled"].as_bool().unwrap_or(false) {
+        println!(
+            "  PREVIEW LANE  decodes={} skipped={}",
+            live["preview"]["decodes"], live["preview"]["skipped_while_canonical_busy"]
+        );
+        println!("{}", row("preview_decode_ms", &live["preview"]["decode_ms"], 1));
+        println!("{}", row("preview_window_secs", &live["preview"]["window_secs"], 1));
     }
 
     println!("\nBATCH DECODE ({:.1} s clip x{})", batch["clip_secs"].as_f64().unwrap(), args.batch_iters);

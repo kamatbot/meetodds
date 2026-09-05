@@ -36,3 +36,10 @@ test('duration is snapshotted before force-flush cleanup', () => {
   const stop = manager.slice(manager.indexOf('pub async fn stop_streams_and_force_flush'));
   assert.ok(stop.indexOf('self.snapshot_duration()') < stop.indexOf('self.state.cleanup()'));
 });
+
+test('latest-main preview channel stays separate from canonical transcription', () => {
+  assert.match(manager, /watch::channel::<Option<AudioChunk>>\(None\)/);
+  assert.match(manager, /Some\(live_preview_sender\)/);
+  assert.match(manager, /Ok\(\(transcription_receiver, live_preview_receiver\)\)/);
+  assert.equal((manager.match(/watch::Receiver<Option<AudioChunk>>/g) || []).length, 2);
+});

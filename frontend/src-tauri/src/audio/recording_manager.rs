@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tauri::Emitter;
 use super::devices::{list_audio_devices, AudioDevice};
 #[cfg(target_os = "macos")]
@@ -48,9 +48,11 @@ impl RecordingManager {
             device_monitor: Some(device_monitor), device_event_receiver: Some(device_event_receiver), stopped_duration: None }
     }
 
-    pub async fn start_recording(&mut self, microphone_device: Option<Arc<AudioDevice>>, system_device: Option<Arc<AudioDevice>>, auto_save: bool) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+    pub async fn start_recording(&mut self, microphone_device: Option<Arc<AudioDevice>>, system_device: Option<Arc<AudioDevice>>, auto_save: bool) -> Result<(mpsc::UnboundedReceiver<AudioChunk>, watch::Receiver<Option<AudioChunk>>)> {
         if microphone_device.is_none() && system_device.is_none() { return Err(anyhow::anyhow!("No audio source available")); }
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
+        // Preserve main's latest-only preview lane; speculative work cannot queue behind canonical audio.
+        let (live_preview_sender, live_preview_receiver) = watch::channel::<Option<AudioChunk>>(None);
         let recording_sender = self.recording_saver.start_accumulation(auto_save);
         // Do not open capture streams or show RECORDING when the recovery folder cannot be written.
         self.recording_saver.ensure_initialized()?;
@@ -64,7 +66,7 @@ impl RecordingManager {
         )).unwrap_or_else(|| ("No System Audio".to_string(), super::device_detection::InputDeviceKind::Unknown));
         self.recording_saver.set_device_info(microphone_device.as_ref().map(|d| d.name.clone()), system_device.as_ref().map(|d| d.name.clone()));
         self.recording_saver.ensure_initialized()?;
-        if let Err(failure) = self.pipeline_manager.start(self.state.clone(), transcription_sender, None, 0, 48000, Some(recording_sender), mic_name, mic_kind, sys_name, sys_kind) {
+        if let Err(failure) = self.pipeline_manager.start(self.state.clone(), transcription_sender, Some(live_preview_sender), 0, 48000, Some(recording_sender), mic_name, mic_kind, sys_name, sys_kind) {
             self.state.stop_recording();
             self.recording_saver.mark_incomplete("The audio pipeline could not start. The recovery folder is preserved.");
             return Err(failure);
@@ -82,11 +84,11 @@ impl RecordingManager {
             if let Err(failure) = monitor.start_monitoring(microphone_device, system_device) { warn!("Device monitoring could not start: {}", failure); }
         }
         info!("Recording started with {} active streams", self.stream_manager.active_stream_count());
-        Ok(transcription_receiver)
+        Ok((transcription_receiver, live_preview_receiver))
     }
 
     /// Retains the existing macOS safe-device/Bluetooth fallback and other-platform defaults.
-    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<(mpsc::UnboundedReceiver<AudioChunk>, watch::Receiver<Option<AudioChunk>>)> {
         #[cfg(target_os = "macos")]
         let (microphone_device, system_device) = {
             let (mic, system) = get_safe_recording_devices_macos()?;

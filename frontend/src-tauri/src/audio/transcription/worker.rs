@@ -7,10 +7,12 @@ use super::provider::TranscriptionError;
 use super::speaker_detection::SpeakerAttributor;
 use crate::audio::AudioChunk;
 use log::{debug, error, info, warn};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Runtime};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -18,24 +20,79 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
-static CANONICAL_TRANSCRIPTION_BUSY: AtomicBool = AtomicBool::new(false);
+static CANONICAL_TRANSCRIPTION_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+// Both the saved transcript and the disposable caption lane use the same
+// on-device model. One permit prevents simultaneous local inference, which
+// otherwise doubles CPU/GPU contention under Whisper and Parakeet.
+static LOCAL_TRANSCRIPTION_PERMIT: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::new(1)));
 
 pub(crate) fn canonical_transcription_busy() -> bool {
-    CANONICAL_TRANSCRIPTION_BUSY.load(Ordering::Acquire)
+    CANONICAL_TRANSCRIPTION_ACTIVE.load(Ordering::Acquire) > 0
 }
 
-struct CanonicalTranscriptionGuard;
+pub(crate) fn try_acquire_preview_permit() -> Option<OwnedSemaphorePermit> {
+    if canonical_transcription_busy() {
+        return None;
+    }
+
+    let permit = LOCAL_TRANSCRIPTION_PERMIT
+        .clone()
+        .try_acquire_owned()
+        .ok()?;
+    // A canonical task may have queued while the permit was being acquired.
+    // Tokio's fair semaphore prevents this preview from jumping that queue.
+    if canonical_transcription_busy() {
+        drop(permit);
+        return None;
+    }
+    Some(permit)
+}
+
+struct CanonicalTranscriptionGuard {
+    permit: Option<OwnedSemaphorePermit>,
+}
 
 impl CanonicalTranscriptionGuard {
-    fn new() -> Self {
-        CANONICAL_TRANSCRIPTION_BUSY.store(true, Ordering::Release);
-        Self
+    async fn acquire() -> Self {
+        let permit = LOCAL_TRANSCRIPTION_PERMIT
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("local transcription permit is never closed");
+        CANONICAL_TRANSCRIPTION_ACTIVE.fetch_add(1, Ordering::Release);
+        Self {
+            permit: Some(permit),
+        }
     }
 }
 
 impl Drop for CanonicalTranscriptionGuard {
     fn drop(&mut self) {
-        CANONICAL_TRANSCRIPTION_BUSY.store(false, Ordering::Release);
+        drop(self.permit.take());
+        CANONICAL_TRANSCRIPTION_ACTIVE.fetch_sub(1, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+mod permit_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn canonical_inference_excludes_preview_inference() {
+        let preview = try_acquire_preview_permit().expect("preview acquires the idle permit");
+        let canonical = tokio::spawn(CanonicalTranscriptionGuard::acquire());
+
+        tokio::task::yield_now().await;
+        assert!(!canonical.is_finished());
+
+        drop(preview);
+        let canonical = canonical.await.expect("canonical task completes");
+        assert!(canonical_transcription_busy());
+        assert!(try_acquire_preview_permit().is_none());
+
+        drop(canonical);
+        assert!(try_acquire_preview_permit().is_some());
     }
 }
 
@@ -206,10 +263,14 @@ pub fn start_transcription_task<R: Runtime>(
                             // Inference blocks for seconds; keep it off the tokio worker
                             // threads so the audio pipeline task keeps draining.
                             let transcription_result = {
-                                let _canonical_guard = CanonicalTranscriptionGuard::new();
+                                let _canonical_guard = CanonicalTranscriptionGuard::acquire().await;
                                 tokio::task::block_in_place(|| {
                                     tokio::runtime::Handle::current().block_on(
-                                        transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone),
+                                        transcribe_chunk_with_provider(
+                                            &engine_clone,
+                                            chunk,
+                                            &app_clone,
+                                        ),
                                     )
                                 })
                             };
