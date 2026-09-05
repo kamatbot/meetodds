@@ -6,13 +6,13 @@ segments, 24.0 s of speech).
 
 | | Preview off | Preview on |
 |---|---|---|
-| Live CPU (75 s meeting, real-time paced) | 6.82 % of one core | **11.75 %** of one core |
+| Live CPU (75 s meeting, real-time paced) | 6.82 % of one core | **12.66 %** of one core |
 | Peak threads | 28 | 29 |
-| Speech end → transcript, median | 293 ms | 287 ms |
+| Speech end → transcript, median | 293 ms | 274 ms |
 | Speech decoded | 24.0 s (14 segments) | 24.0 s (14 segments) |
-| Preview decodes | — | 16 |
-| Preview decode ms, median / p95 | — | 61.9 / 115.8 |
-| Preview window, median | — | 0.7 s |
+| Preview decodes | — | 26 |
+| Preview decode ms, median / p95 | — | 60.6 / 81.6 |
+| Preview window, median | — | 0.5 s |
 
 This is a synthetic Parakeet baseline, not a live microphone result and not a
 Whisper measurement. It measured the earlier scheduler; the current scheduler
@@ -22,7 +22,7 @@ model at the same time.
 
 ## How it stays cheap
 
-- Snapshots offered to the preview decoder at most every 800 ms
+- Snapshots offered to the preview decoder at most every 600 ms
   (`LIVE_PREVIEW_INTERVAL`).
 - Each snapshot is capped to the last 6 s of the open utterance
   (`LIVE_PREVIEW_MAX_WINDOW_MS`), so a long monologue doesn't grow the decode.

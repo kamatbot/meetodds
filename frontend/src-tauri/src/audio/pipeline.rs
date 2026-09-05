@@ -737,8 +737,8 @@ impl AudioCapture {
 // preview decoder at most this often; it decodes the last MAX_WINDOW of speech
 // so the caption shows the sentence in progress, not just a 2-3 s tail.
 // ponytail: fixed cadence; the preview task itself duty-cycles on decode time.
-pub const LIVE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(800);
-pub const LIVE_PREVIEW_MIN_SPEECH_MS: u32 = 700;
+pub const LIVE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(600);
+pub const LIVE_PREVIEW_MIN_SPEECH_MS: u32 = 500;
 pub const LIVE_PREVIEW_MAX_WINDOW_MS: u32 = 6_000;
 
 /// Silero redemption window for live recording, in ms. This is pure
