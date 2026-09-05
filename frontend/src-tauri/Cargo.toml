@@ -125,7 +125,7 @@ dashmap = "6.1.0"
 # Directories
 dirs = "5.0.1"
 
-# getrusage() for the perf_baseline harness (src/bin/perf_baseline.rs)
+# getrusage() for the archived developer performance harness (tools/perf_baseline.rs)
 libc = "0.2"
 
 # Additional dependencies for notification system
