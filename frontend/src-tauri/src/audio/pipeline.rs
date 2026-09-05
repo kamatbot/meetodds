@@ -792,10 +792,10 @@ impl AudioPipeline {
             system_device_kind,
         );
 
-        // Give macOS speakers time for natural pauses before finalizing a segment.
-        // Fewer, larger Whisper jobs reduce sustained CPU and thermal load; Windows
-        // retains its shorter threshold because its audio stack benefits from it.
-        let redemption_time = if cfg!(target_os = "macos") { 1_200 } else { 400 };
+        // Redemption is pure end-of-utterance latency; 300 ms still bridges word
+        // gaps. Long utterances are capped inside the VAD processor instead of
+        // being held open with a long redemption window.
+        let redemption_time = 300;
 
         let create_vad_processor =
             |source: &str| match ContinuousVadProcessor::new(sample_rate, redemption_time) {
