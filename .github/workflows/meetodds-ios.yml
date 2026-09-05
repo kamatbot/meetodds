@@ -1,0 +1,66 @@
+name: MeetOdds iOS
+on:
+  push:
+    branches: [feat/native-ios-meetodds]
+    paths: ['ios/**', '.github/workflows/meetodds-ios.yml']
+  pull_request:
+    paths: ['ios/**', '.github/workflows/meetodds-ios.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: meetodds-ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Select installed Xcode 26 SDK
+        run: |
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+      - name: Test portable meeting core
+        run: cd ios/MeetOddsCore && swift test
+      - name: Test subscription companion boundary
+        run: node --test ios/companion/test/*.test.mjs
+      - name: Install project generator
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Build native app and Live Activity extension
+        run: |
+          cd ios
+          xcodegen generate --spec project.yml
+          set -o pipefail
+          xcodebuild -project MeetOdds.xcodeproj -scheme MeetOdds -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log
+      - name: Choose available iPhone simulator
+        id: simulator
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, os
+          devices = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))['devices']
+          candidates = [(runtime,d) for runtime,items in devices.items() if 'iOS-26' in runtime for d in items if 'iPhone' in d['name']]
+          if not candidates: raise RuntimeError('An iOS 26 iPhone simulator is required')
+          device = sorted(candidates,key=lambda pair: pair[0])[-1][1]
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('id='+device['udid']+'\n')
+          PY
+      - name: Run native screen interaction tests
+        run: |
+          cd ios
+          set -o pipefail
+          xcodebuild -project MeetOdds.xcodeproj -scheme MeetOdds -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}' -derivedDataPath DerivedData -resultBundlePath UITests.xcresult CODE_SIGNING_ALLOWED=NO test 2>&1 | tee ui-tests.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: meetodds-ios-build
+          path: |
+            ios/build.log
+            ios/ui-tests.log
+            ios/UITests.xcresult
+            ios/MeetOdds.xcodeproj
+          retention-days: 7

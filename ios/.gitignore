@@ -1,0 +1,10 @@
+.build/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+*.xcresult/
+*.log
+.DS_Store
+Config/Info.plist
+Config/WidgetInfo.plist
+companion/.private/
