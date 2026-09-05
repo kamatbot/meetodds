@@ -82,7 +82,7 @@ export default function ExportSheet({ meetingId, open, onOpenChange }: ExportShe
             const result = await exportMeetingSummary({ format, title: info.title, createdAt: info.createdAt, markdown: snapshot });
             return { cancelled: false, label: result.path ?? `Download requested: ${result.filename}` };
           }
-          const result = await invoke<MeetingExportResult>('api_export_meeting', { request: { meetingId, format, selection } });
+          const result = await invoke<MeetingExportResult>('api_export_meeting', { request: { meetingId, format, selection, expectedMarkdown: snapshot } });
           return { cancelled: result.cancelled, label: result.path };
         } : undefined,
         audio: includeAudio ? async () => {

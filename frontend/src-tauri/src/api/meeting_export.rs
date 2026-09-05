@@ -58,6 +58,8 @@ pub struct MeetingExportRequest {
     pub meeting_id: String,
     pub format: String,
     pub selection: MeetingExportSelection,
+    #[serde(default)]
+    pub expected_markdown: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -508,10 +510,10 @@ fn selected_json(
     bundle: &MeetingExportBundle,
     selection: &MeetingExportSelection,
 ) -> Result<String, String> {
-    let summary = selection
-        .include_summary
-        .then_some(bundle.summary.as_ref())
-        .flatten();
+    let visible_summary = if selection.include_summary {
+        bundle.summary.as_ref().and_then(summary_to_markdown).map(|markdown| serde_json::json!({"markdown": markdown}))
+    } else { None };
+    let summary = visible_summary.as_ref();
     let notes_markdown = selection
         .include_notes
         .then_some(bundle.notes_markdown.as_deref())
@@ -655,6 +657,11 @@ pub async fn api_export_meeting<R: Runtime>(
     request: MeetingExportRequest,
 ) -> Result<MeetingExportResult, String> {
     let bundle = load_bundle(state.db_manager.pool(), &request.meeting_id).await?;
+    if let Some(expected) = request.expected_markdown.as_deref() {
+        if selected_markdown(&bundle, &request.selection)? != expected {
+            return Err("Saved content changed after preview. Review it again before exporting.".to_string());
+        }
+    }
     let (extension, filter_name, content) =
         serialize_content(&bundle, request.format.trim().to_lowercase().as_str(), &request.selection)?;
     let filename = default_filename(&bundle, extension);
@@ -666,8 +673,12 @@ pub async fn api_export_meeting<R: Runtime>(
         });
     };
 
-    std::fs::write(&destination, content)
-        .map_err(|error| format!("Failed to write exported meeting: {error}"))?;
+    let parent = destination.parent().ok_or_else(|| "Invalid export destination".to_string())?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    use std::io::Write;
+    temporary.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+    temporary.as_file().sync_all().map_err(|e| e.to_string())?;
+    temporary.persist(&destination).map_err(|e| e.to_string())?;
 
     Ok(MeetingExportResult {
         cancelled: false,

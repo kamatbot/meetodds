@@ -14,8 +14,8 @@ type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 const AUTOSAVE_DELAY_MS = 650;
 
 // Shared across editor mounts: leaving and reopening a tab cannot create racing writes.
-const saves = createNotesSaveQueue(async (meetingId, notesMarkdown) => {
-  await invoke<void>('api_save_meeting_notes', { meetingId, notesMarkdown });
+const saves = createNotesSaveQueue(async (meetingId, notesMarkdown, expectedNotesMarkdown) => {
+  await invoke<void>('api_save_meeting_notes', { meetingId, notesMarkdown, expectedNotesMarkdown });
   try { clearAcknowledgedDraft(window.localStorage, meetingId, notesMarkdown); } catch { /* Keep native success. */ }
 });
 
@@ -47,13 +47,23 @@ function Editor({ meetingId }: NotesEditorProps) {
     const snapshot = latest.current;
     if (mounted.current) setSaveState('saving');
     try {
-      const result = await saves.save(meetingId, snapshot);
+      const result = await saves.save(meetingId, snapshot, acknowledged.current);
       if (result === 'saved') {
         acknowledged.current = snapshot;
         if (mounted.current && latest.current === snapshot) setSaveState('saved');
       }
-    } catch {
-      if (mounted.current && latest.current === snapshot) setSaveState('error');
+    } catch (error) {
+      if (String(error).includes('NOTES_CONFLICT') && mounted.current) {
+        blocked.current = true;
+        try {
+          const saved = await invoke<MeetingNotesResponse>('api_get_meeting_notes', { meetingId });
+          if (mounted.current) {
+            acknowledged.current = saved.notesMarkdown;
+            setConflict({ saved: saved.notesMarkdown, draft: latest.current });
+            setRecovered(true); setSaveState('error');
+          }
+        } catch { if (mounted.current) { setSaveState('error'); setLoadError('Saved notes changed but could not be read. Your local draft is retained. Retry to compare both versions.'); } }
+      } else if (mounted.current && latest.current === snapshot) setSaveState('error');
     }
   }, [clearTimer, meetingId]);
 

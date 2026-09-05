@@ -38,16 +38,17 @@ export function discardNotesDraft(storage: DraftStorage, meetingId: string): voi
   storage.removeItem(keyFor(meetingId));
 }
 
-export function createNotesSaveQueue(write: (meetingId: string, value: string) => Promise<void>) {
-  const queues = new Map<string, { latest: number; tail: Promise<void> }>();
+export function createNotesSaveQueue(write: (meetingId: string, value: string, expected?: string) => Promise<void>) {
+  const queues = new Map<string, { latest: number; tail: Promise<void>; acknowledged?: string }>();
   return {
-    save(meetingId: string, value: string): Promise<'saved' | 'superseded'> {
-      const queue = queues.get(meetingId) ?? { latest: 0, tail: Promise.resolve() };
+    save(meetingId: string, value: string, expected?: string): Promise<'saved' | 'superseded'> {
+      const queue = queues.get(meetingId) ?? { latest: 0, tail: Promise.resolve(), acknowledged: expected };
       const revision = ++queue.latest;
       queues.set(meetingId, queue);
       const result = queue.tail.then(async () => {
         if (revision !== queue.latest) return 'superseded' as const;
-        await write(meetingId, value);
+        await write(meetingId, value, queue.acknowledged);
+        queue.acknowledged = value;
         return revision === queue.latest ? 'saved' as const : 'superseded' as const;
       });
       queue.tail = result.then(() => undefined, () => undefined);

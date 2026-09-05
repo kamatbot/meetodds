@@ -258,6 +258,15 @@ export function SummaryPanel({
   }
 };
 
+  const generateSafely = async (prompt: string) => {
+    try { if (aiSummary) await onSaveAll(); await onGenerateSummary(prompt); }
+    catch { toast.error("Save your summary edits before generating again"); }
+  };
+  const regenerateSafely = async () => {
+    try { if (aiSummary) await onSaveAll(); await onRegenerateSummary(); }
+    catch { toast.error("Save your summary edits before regenerating"); }
+  };
+
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   const languageSlot = (
@@ -289,9 +298,9 @@ export function SummaryPanel({
   );
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+    <div className="flex-1 min-w-0 flex flex-col bg-bg overflow-hidden">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="p-4 border-b border-border">
         {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}
@@ -309,7 +318,7 @@ export function SummaryPanel({
                 modelConfig={modelConfig}
                 setModelConfig={setModelConfig}
                 onSaveModelConfig={onSaveModelConfig}
-                onGenerateSummary={onGenerateSummary}
+                onGenerateSummary={generateSafely}
                 onStopGeneration={onStopGeneration}
                 customPrompt={customPrompt}
                 summaryStatus={summaryStatus}
@@ -345,7 +354,9 @@ export function SummaryPanel({
         )}
       </div>
 
-      {isSummaryLoading ? (
+      {summaryError && <div role="alert" className="mx-4 my-3 rounded-control border border-border bg-surface p-3 text-ui text-danger">{summaryError}</div>}
+      {isSummaryLoading && aiSummary && <div role="status" className="flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3 text-ui text-2"><span>{getSummaryStatusMessage(summaryStatus)} Your previous summary remains available.</span><button type="button" onClick={onStopGeneration} className="rounded-control border border-border px-3 py-1.5">Cancel</button></div>}
+      {isSummaryLoading && !aiSummary ? (
         <div className="flex flex-col h-full">
           {/* Show button group during generation */}
           <div className="flex items-center justify-center pt-8 pb-4">
@@ -353,7 +364,7 @@ export function SummaryPanel({
               modelConfig={modelConfig}
               setModelConfig={setModelConfig}
               onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
+              onGenerateSummary={generateSafely}
               onStopGeneration={onStopGeneration}
               customPrompt={customPrompt}
               summaryStatus={summaryStatus}
@@ -369,7 +380,7 @@ export function SummaryPanel({
           <div className="flex items-center justify-center flex-1">
             <div className="text-center">
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-600">Generating AI Summary...</p>
+              <p className="text-2">Generating AI Summary...</p>
             </div>
           </div>
         </div>
@@ -381,7 +392,7 @@ export function SummaryPanel({
               modelConfig={modelConfig}
               setModelConfig={setModelConfig}
               onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
+              onGenerateSummary={generateSafely}
               onStopGeneration={onStopGeneration}
               customPrompt={customPrompt}
               summaryStatus={summaryStatus}
@@ -397,7 +408,7 @@ export function SummaryPanel({
           </div>
           {/* Empty state message */}
           <EmptyStateSummary
-            onGenerate={() => onGenerateSummary(customPrompt)}
+            onGenerate={() => generateSafely(customPrompt)}
             hasModel={modelConfig.provider !== null && modelConfig.model !== null}
             isGenerating={isSummaryLoading}
           />
@@ -449,7 +460,7 @@ export function SummaryPanel({
               ) : null}
             </div>
           )}
-          <div className="p-6 w-full">
+          <div className="p-6 w-full" aria-busy={isSummaryLoading} style={isSummaryLoading ? { pointerEvents: "none" } : undefined}>
             <BlockNoteSummaryView
               ref={summaryRef}
               summaryData={aiSummary}
@@ -460,7 +471,7 @@ export function SummaryPanel({
               error={summaryError}
               onRegenerateSummary={() => {
                 Analytics.trackButtonClick('regenerate_summary', 'meeting_details');
-                onRegenerateSummary();
+                void regenerateSafely();
               }}
               meeting={{
                 id: meeting.id,
