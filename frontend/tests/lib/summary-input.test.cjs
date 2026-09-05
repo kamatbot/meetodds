@@ -8,7 +8,7 @@ const file = path.resolve(__dirname, '../../src/lib/summary-input.ts');
 const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
 const loaded = new Module(file, module); loaded._compile(compiled.outputText, file);
 const { summaryTarget, sameSummaryTarget, approveSummaryInput, summaryFailureMessage, parseSummaryData } = loaded.exports;
-const fixture = () => ({ target: summaryTarget('openai-codex', 'account-model'), transcript: '[00:05] Me: We discussed an experiment.', notes: 'Private concern about ownership', notesUnavailable: false, prompt: 'Be concise', template: 'product_review' });
+const fixture = () => ({ target: summaryTarget('openai-codex', 'account-model'), transcript: '[00:05] Me: We discussed an experiment.', notes: 'Private concern about ownership', notesUnavailable: false, manualNotes: '', prompt: 'Be concise', template: 'product_review' });
 
 test('known API, account and on-device providers have distinct routes', () => {
   assert.equal(summaryTarget('builtin-ai', 'local').local, true);
@@ -48,6 +48,16 @@ test('notes are encoded as data, and transcript instructions are not authority',
 });
 test('empty notes do not introduce false personal evidence', () => {
   const approved = approveSummaryInput(fixture(), true, '   '); assert.equal(approved.notesIncluded, false); assert.doesNotMatch(approved.text, /PERSONAL NOTES/);
+});
+test('notes taken during the meeting are appended by default and omitted when the flag is false', () => {
+  const input = { ...fixture(), manualNotes: 'Follow up with legal about the contract' };
+  const included = approveSummaryInput(input, false, '');
+  assert.match(included.text, /NOTES TAKEN DURING THE MEETING — NOT RECORDED SPEECH/);
+  assert.match(included.text, /Follow up with legal/);
+  assert.equal(included.notesIncluded, true);
+  const excluded = approveSummaryInput(input, false, '', false);
+  assert.doesNotMatch(excluded.text, /Follow up with legal/);
+  assert.equal(excluded.notesIncluded, false);
 });
 test('oversized selection and empty transcript are not silently truncated', () => {
   assert.throws(() => approveSummaryInput(fixture(), true, 'x'.repeat(30001)));

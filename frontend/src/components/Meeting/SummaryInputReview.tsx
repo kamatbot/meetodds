@@ -8,18 +8,20 @@ import { approveSummaryInput, type ApprovedSummaryInput, type SummaryReviewInput
 function Review({ input, finish }: { input: SummaryReviewInput; finish: (result: ApprovedSummaryInput | null) => void }) {
   const [includeNotes, setIncludeNotes] = useState(false);
   const [notes, setNotes] = useState(input.notes);
+  const [includeManualNotes, setIncludeManualNotes] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const target = input.target;
   const requiresSendConfirmation = !target.local && target.provider !== 'openai-codex';
+  const hasManualNotes = Boolean(input.manualNotes.trim());
   const approve = () => {
-    try { finish(approveSummaryInput(input, includeNotes, notes)); }
+    try { finish(approveSummaryInput(input, includeNotes, notes, includeManualNotes)); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'The selected input could not be prepared.'); }
   };
   const copy = async () => {
     try {
-      const selected = approveSummaryInput(input, includeNotes, notes);
+      const selected = approveSummaryInput(input, includeNotes, notes, includeManualNotes);
       await navigator.clipboard.writeText(`${selected.customPrompt}\n\nTemplate: ${input.template}\n\n${selected.text}`);
       setCopied(true);
     } catch { setError('Could not copy the selected text. Review its size or try again.'); }
@@ -43,6 +45,12 @@ function Review({ input, finish }: { input: SummaryReviewInput; finish: (result:
               <summary className="cursor-pointer text-ui font-medium">Saved transcript · {input.transcript.length.toLocaleString()} characters</summary>
               <pre className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-caption leading-6">{input.transcript}</pre>
             </details>
+            {hasManualNotes && (
+              <div>
+                <label className="flex items-start gap-2 text-ui font-medium"><input type="checkbox" className="mt-1" checked={includeManualNotes} onChange={(event) => { setIncludeManualNotes(event.target.checked); setCopied(false); }} /> Include notes taken during the meeting</label>
+                {includeManualNotes && <pre className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-caption leading-6">{input.manualNotes}</pre>}
+              </div>
+            )}
             <div>
               <label className="flex items-start gap-2 text-ui font-medium"><input type="checkbox" className="mt-1" checked={includeNotes} onChange={(event) => { setIncludeNotes(event.target.checked); setCopied(false); }} /> Enhance with selected personal notes</label>
               <p className="mt-1 text-caption text-2">Excluded by default. Including notes allows them to influence the generated summary; review the result before sharing. Your original notes are not edited.</p>

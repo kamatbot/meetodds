@@ -137,8 +137,11 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       let notes = ''; let notesUnavailable = false;
       try { notes = (await invoke<{ notesMarkdown: string }>('api_get_meeting_notes', { meetingId: id })).notesMarkdown; }
       catch { notesUnavailable = true; }
+      let manualNotes = '';
+      try { manualNotes = (await invoke<{ content: string }>('api_get_manual_notes', { meetingId: id })).content; }
+      catch { /* Manual notes are optional context; a summary can proceed without them. */ }
       const { reviewSummaryInput } = await import('@/components/Meeting/SummaryInputReview');
-      const approved = await reviewSummaryInput({ target, transcript: transcriptText(turns), notes, notesUnavailable, prompt: customPrompt, template: selectedTemplate }, abort.signal);
+      const approved = await reviewSummaryInput({ target, transcript: transcriptText(turns), notes, notesUnavailable, manualNotes, prompt: customPrompt, template: selectedTemplate }, abort.signal);
       if (!approved || abort.signal.aborted) {
         if (visible()) setSummaryStatus(previousStatus);
         release(); return;
