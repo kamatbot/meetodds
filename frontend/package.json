@@ -1,6 +1,6 @@
 {
     "name": "meetily",
-    "version": "0.4.18",
+    "version": "0.4.19",
     "private": true,
     "main": "electron/main.js",
     "scripts": {
@@ -26,7 +26,8 @@
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
         "lint": "next lint",
-        "tauri:build:m5": "bash scripts/build-macos-m5.sh"
+        "tauri:build:m5": "bash scripts/build-macos-m5.sh",
+        "tauri:build:m5:app": "APP_ONLY=1 bash scripts/build-macos-m5.sh"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",

@@ -29,4 +29,9 @@ cargo build --manifest-path "$workspace_root/llama-helper/Cargo.toml" --release 
 mkdir -p "$(dirname "$sidecar_path")"
 install -m 755 "$workspace_root/target/release/llama-helper" "$sidecar_path"
 
-pnpm exec tauri build -- --features metal,coreml
+if [[ "${APP_ONLY:-0}" == "1" ]]; then
+  echo "Packaging a fast release app only (no DMG or updater artifact)"
+  TAURI_CONFIG='{"bundle":{"createUpdaterArtifacts":false}}' pnpm exec tauri build --bundles app -- --features metal,coreml
+else
+  pnpm exec tauri build -- --features metal,coreml
+fi
