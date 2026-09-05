@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } f
 import type { MeetingExportInfo, MeetingExportResult, MeetingExportSelection } from '@/types/meeting';
 import { canExportSrt, isFormattedDocument, privateExportDefaults, runExportSteps, selectedSectionCount, selectionKey, type ExportFormatChoice } from '@/lib/export-selection';
 
-interface ExportSheetProps { meetingId: string; open: boolean; onOpenChange: (open: boolean) => void; initialInfo?: MeetingExportInfo | null }
+interface ExportSheetProps { meetingId: string; open: boolean; onOpenChange: (open: boolean) => void; initialInfo?: MeetingExportInfo | null; initialFormat?: ExportFormatChoice }
 const options: { key: keyof MeetingExportSelection; label: string; availability: 'hasSummary' | 'hasNotes' | 'hasTranscript' }[] = [
   { key: 'includeSummary', label: 'Saved summary', availability: 'hasSummary' },
   { key: 'includeNotes', label: 'Personal notes', availability: 'hasNotes' },
@@ -19,7 +19,7 @@ const formats: { value: ExportFormatChoice; label: string }[] = [
   { value: 'text', label: 'Text' }, { value: 'json', label: 'JSON' }, { value: 'srt', label: 'Subtitles' },
 ];
 
-export default function ExportSheet({ meetingId, open, onOpenChange }: ExportSheetProps) {
+export default function ExportSheet({ meetingId, open, onOpenChange, initialFormat = 'markdown' }: ExportSheetProps) {
   const [info, setInfo] = useState<MeetingExportInfo | null>(null);
   const [selection, setSelection] = useState<MeetingExportSelection>(privateExportDefaults({ hasSummary: false }));
   const [format, setFormat] = useState<ExportFormatChoice>('markdown');
@@ -39,7 +39,7 @@ export default function ExportSheet({ meetingId, open, onOpenChange }: ExportShe
   useEffect(() => {
     if (!open) return;
     let disposed = false;
-    setLoading(true); setError(null); setInfo(null); setPreview(null); setPreviewError(false); setIncludeAudio(false); setFormat('markdown');
+    setLoading(true); setError(null); setInfo(null); setPreview(null); setPreviewError(false); setIncludeAudio(false); setFormat(initialFormat);
     // Always refresh. A cached Share menu can predate a new summary or a notes edit.
     void invoke<MeetingExportInfo>('api_get_meeting_export_info', { meetingId }).then((result) => {
       if (disposed) return;
@@ -48,7 +48,7 @@ export default function ExportSheet({ meetingId, open, onOpenChange }: ExportShe
     }).catch(() => { if (!disposed) setError('Saved content could not be loaded. Retry before exporting.'); })
       .finally(() => { if (!disposed) setLoading(false); });
     return () => { disposed = true; };
-  }, [meetingId, open, retry]);
+  }, [meetingId, open, retry, initialFormat]);
 
   useEffect(() => {
     if (!open || !info || !count) { setPreview(null); setPreviewError(false); return; }

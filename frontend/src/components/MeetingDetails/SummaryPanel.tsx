@@ -16,7 +16,8 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
-import { exportMeetingSummary, type MeetingExportFormat } from '@/lib/meeting-export';
+import type { MeetingExportFormat } from '@/lib/meeting-export';
+import ExportSheet from '@/components/Meeting/ExportSheet';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
@@ -102,6 +103,8 @@ export function SummaryPanel({
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<MeetingExportFormat | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<MeetingExportFormat>("markdown");
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -225,38 +228,16 @@ export function SummaryPanel({
   };
 
   const handleExport = async (format: MeetingExportFormat) => {
-  if (exportingFormat) return;
-  setExportingFormat(format);
-
-  try {
-    const editorMarkdown = await summaryRef.current?.getMarkdown();
-    const rawPersistedMarkdown = (aiSummary as unknown as { markdown?: unknown } | null)?.markdown;
-    const persistedMarkdown = typeof rawPersistedMarkdown === 'string' ? rawPersistedMarkdown : '';
-    const markdown = (editorMarkdown || persistedMarkdown).trim();
-
-    if (!markdown) {
-      throw new Error('No summary content is available to export.');
-    }
-
-    const result = await exportMeetingSummary({
-      format,
-      title: meetingTitle,
-      createdAt: meeting.created_at,
-      markdown,
-    });
-
-    toast.success(`Exported ${result.filename}`, {
-      description: result.path ?? `Saved through ${result.destination}.`,
-    });
-  } catch (error) {
-    console.error(`Failed to export ${format}:`, error);
-    toast.error(`Failed to export ${format.toUpperCase()}`, {
-      description: error instanceof Error ? error.message : String(error),
-    });
-  } finally {
-    setExportingFormat(null);
-  }
-};
+    if (exportingFormat) return;
+    setExportingFormat(format);
+    try {
+      await onSaveAll();
+      setExportFormat(format);
+      setExportOpen(true);
+    } catch {
+      toast.error('Save your current summary edits before exporting');
+    } finally { setExportingFormat(null); }
+  };
 
   const generateSafely = async (prompt: string) => {
     try { if (aiSummary) await onSaveAll(); await onGenerateSummary(prompt); }
@@ -299,6 +280,7 @@ export function SummaryPanel({
 
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-bg overflow-hidden">
+      <ExportSheet meetingId={meeting.id} open={exportOpen} onOpenChange={setExportOpen} initialFormat={exportFormat} />
       {/* Title area */}
       <div className="p-4 border-b border-border">
         {/* <EditableTitle
@@ -338,7 +320,7 @@ export function SummaryPanel({
               <SummaryUpdaterButtonGroup
                 isSaving={isSaving}
                 isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
-                onSave={onSaveAll}
+                onSave={() => onSaveAll().catch(() => undefined)}
                 onCopy={onCopySummary}
                 onFind={() => {
                   // TODO: Implement find in summary functionality
@@ -462,6 +444,7 @@ export function SummaryPanel({
           )}
           <div className="p-6 w-full" aria-busy={isSummaryLoading} style={isSummaryLoading ? { pointerEvents: "none" } : undefined}>
             <BlockNoteSummaryView
+              key={meeting.id}
               ref={summaryRef}
               summaryData={aiSummary}
               onSave={onSaveSummary}

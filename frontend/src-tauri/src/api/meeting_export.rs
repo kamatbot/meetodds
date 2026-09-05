@@ -162,14 +162,7 @@ async fn load_bundle(pool: &SqlitePool, meeting_id: &str) -> Result<MeetingExpor
         .3
         .filter(|notes| !notes.trim().is_empty());
 
-    let audio_path = row.2.and_then(|folder| {
-        let candidate = PathBuf::from(folder).join("audio.mp4");
-        if candidate.is_file() {
-            Some(candidate)
-        } else {
-            None
-        }
-    });
+    let audio_path = row.2.and_then(|folder| recording_audio_path(Path::new(&folder)));
 
     Ok(MeetingExportBundle {
         meeting_id: meeting_id.to_string(),
@@ -180,6 +173,20 @@ async fn load_bundle(pool: &SqlitePool, meeting_id: &str) -> Result<MeetingExpor
         transcripts,
         audio_path,
     })
+}
+
+fn recording_audio_path(folder: &Path) -> Option<PathBuf> {
+    let folder = folder.canonicalize().ok()?;
+    let metadata = std::fs::read(folder.join("metadata.json")).ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let name = metadata.as_ref().and_then(|value| value.get("audio_file")).and_then(Value::as_str);
+    if name == Some("") { return None; }
+    let name = name.unwrap_or("audio.mp4");
+    let relative = Path::new(name);
+    if relative.components().count() != 1 || relative.file_name()?.to_str()? != name { return None; }
+    let path = folder.join(relative).canonicalize().ok()?;
+    if path.parent() != Some(folder.as_path()) || !path.is_file() { return None; }
+    Some(path)
 }
 
 fn summary_has_content(summary: &Value) -> bool {
@@ -707,8 +714,12 @@ pub async fn api_export_meeting_audio<R: Runtime>(
     };
 
     if !paths_refer_to_same_file(source, &destination) {
-        std::fs::copy(source, &destination)
-            .map_err(|error| format!("Failed to export meeting audio: {error}"))?;
+        let parent = destination.parent().ok_or_else(|| "Invalid audio export destination".to_string())?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+        let mut original = std::fs::File::open(source).map_err(|e| e.to_string())?;
+        std::io::copy(&mut original, temporary.as_file_mut()).map_err(|e| e.to_string())?;
+        temporary.as_file().sync_all().map_err(|e| e.to_string())?;
+        temporary.persist(&destination).map_err(|e| e.to_string())?;
     }
 
     Ok(MeetingExportResult {
@@ -871,4 +882,17 @@ mod tests {
             "2026-09-03 — 製品レビュー Q4 😀.md"
         );
     }
+    #[test]
+    fn playback_uses_the_committed_recovery_filename_and_rejects_path_escape() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("audio-recovered-example.mp4"), b"audio").unwrap();
+        let metadata = directory.path().join("metadata.json");
+        std::fs::write(&metadata, br#"{"audio_file":"audio-recovered-example.mp4"}"#).unwrap();
+        assert!(super::recording_audio_path(directory.path()).unwrap().ends_with("audio-recovered-example.mp4"));
+        std::fs::write(&metadata, br#"{"audio_file":"../secret.mp4"}"#).unwrap();
+        assert!(super::recording_audio_path(directory.path()).is_none());
+        std::fs::write(&metadata, br#"{"audio_file":""}"#).unwrap();
+        assert!(super::recording_audio_path(directory.path()).is_none());
+    }
+
 }

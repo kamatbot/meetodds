@@ -20,7 +20,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const [isTitleDirty, setIsTitleDirty] = useState(false);
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);
   const [isSaving, setIsSaving] = useState(false);
-  const [, setIsSummaryDirty] = useState(false);
+  const [isSummaryDirty, setIsSummaryDirty] = useState(false);
   const [, setError] = useState<string>('');
 
   // Ref for BlockNoteSummaryView
@@ -50,6 +50,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
 
   const handleSummaryChange = useCallback((newSummary: Summary) => {
     setAiSummary(newSummary);
+    setIsSummaryDirty(true);
   }, []);
 
   const handleSaveMeetingTitle = useCallback(async () => {
@@ -120,6 +121,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       } else {
         setError('Failed to save meeting summary: Unknown error');
       }
+      throw error;
     }
   }, [meeting.id, meetingTitle]);
 
@@ -128,25 +130,26 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     try {
       // Save meeting title only if changed
       if (isTitleDirty) {
-        await handleSaveMeetingTitle();
+        if (!await handleSaveMeetingTitle()) throw new Error("Meeting title could not be saved");
       }
 
       // Save BlockNote editor changes if dirty
       if (blockNoteSummaryRef.current?.isDirty) {
         console.log('💾 Saving BlockNote editor changes...');
         await blockNoteSummaryRef.current.saveSummary();
-      } else if (aiSummary) {
+      } else if (aiSummary && isSummaryDirty) {
         await handleSaveSummary(aiSummary);
       }
 
-      toast.success("Changes saved successfully");
+      setIsSummaryDirty(false);
     } catch (error) {
       console.error('Failed to save changes:', error);
-      toast.error("Failed to save changes", { description: String(error) });
+      toast.error("Failed to save changes", { description: "Your unsaved edits are still available. Retry before exporting or generating a new summary." });
+      throw error;
     } finally {
       setIsSaving(false);
     }
-  }, [isTitleDirty, handleSaveMeetingTitle, aiSummary, handleSaveSummary]);
+  }, [isTitleDirty, isSummaryDirty, handleSaveMeetingTitle, aiSummary, handleSaveSummary]);
 
   // Update meeting title from external source (e.g., AI summary)
   const updateMeetingTitle = useCallback((newTitle: string) => {

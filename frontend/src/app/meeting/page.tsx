@@ -311,6 +311,7 @@ function MeetingContent() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
       <MeetingHeader
+        key={meetingDetails.id}
         meetingId={meetingDetails.id}
         title={meetingDetails.title}
         createdAt={meetingDetails.created_at}
@@ -323,6 +324,7 @@ function MeetingContent() {
       />
       <div className="min-h-0 flex-1 overflow-hidden">
         <PageContent
+          key={meetingDetails.id}
           meeting={meetingDetails}
           summaryData={meetingSummary}
           activeTab={activeTab}
@@ -341,7 +343,7 @@ function MeetingContent() {
         />
       </div>
       {activeTab === 'transcript' && (
-        <AudioPlayer meetingId={meetingDetails.id} />
+        <AudioPlayer key={meetingDetails.id} meetingId={meetingDetails.id} />
       )}
     </div>
   );
