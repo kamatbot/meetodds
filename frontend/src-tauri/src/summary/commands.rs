@@ -346,12 +346,16 @@ pub async fn api_process_transcript<R: Runtime>(
         return Err("A saved transcript and selected model are required".to_string());
     }
     let execution = execution_config::resolve(state.db_manager.pool(), &model, &model_name, approved_target.as_ref()).await?;
+    let scheduling_guard = if execution.local { Some(crate::audio::common::acquire_engine_lifecycle_lock().await) } else { None };
     if execution.local && crate::audio::recording_commands::is_recording().await {
         return Err("Finish recording before starting a local summary".to_string());
     }
     // Acquire before any database reset. React state is not a cross-view job lock.
     // The owned lease moves into the native task and drops on all exit/unwind paths.
     let lease = execution_gate::SummaryLease::acquire(&m_id)?;
+    let cancellation_token = tokio_util::sync::CancellationToken::new();
+    let local_lease = if execution.local { Some(crate::summary::inference_priority::register(&m_id, cancellation_token.clone())?) } else { None };
+    drop(scheduling_guard);
     if matches!(model.as_str(), "builtin-ai" | "local-llama")
         && crate::audio::recording_commands::is_recording().await
     {
@@ -412,8 +416,10 @@ pub async fn api_process_transcript<R: Runtime>(
             final_template_id,
             summary_language,
             execution,
+            cancellation_token,
         )
         .await;
+        drop(local_lease);
         drop(lease);
     });
 

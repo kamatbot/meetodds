@@ -193,8 +193,7 @@ pub struct SummaryService;
 
 impl SummaryService {
     /// Registers a new cancellation token for a meeting
-    fn register_cancellation_token(meeting_id: &str) -> CancellationToken {
-        let token = CancellationToken::new();
+    fn register_cancellation_token(meeting_id: &str, token: CancellationToken) -> CancellationToken {
         if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
             registry.insert(meeting_id.to_string(), token.clone());
             info!("Registered cancellation token for meeting: {}", meeting_id);
@@ -307,6 +306,7 @@ impl SummaryService {
         template_id: String,
         summary_language: Option<String>,
         execution: crate::summary::commands::execution_config::ResolvedSummaryConfig,
+        supplied_cancellation_token: CancellationToken,
     ) {
         let start_time = Instant::now();
         info!(
@@ -315,7 +315,13 @@ impl SummaryService {
         );
 
         // Register cancellation token for this meeting
-        let cancellation_token = Self::register_cancellation_token(&meeting_id);
+        let cancellation_token = Self::register_cancellation_token(&meeting_id, supplied_cancellation_token);
+
+        if cancellation_token.is_cancelled() {
+            let _ = SummaryProcessesRepository::update_process_cancelled(&pool, &meeting_id).await;
+            Self::cleanup_cancellation_token(&meeting_id);
+            return;
+        }
 
         // Frozen before dispatch: never re-read mutable destinations inside the job.
         let provider = execution.provider;

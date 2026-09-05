@@ -22,6 +22,7 @@ serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 once_cell = "1"
+tokio-util = "0.7"
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
@@ -48,6 +49,8 @@ summary = root/'frontend/src-tauri/src/summary'
 if (summary/'execution_config.rs').exists():
     (crate/'src/execution_config.rs').write_text((summary/'execution_config.rs').read_text())
     (crate/'src/execution_gate.rs').write_text((summary/'execution_gate.rs').read_text())
+    (crate/'src/inference_priority.rs').write_text((summary/'inference_priority.rs').read_text())
+    modules.append('mod inference_priority;')
     llm = (summary/'llm_client.rs').read_text()
     provider = llm[llm.index('#[derive(Debug, Clone, PartialEq)]\npub enum LLMProvider'):llm.index('/// Build the HTTP request')]
     modules.append('pub mod summary { pub mod llm_client {\n'+provider+'\n} }')

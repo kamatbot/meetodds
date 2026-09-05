@@ -21,6 +21,7 @@ const [baseline, current] = process.argv.slice(2);
 if (!baseline || !current) throw new Error('Usage: check-types.cjs baseline-frontend current-frontend');
 const before = diagnostics(baseline);
 const after = diagnostics(current);
+for (const [key,count] of before) console.log(`Baseline (${count}): ${key}`);
 let introduced = 0;
 for (const [key, count] of after) {
   const delta = count - (before.get(key) || 0);

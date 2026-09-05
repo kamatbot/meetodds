@@ -86,16 +86,7 @@ const OPENAI_FALLBACK_MODELS = [
   'gpt-4o',
 ];
 
-const CODEX_FALLBACK_MODELS = [
-  'gpt-5.6-sol',
-  'gpt-5.6-terra',
-  'gpt-5.6-luna',
-  'gpt-5.5',
-  'gpt-5.4-mini',
-  'gpt-5.4',
-  'gpt-5.3-codex',
-  'gpt-5.3-codex-spark',
-];
+const CODEX_FALLBACK_MODELS: string[] = []; // Account discovery is authoritative.
 
 const CLAUDE_FALLBACK_MODELS = [
   'claude-sonnet-4-5-20250929',

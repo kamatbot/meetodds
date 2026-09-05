@@ -135,8 +135,8 @@ impl RecordingSaver {
     }
 
     /// Existing sender type is preserved. The manager must call ensure_initialized before opening streams.
-    pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::UnboundedSender<AudioChunk> {
-        let (sender, receiver) = mpsc::unbounded_channel();
+    pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::Sender<AudioChunk> {
+        let (sender, receiver) = mpsc::channel(64);
         let name = self.meeting_name.clone().unwrap_or_else(|| format!("Meeting {}", self.capture_session_id));
         if self.initialize_meeting_folder(&name, auto_save).is_err() {
             self.fail("Recording storage is unavailable. Check free space and folder permissions before starting.");
@@ -149,7 +149,7 @@ impl RecordingSaver {
         let failure = self.failure.clone();
         let notify = self.failure_callback.clone();
         self.worker = Some(tokio::spawn(async move {
-            let result = save_worker::drain_until_closed(receiver, stopped, move |chunk| {
+            let result = save_worker::drain_bounded_until_closed(receiver, stopped, move |chunk| {
                 let saver = saver.clone();
                 async move {
                     if let Some(saver) = saver {

@@ -99,6 +99,15 @@ impl AudioMixerRingBuffer {
         }
     }
 
+    fn extract_tail(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
+        let count = self.mic_buffer.len().max(self.system_buffer.len());
+        if count == 0 { return None; }
+        let mut microphone: Vec<f32> = self.mic_buffer.drain(..).collect();
+        let mut system: Vec<f32> = self.system_buffer.drain(..).collect();
+        microphone.resize(count, 0.0); system.resize(count, 0.0);
+        Some((microphone, system))
+    }
+
     fn can_mix(&self) -> bool {
         self.mic_buffer.len() >= self.window_size_samples
             || self.system_buffer.len() >= self.window_size_samples
@@ -758,7 +767,7 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
 
     // Recording sender for pre-mixed audio
-    recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    recording_sender_for_mixed: Option<mpsc::Sender<AudioChunk>>,
     // Latest-only speculative subtitle lane. `watch` intentionally drops old snapshots.
     live_preview_sender: Option<watch::Sender<Option<AudioChunk>>>,
     mic_live_preview_last_emit: Option<std::time::Instant>,
@@ -917,22 +926,11 @@ impl AudioPipeline {
                         self.last_summary_time = std::time::Instant::now();
                     }
 
-                    // STEP 1: Transcribe each source independently so speaker
-                    // attribution survives VAD and speech recognition.
-                    if let Err(e) =
-                        self.process_source_audio(chunk.device_type.clone(), &chunk.data)
-                    {
-                        warn!(
-                            "Failed to process {:?} audio for transcription: {}",
-                            chunk.device_type, e
-                        );
-                    }
-
                     // STEP 2: Add raw audio to the ring buffer for the mixed recording.
                     // Microphone audio is already normalized at capture level (AudioCapture)
                     // System audio remains raw
                     self.ring_buffer
-                        .add_samples(chunk.device_type.clone(), chunk.data);
+                        .add_samples(chunk.device_type.clone(), chunk.data.clone());
 
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
@@ -955,9 +953,16 @@ impl AudioPipeline {
                                     chunk_id: self.chunk_id_counter,
                                     device_type: DeviceType::Microphone, // Mixed audio
                                 };
-                                let _ = sender.send(recording_chunk);
+                                if sender.try_send(recording_chunk).is_err() {
+                                    self.state.stop_recording();
+                                    self.state.report_error(AudioError::BufferOverflow);
+                                    return Err(anyhow::anyhow!("Recording storage cannot keep up. Capture stopped; acknowledged audio remains recoverable."));
+                                }
                             }
                         }
+                    }
+                    if let Err(error) = self.process_source_audio(chunk.device_type, &chunk.data) {
+                        warn!("Transcription processing failed; recording audio was retained: {}", error);
                     }
                 }
                 Ok(None) => {
@@ -1088,6 +1093,15 @@ impl AudioPipeline {
     }
 
     fn flush_remaining_audio(&mut self) -> Result<()> {
+        if let Some((microphone, system)) = self.ring_buffer.extract_tail() {
+            let mixed = self.mixer.mix_window(&microphone, &system);
+            if let Some(sender) = self.recording_sender_for_mixed.as_ref() {
+                sender.try_send(AudioChunk { data: mixed, sample_rate: self.sample_rate,
+                    timestamp: self.state.get_active_recording_duration().unwrap_or(0.0),
+                    chunk_id: self.chunk_id_counter, device_type: DeviceType::Microphone })
+                    .map_err(|_| anyhow::anyhow!("Final recording window could not be queued; recovery is required"))?;
+            }
+        }
         info!(
             "Flushing source-separated VAD processors after {} input chunks",
             self.processed_chunks
@@ -1128,7 +1142,7 @@ impl AudioPipelineManager {
         live_preview_sender: Option<watch::Sender<Option<AudioChunk>>>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
-        recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+        recording_sender: Option<mpsc::Sender<AudioChunk>>,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,

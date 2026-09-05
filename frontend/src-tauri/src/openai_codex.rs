@@ -19,16 +19,6 @@ const CODEX_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 const AUTH_FILE_NAME: &str = "openai-codex-auth.json";
 const REFRESH_SKEW_SECONDS: i64 = 120;
 
-const CODEX_FALLBACK_MODELS: &[&str] = &[
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5",
-    "gpt-5.4-mini",
-    "gpt-5.4",
-    "gpt-5.3-codex",
-    "gpt-5.3-codex-spark",
-];
 
 static AUTH_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -104,6 +94,9 @@ fn read_auth(path: &Path) -> Result<Option<CodexAuthState>, String> {
     if !path.exists() {
         return Ok(None);
     }
+    if std::fs::symlink_metadata(path).map_err(|_| "Credential metadata unavailable".to_string())?.file_type().is_symlink() {
+        return Err("Refusing a symbolic-link credential file".to_string());
+    }
     let bytes =
         std::fs::read(path).map_err(|e| format!("Unable to read OpenAI Codex credentials: {e}"))?;
     let auth = serde_json::from_slice::<CodexAuthState>(&bytes)
@@ -115,27 +108,16 @@ fn read_auth(path: &Path) -> Result<Option<CodexAuthState>, String> {
 }
 
 fn write_auth(path: &Path, auth: &CodexAuthState) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Unable to create MeetOdds app data directory: {e}"))?;
-    }
-
-    let tmp = path.with_extension("json.tmp");
-    let bytes = serde_json::to_vec_pretty(auth)
-        .map_err(|e| format!("Unable to serialize OpenAI Codex credentials: {e}"))?;
-    std::fs::write(&tmp, bytes)
-        .map_err(|e| format!("Unable to persist OpenAI Codex credentials: {e}"))?;
-
+    use std::io::Write;
+    let parent = path.parent().ok_or_else(|| "Credential directory is unavailable".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|_| "Credential directory could not be created".to_string())?;
+    // NamedTempFile is private from creation on Unix; never write a public file then chmod it.
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|_| "Credential file could not be created".to_string())?;
+    serde_json::to_writer(file.as_file_mut(), auth).map_err(|_| "Credentials could not be serialized".to_string())?;
+    file.flush().and_then(|_| file.as_file().sync_all()).map_err(|_| "Credentials could not be flushed".to_string())?;
+    file.persist(path).map_err(|_| "Credentials could not be committed".to_string())?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&tmp, permissions)
-            .map_err(|e| format!("Unable to secure OpenAI Codex credentials: {e}"))?;
-    }
-
-    std::fs::rename(&tmp, path)
-        .map_err(|e| format!("Unable to finalize OpenAI Codex credentials: {e}"))?;
+    std::fs::File::open(parent).and_then(|directory| directory.sync_all()).map_err(|_| "Credential directory could not be flushed".to_string())?;
     Ok(())
 }
 
@@ -567,10 +549,7 @@ pub async fn openai_codex_get_models<R: Runtime>(
     models.sort();
     models.dedup();
     if models.is_empty() {
-        models = CODEX_FALLBACK_MODELS
-            .iter()
-            .map(|model| (*model).to_string())
-            .collect();
+        return Err("No summary-capable models were returned for this ChatGPT account. Reconnect or refresh the model list; no fallback model was selected.".to_string());
     }
 
     Ok(models.into_iter().map(|id| CodexModel { id }).collect())
