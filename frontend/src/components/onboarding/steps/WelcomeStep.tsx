@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { Cpu, FileText, Lock, MessageSquareText, Sparkles } from 'lucide-react';
+import { ArrowRight, Check, FileText, Lock, MessageSquareText, Sparkles, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -35,97 +35,123 @@ export function WelcomeStep() {
     );
   };
 
-  const features = [
-    { icon: Lock, title: 'Recordings stay on your device' },
-    { icon: Sparkles, title: 'Local or cloud AI summaries' },
-    { icon: Cpu, title: 'Offline, on-device transcription' },
+  const highlights = [
+    { icon: Lock, label: 'Stays on your device' },
+    { icon: Sparkles, label: 'Local or cloud AI' },
+    { icon: WifiOff, label: 'Works offline' },
   ];
 
   return (
-    <OnboardingContainer
-      title="Welcome to MeetOdds"
-      step={1}
-      totalSteps={4}
-      hideProgress
-      hero={null}
-    >
-      <div className="mx-auto flex w-full max-w-[600px] flex-1 flex-col justify-center gap-5">
-        <header className="relative mb-1 shrink-0">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 -top-24 h-72 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(91,63,217,0.22),transparent_70%)]"
-          />
-          <div className="relative flex items-center justify-center gap-4">
+    <OnboardingContainer title="Welcome to MeetOdds" step={1} totalSteps={4} hideProgress hero={null}>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[460px] overflow-hidden"
+      >
+        <div className="absolute left-1/2 top-[-160px] h-[440px] w-[760px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(91,63,217,0.18),rgba(59,110,246,0.08)_55%,transparent_78%)] blur-2xl" />
+      </div>
+
+      <div className="relative mx-auto flex w-full max-w-[640px] flex-1 flex-col justify-center">
+        <div className="flex flex-col items-center text-center animate-fade-in-up motion-reduce:animate-none">
+          <div className="relative mb-5">
             <Image
               src="/meetodds-icon.png"
               alt=""
-              width={64}
-              height={64}
+              width={80}
+              height={80}
               priority
-              className="h-16 w-16 rounded-[18px] shadow-[0_10px_28px_rgba(59,110,246,0.28)]"
+              className="h-20 w-20 rounded-[22px] shadow-[0_18px_40px_-12px_rgba(59,110,246,0.45)] animate-float motion-reduce:animate-none"
             />
-            <div className="text-left">
-              <h1 className="text-[28px] font-semibold leading-8 tracking-tight text-text">MeetOdds</h1>
-              <p className="mt-0.5 text-body text-2">Private meeting notes, transcripts, and summaries on your Mac.</p>
-            </div>
+            <span className="absolute -right-3 -top-2 inline-flex items-center rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-semibold text-2 shadow-sm">
+              Private
+            </span>
           </div>
-          <p className="relative mx-auto mt-4 max-w-md text-center text-ui leading-5 text-3">
-            Capture the conversation locally, then choose the intelligence layer that fits the meeting.
+          <h1 className="text-[34px] font-semibold leading-[40px] tracking-[-0.02em] text-text">
+            Meeting notes, done for you.
+          </h1>
+          <p className="mt-3 max-w-[460px] text-[15px] leading-6 text-2">
+            MeetOdds records on your Mac, transcribes on-device, and turns the conversation into notes you can share. Nothing leaves your computer unless you say so.
           </p>
-        </header>
+        </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          {features.map((feature) => {
-            const Icon = feature.icon;
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2 animate-fade-in-up delay-75 motion-reduce:animate-none">
+          {highlights.map((item) => {
+            const Icon = item.icon;
             return (
-              <div key={feature.title} className="flex items-center gap-2.5 rounded-card border border-border bg-surface px-3 py-2.5">
-                <div className="inline-grid h-8 w-8 shrink-0 place-items-center rounded-control bg-accent-soft text-accent">
-                  <Icon className="h-4 w-4" strokeWidth={1.75} />
-                </div>
-                <p className="text-ui leading-4 text-text">{feature.title}</p>
-              </div>
+              <span
+                key={item.label}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-caption font-medium text-2 shadow-sm"
+              >
+                <Icon className="h-3.5 w-3.5 text-accent" strokeWidth={2} />
+                {item.label}
+              </span>
             );
           })}
         </div>
 
-        <section aria-labelledby="meeting-style-title">
-          <h2 id="meeting-style-title" className="text-ui font-semibold text-2">
+        <section aria-labelledby="meeting-style-title" className="mt-7 animate-fade-in-up delay-100 motion-reduce:animate-none">
+          <h2 id="meeting-style-title" className="text-center text-ui font-medium text-3">
             When a meeting starts, what should be in front of you?
           </h2>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => chooseFocus('notes')}
-              aria-pressed={focusPreference === 'notes'}
-              className={`rounded-card border p-3 text-left transition-colors duration-150 ${focusPreference === 'notes' ? 'border-accent bg-accent-soft' : 'border-border bg-surface hover:bg-bg'}`}
-            >
-              <div className="flex items-center gap-2">
-                <FileText className={`h-5 w-5 ${focusPreference === 'notes' ? 'text-accent' : 'text-2'}`} strokeWidth={1.75} />
-                <span className="text-ui font-semibold text-text">I take notes while I talk</span>
-              </div>
-              <p className="mt-1 text-caption leading-4 text-3">Keep the live transcript available, but start with a quieter note-taking workspace.</p>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => chooseFocus('transcript')}
-              aria-pressed={focusPreference === 'transcript'}
-              className={`rounded-card border p-3 text-left transition-colors duration-150 ${focusPreference === 'transcript' ? 'border-accent bg-accent-soft' : 'border-border bg-surface hover:bg-bg'}`}
-            >
-              <div className="flex items-center gap-2">
-                <MessageSquareText className={`h-5 w-5 ${focusPreference === 'transcript' ? 'text-accent' : 'text-2'}`} strokeWidth={1.75} />
-                <span className="text-ui font-semibold text-text">I just want the transcript</span>
-              </div>
-              <p className="mt-1 text-caption leading-4 text-3">Open the live transcript drawer automatically while recording.</p>
-            </button>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            {(
+              [
+                {
+                  key: 'notes' as const,
+                  icon: FileText,
+                  title: 'I take notes while I talk',
+                  body: 'Keep the live transcript available, but start with a quieter note-taking workspace.',
+                },
+                {
+                  key: 'transcript' as const,
+                  icon: MessageSquareText,
+                  title: 'I just want the transcript',
+                  body: 'Open the live transcript drawer automatically while recording.',
+                },
+              ]
+            ).map((option) => {
+              const Icon = option.icon;
+              const selected = focusPreference === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => chooseFocus(option.key)}
+                  aria-pressed={selected}
+                  className={`group relative rounded-2xl border p-4 text-left transition-all duration-200 ${
+                    selected
+                      ? 'border-accent bg-accent-soft shadow-[0_0_0_3px_rgba(59,110,246,0.14)]'
+                      : 'border-border bg-surface hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-16px_rgba(27,27,27,0.28)]'
+                  }`}
+                >
+                  <span
+                    className={`inline-grid h-9 w-9 place-items-center rounded-xl transition-colors duration-200 ${
+                      selected ? 'bg-accent text-white' : 'bg-bg text-2 group-hover:text-text'
+                    }`}
+                  >
+                    <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
+                  </span>
+                  {selected && (
+                    <span className="absolute right-3 top-3 inline-grid h-5 w-5 place-items-center rounded-full bg-accent text-white">
+                      <Check className="h-3 w-3" strokeWidth={2.5} />
+                    </span>
+                  )}
+                  <div className="mt-3 text-[15px] font-semibold leading-5 text-text">{option.title}</div>
+                  <p className="mt-1 text-caption leading-4 text-3">{option.body}</p>
+                </button>
+              );
+            })}
           </div>
         </section>
 
-        <div className="mx-auto w-full max-w-xs">
-          <Button onClick={goNext} className="h-10 w-full rounded-control bg-accent text-white hover:opacity-90">
+        <div className="mt-7 flex flex-col items-center animate-fade-in-up delay-150 motion-reduce:animate-none">
+          <Button
+            onClick={goNext}
+            className="h-11 w-full max-w-[300px] rounded-xl bg-accent text-[15px] font-semibold text-white shadow-[0_10px_24px_-10px_rgba(59,110,246,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:opacity-95 active:translate-y-0"
+          >
             Get started
+            <ArrowRight className="ml-1.5 h-4 w-4" strokeWidth={2} />
           </Button>
-          <p className="mt-2 text-center text-caption text-3">Step 1 of 4 · about two minutes</p>
+          <p className="mt-3 text-caption text-3">Step 1 of 4 · about two minutes · no account needed</p>
         </div>
       </div>
     </OnboardingContainer>
