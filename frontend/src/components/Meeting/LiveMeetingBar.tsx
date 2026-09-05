@@ -1,11 +1,12 @@
 'use client';
 
-import { Pause, Play, Square } from 'lucide-react';
+import { NotebookPen, Pause, Play, Square } from 'lucide-react';
 interface LiveMeetingBarProps {
   isPaused: boolean;
   isBusy: boolean;
   onPauseResume: () => void;
   onStop: () => void;
+  onOpenNotes: () => void;
 }
 
 export default function LiveMeetingBar({
@@ -13,6 +14,7 @@ export default function LiveMeetingBar({
   isBusy,
   onPauseResume,
   onStop,
+  onOpenNotes,
 }: LiveMeetingBarProps) {
   const status = isPaused
     ? 'Recording paused'
@@ -27,6 +29,15 @@ export default function LiveMeetingBar({
       <span className="min-w-0 flex-1 truncate text-ui text-slate-100" aria-live="polite">
         {status}
       </span>
+      <button
+        type="button"
+        onClick={onOpenNotes}
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-white/20 bg-white/10 px-2.5 text-caption font-semibold text-white transition-colors hover:bg-white/20 disabled:opacity-40"
+        aria-label="Open meeting notes"
+      >
+        <NotebookPen className="h-3.5 w-3.5" strokeWidth={1.75} />
+        Notes
+      </button>
       <button
         type="button"
         onClick={onPauseResume}

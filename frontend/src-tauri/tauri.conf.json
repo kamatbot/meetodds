@@ -41,7 +41,8 @@
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
                     "windows": [
-                        "main"
+                        "main",
+                        "manual-notes"
                     ],
                     "permissions": [
                         "fs:default",
@@ -61,6 +62,11 @@
                         "core:menu:default",
                         "core:tray:default",
                         "core:window:allow-set-title",
+                        "core:window:allow-start-dragging",
+                        "core:window:allow-hide",
+                        "core:window:allow-show",
+                        "core:window:allow-set-focus",
+                        "core:window:allow-close",
                         "store:default",
                         "notification:default",
                         "notification:allow-is-permission-granted",

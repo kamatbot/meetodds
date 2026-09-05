@@ -9,6 +9,7 @@ import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { withSpeakerPrefix } from '@/lib/speaker-labels';
 import { indexedDBService } from '@/services/indexedDBService';
+import { openManualNotesWindow, closeManualNotesWindow } from '@/services/manualNotesService';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -142,6 +143,7 @@ useEffect(() => {
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;
             setCurrentMeetingId(meetingId);
+            void openManualNotesWindow(meetingId).catch(() => {});
 
             // Store in sessionStorage as fallback for markMeetingAsSaved
             sessionStorage.setItem('indexeddb_current_meeting_id', meetingId);
@@ -189,6 +191,7 @@ useEffect(() => {
 
         // Listen for recording-stopped event
         unlistenRecordingStopped = await recordingService.onRecordingStopped(async (payload) => {
+          void closeManualNotesWindow().catch(() => {});
           setLivePreview(null);
           try {
             if (currentMeetingId) {

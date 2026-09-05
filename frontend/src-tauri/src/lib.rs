@@ -44,6 +44,7 @@ pub mod console_utils;
 pub mod database;
 pub mod groq;
 pub mod live_translation;
+pub mod manual_notes_window;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -675,6 +676,8 @@ pub fn run() {
             api::api_save_meeting_notes,
             api::api_get_manual_notes,
             api::api_save_manual_notes,
+            manual_notes_window::open_manual_notes_window,
+            manual_notes_window::close_manual_notes_window,
             api::api_get_meeting_export_info,
             api::api_get_meeting_markdown,
             api::api_export_meeting,
