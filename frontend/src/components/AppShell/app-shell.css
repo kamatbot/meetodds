@@ -1,0 +1,14 @@
+/* Native keyboard focus remains visible on icon-only and legacy controls. */
+.meetodds-shell :is(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid Highlight;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .meetodds-shell *, .meetodds-shell *::before, .meetodds-shell *::after,
+  [role='dialog'] *, [role='dialog'] *::before, [role='dialog'] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
