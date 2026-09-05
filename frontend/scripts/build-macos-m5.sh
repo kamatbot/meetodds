@@ -31,7 +31,7 @@ install -m 755 "$workspace_root/target/release/llama-helper" "$sidecar_path"
 
 if [[ "${APP_ONLY:-0}" == "1" ]]; then
   echo "Packaging a fast release app only (no DMG or updater artifact)"
-  TAURI_CONFIG='{"bundle":{"createUpdaterArtifacts":false}}' pnpm exec tauri build --bundles app -- --features metal,coreml
+  pnpm exec tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' --bundles app -- --features metal,coreml
 else
   pnpm exec tauri build -- --features metal,coreml
 fi
