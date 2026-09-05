@@ -1,6 +1,6 @@
 'use client';
 
-import { LoaderCircle, Pause, Play, Square } from 'lucide-react';
+import { Captions, CaptionsOff, LoaderCircle, NotebookPen, Pause, Play, Square } from 'lucide-react';
 
 interface RecorderBarProps {
   isPaused: boolean;
@@ -11,8 +11,11 @@ interface RecorderBarProps {
   recordingDuration: number | null;
   speechDetected: boolean;
   audioLevel?: number | null;
+  captionsVisible: boolean;
   onPauseResume: () => void;
   onStop: () => void;
+  onToggleCaptions: () => void;
+  onOpenNotes: () => void;
 }
 
 function formatDuration(seconds: number | null): string {
@@ -64,13 +67,16 @@ export default function RecorderBar({
   recordingDuration,
   speechDetected,
   audioLevel = null,
+  captionsVisible,
   onPauseResume,
   onStop,
+  onToggleCaptions,
+  onOpenNotes,
 }: RecorderBarProps) {
   const controlsBusy = isStopping || isPausing || isResuming;
 
   return (
-    <div className="flex min-w-[390px] items-center gap-2 rounded-full border border-border bg-surface px-2.5 py-2 shadow-popover">
+    <div className="flex min-w-[470px] items-center gap-2 rounded-full border border-border bg-surface px-2.5 py-2 shadow-popover">
       <span
         className={`ml-1 h-2.5 w-2.5 rounded-full ${isPaused ? 'bg-warn' : 'bg-record'}`}
         aria-hidden="true"
@@ -96,6 +102,29 @@ export default function RecorderBar({
                     ? 'Speech detected'
                     : 'Recording'}
       </span>
+
+      <button
+        type="button"
+        onClick={onToggleCaptions}
+        aria-pressed={captionsVisible}
+        className={`inline-grid h-8 w-8 shrink-0 place-items-center rounded-full border border-border bg-bg text-text transition-colors duration-150 hover:bg-surface ${captionsVisible ? '' : 'text-3'}`}
+        aria-label={captionsVisible ? 'Hide live captions' : 'Show live captions'}
+      >
+        {captionsVisible ? (
+          <Captions className="h-4 w-4" strokeWidth={1.75} />
+        ) : (
+          <CaptionsOff className="h-4 w-4" strokeWidth={1.75} />
+        )}
+      </button>
+
+      <button
+        type="button"
+        onClick={onOpenNotes}
+        className="inline-grid h-8 w-8 shrink-0 place-items-center rounded-full border border-border bg-bg text-text transition-colors duration-150 hover:bg-surface"
+        aria-label="Open meeting notes"
+      >
+        <NotebookPen className="h-4 w-4" strokeWidth={1.75} />
+      </button>
 
       <button
         type="button"

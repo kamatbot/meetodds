@@ -24,6 +24,9 @@ interface TranscriptContextType {
   clearTranscripts: () => void;
   currentMeetingId: string | null;
   markMeetingAsSaved: () => Promise<void>;
+  captionsVisible: boolean;
+  setCaptionsVisible: (value: boolean) => void;
+  previewSettled: boolean;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -33,6 +36,27 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [livePreview, setLivePreview] = useState<LiveTranscriptPreview | null>(null);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
+  const [captionsVisible, setCaptionsVisibleState] = useState(true);
+  const [previewSettled, setPreviewSettled] = useState(false);
+
+  const setCaptionsVisible = useCallback((value: boolean) => {
+    setCaptionsVisibleState(value);
+    try {
+      localStorage.setItem('meetodds.liveCaptions.visible', value ? 'true' : 'false');
+    } catch {
+      // Ignore storage failures (e.g. private mode)
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = localStorage.getItem('meetodds.liveCaptions.visible');
+      if (stored === 'false') setCaptionsVisibleState(false);
+    } catch {
+      // Ignore storage failures (e.g. private mode)
+    }
+  }, []);
 
   // Recording state context - provides backend-synced state
   const recordingState = useRecordingState();
@@ -59,6 +83,7 @@ useEffect(() => {
   let disposed = false;
 
   void listen<LiveTranscriptPreview>('live-transcript-preview', (event) => {
+    setPreviewSettled(false);
     setLivePreview(event.payload);
   }).then((dispose) => {
     if (disposed) dispose();
@@ -69,9 +94,12 @@ useEffect(() => {
     'live-transcript-preview-clear',
     (event) => {
       const source = event.payload?.source ?? null;
-      setLivePreview((prev) =>
-        prev && (source === null || prev.source === source) ? null : prev
-      );
+      setLivePreview((prev) => {
+        if (prev && (source === null || prev.source === source)) {
+          setPreviewSettled(true);
+        }
+        return prev;
+      });
     }
   ).then((dispose) => {
     if (disposed) dispose();
@@ -89,7 +117,10 @@ useEffect(() => {
 // without a clear event; hide rather than show outdated words.
 useEffect(() => {
   if (!livePreview) return;
-  const timer = setTimeout(() => setLivePreview(null), 8000);
+  const timer = setTimeout(() => {
+    setLivePreview(null);
+    setPreviewSettled(false);
+  }, 8000);
   return () => clearTimeout(timer);
 }, [livePreview]);
 
@@ -139,6 +170,7 @@ useEffect(() => {
         // Listen for recording-started event
         unlistenRecordingStarted = await recordingService.onRecordingStarted(async () => {
           setLivePreview(null);
+          setPreviewSettled(false);
           try {
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;
@@ -193,6 +225,7 @@ useEffect(() => {
         unlistenRecordingStopped = await recordingService.onRecordingStopped(async (payload) => {
           void closeManualNotesWindow().catch(() => {});
           setLivePreview(null);
+          setPreviewSettled(false);
           try {
             if (currentMeetingId) {
               // Update folder path in IndexedDB
@@ -520,6 +553,7 @@ useEffect(() => {
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
     setLivePreview(null);
+    setPreviewSettled(false);
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 
@@ -559,6 +593,9 @@ useEffect(() => {
     clearTranscripts,
     currentMeetingId,
     markMeetingAsSaved,
+    captionsVisible,
+    setCaptionsVisible,
+    previewSettled,
   };
 
   return (

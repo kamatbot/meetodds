@@ -1,20 +1,24 @@
 'use client';
 
-import { NotebookPen, Pause, Play, Square } from 'lucide-react';
+import { Captions, CaptionsOff, NotebookPen, Pause, Play, Square } from 'lucide-react';
 interface LiveMeetingBarProps {
   isPaused: boolean;
   isBusy: boolean;
+  captionsVisible: boolean;
   onPauseResume: () => void;
   onStop: () => void;
   onOpenNotes: () => void;
+  onToggleCaptions: () => void;
 }
 
 export default function LiveMeetingBar({
   isPaused,
   isBusy,
+  captionsVisible,
   onPauseResume,
   onStop,
   onOpenNotes,
+  onToggleCaptions,
 }: LiveMeetingBarProps) {
   const status = isPaused
     ? 'Recording paused'
@@ -29,6 +33,20 @@ export default function LiveMeetingBar({
       <span className="min-w-0 flex-1 truncate text-ui text-slate-100" aria-live="polite">
         {status}
       </span>
+      <button
+        type="button"
+        onClick={onToggleCaptions}
+        aria-pressed={captionsVisible}
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-white/20 bg-white/10 px-2.5 text-caption font-semibold text-white transition-colors hover:bg-white/20 disabled:opacity-40"
+        aria-label={captionsVisible ? 'Hide live captions' : 'Show live captions'}
+      >
+        {captionsVisible ? (
+          <Captions className="h-3.5 w-3.5" strokeWidth={1.75} />
+        ) : (
+          <CaptionsOff className="h-3.5 w-3.5" strokeWidth={1.75} />
+        )}
+        Captions
+      </button>
       <button
         type="button"
         onClick={onOpenNotes}

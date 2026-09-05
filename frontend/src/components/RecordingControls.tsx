@@ -11,6 +11,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import RecorderBar from '@/components/Meeting/RecorderBar';
 import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { useTranscripts } from '@/contexts/TranscriptContext';
+import { openManualNotesWindow } from '@/services/manualNotesService';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -51,6 +53,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   // remain synchronized.
   const recordingState = useRecordingState();
   const isPaused = recordingState.isPaused;
+  const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscripts();
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -285,10 +288,15 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             // pass it into the production recorder. Keep the meter neutral until the
             // capture pipeline exposes a genuine amplitude contract.
             audioLevel={null}
+            captionsVisible={captionsVisible}
             onPauseResume={handlePauseResume}
             onStop={() => {
               Analytics.trackButtonClick('stop_recording', 'recording_controls');
               void handleStopRecording();
+            }}
+            onToggleCaptions={() => setCaptionsVisible(!captionsVisible)}
+            onOpenNotes={() => {
+              if (currentMeetingId) void openManualNotesWindow(currentMeetingId).catch(() => {});
             }}
           />
         ) : (
