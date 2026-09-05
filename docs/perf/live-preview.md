@@ -14,10 +14,11 @@ segments, 24.0 s of speech).
 | Preview decode ms, median / p95 | — | 61.9 / 115.8 |
 | Preview window, median | — | 0.7 s |
 
-The preview lane adds about 5 percentage points of one core and does not move
-the canonical transcript's latency — it decoded 16 caption snapshots for free
-alongside the 14 real segments, at zero skips (the canonical decoder never
-caught the preview lane mid-decode in this run).
+This is a synthetic Parakeet baseline, not a live microphone result and not a
+Whisper measurement. It measured the earlier scheduler; the current scheduler
+serializes all local preview and canonical inference, so a canonical decode may
+wait for one preview already in progress but the two never contend for the
+model at the same time.
 
 ## How it stays cheap
 
@@ -25,14 +26,16 @@ caught the preview lane mid-decode in this run).
   (`LIVE_PREVIEW_INTERVAL`).
 - Each snapshot is capped to the last 6 s of the open utterance
   (`LIVE_PREVIEW_MAX_WINDOW_MS`), so a long monologue doesn't grow the decode.
-- Canonical sentence decode always runs first — the preview lane checks a busy
-  flag and skips its turn rather than contend for the model.
+- Preview and canonical decodes share a single fair local-inference permit.
+  Canonical work queues ahead of new preview work, and a preview releases the
+  permit immediately after its decode. This prevents the two local models from
+  competing for CPU or GPU.
 - The channel between VAD and preview decoder is a `tokio::sync::watch`: only
   the newest snapshot is ever pending, so a slow preview decode can't build a
   backlog.
-- After every preview decode the lane rests for 2x its own decode time, which
-  bounds it to at most ~33% of one core by construction, independent of
-  machine speed.
+- After every preview decode — including empty, stale, or failed results — the
+  lane rests for 2x its own decode time. The watch channel drops snapshots that
+  arrive during that rest, so it resumes with only the latest audio.
 - Nothing in this lane writes to transcripts, notes, or persistence — it only
   emits a display-only `live-transcript-preview` event.
 

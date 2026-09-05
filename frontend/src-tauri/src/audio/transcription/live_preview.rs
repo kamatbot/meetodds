@@ -1,5 +1,5 @@
 use super::engine::{get_or_init_transcription_engine, TranscriptionEngine};
-use super::worker::canonical_transcription_busy;
+use super::worker::{canonical_transcription_busy, try_acquire_preview_permit};
 use crate::audio::recording_state::{AudioChunk, DeviceType};
 use log::{debug, warn};
 use serde::Serialize;
@@ -59,10 +59,11 @@ pub fn start_live_preview_task<R: Runtime>(
                 continue;
             };
 
-            // Never start speculative work while the canonical sentence decoder is active.
-            if canonical_transcription_busy() {
+            // Preview work is admitted only when it can hold the local-inference
+            // permit immediately. Canonical work queues fairly ahead of new previews.
+            let Some(permit) = try_acquire_preview_permit() else {
                 continue;
-            }
+            };
 
             let revision = chunk.chunk_id;
             let source = match &chunk.device_type {
@@ -75,51 +76,50 @@ pub fn start_live_preview_task<R: Runtime>(
                 tokio::runtime::Handle::current().block_on(decode_preview(&engine, &chunk))
             });
             let decode_time = started.elapsed();
+            drop(permit);
+
             let text = match decoded {
-                Ok(text) => text.trim().to_string(),
+                Ok(text) if !canonical_transcription_busy() => text.trim().to_string(),
                 Err(error) => {
                     debug!("Speculative subtitle decode skipped: {}", error);
-                    continue;
+                    String::new()
                 }
+                Ok(_) => String::new(),
             };
-            if text.is_empty() || canonical_transcription_busy() {
-                continue;
+
+            if !text.is_empty() {
+                let duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+                let audio_end_time = chunk.timestamp + duration;
+                if should_emit_preview(&last_emitted, source, &text, chunk.timestamp) {
+                    last_emitted.insert(
+                        source.to_string(),
+                        LastEmittedPreview {
+                            text: text.clone(),
+                            audio_end_time,
+                        },
+                    );
+
+                    let (speaker, speaker_label) = match (&chunk.device_type, channel_separated) {
+                        (DeviceType::Microphone, true) => ("me", "Me"),
+                        (DeviceType::System, _) => ("remote-live", "Other"),
+                        (DeviceType::Microphone, false) => ("room-live", "Live"),
+                    };
+                    let update = LiveTranscriptPreviewUpdate {
+                        text,
+                        source: source.to_string(),
+                        speaker: speaker.to_string(),
+                        speaker_label: speaker_label.to_string(),
+                        revision,
+                        audio_start_time: chunk.timestamp,
+                        audio_end_time,
+                        latency_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                    };
+                    let _ = app.emit("live-transcript-preview", update);
+                }
             }
 
-            let duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
-            let audio_end_time = chunk.timestamp + duration;
-            if !should_emit_preview(&last_emitted, source, &text, chunk.timestamp) {
-                continue;
-            }
-            last_emitted.insert(
-                source.to_string(),
-                LastEmittedPreview {
-                    text: text.clone(),
-                    audio_end_time,
-                },
-            );
-
-            let (speaker, speaker_label) = match (&chunk.device_type, channel_separated) {
-                (DeviceType::Microphone, true) => ("me", "Me"),
-                (DeviceType::System, _) => ("remote-live", "Other"),
-                (DeviceType::Microphone, false) => ("room-live", "Live"),
-            };
-            let update = LiveTranscriptPreviewUpdate {
-                text,
-                source: source.to_string(),
-                speaker: speaker.to_string(),
-                speaker_label: speaker_label.to_string(),
-                revision,
-                audio_start_time: chunk.timestamp,
-                audio_end_time,
-                latency_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-            };
-            let _ = app.emit("live-transcript-preview", update);
-
-            // ponytail: duty-cycle cap. Resting for twice the decode time bounds
-            // this lane to about a third of one core no matter how slow the
-            // machine is; the watch channel drops any snapshots that arrive
-            // meanwhile, so we always resume on the newest audio.
+            // ponytail: duty-cycle cap. Rest after every decode, including empty,
+            // stale, or failed output. The watch channel drops snapshots meanwhile.
             tokio::time::sleep(decode_time * 2).await;
         }
     })
