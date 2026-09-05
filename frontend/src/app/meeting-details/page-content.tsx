@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import NotesEditor from '@/components/Meeting/NotesEditor';
+import ManualNotesCard from '@/components/Meeting/ManualNotesCard';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import type { MeetingDetailTab } from '@/components/Meeting/MeetingHeader';
 
@@ -238,7 +239,12 @@ export default function PageContent({
         )}
 
         {(activeTab === 'notes' || visitedTabs.has('notes')) && (
-          <div id="meeting-panel-notes" role="tabpanel" aria-labelledby="meeting-tab-notes" hidden={activeTab !== 'notes'} className={activeTab === 'notes' ? 'h-full' : 'hidden'}><NotesEditor meetingId={meeting.id} /></div>
+          <div id="meeting-panel-notes" role="tabpanel" aria-labelledby="meeting-tab-notes" hidden={activeTab !== 'notes'} className={activeTab === 'notes' ? 'flex h-full min-h-0 flex-col' : 'hidden'}>
+            <ManualNotesCard meetingId={meeting.id} />
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <NotesEditor meetingId={meeting.id} />
+            </div>
+          </div>
         )}
       </div>
     </div>
