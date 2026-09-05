@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS meeting_manual_notes (
+    meeting_id TEXT PRIMARY KEY,
+    content TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

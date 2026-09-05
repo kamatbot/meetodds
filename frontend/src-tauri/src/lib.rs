@@ -673,6 +673,8 @@ pub fn run() {
             api::api_restore_meeting,
             api::api_get_meeting_notes,
             api::api_save_meeting_notes,
+            api::api_get_manual_notes,
+            api::api_save_manual_notes,
             api::api_get_meeting_export_info,
             api::api_get_meeting_markdown,
             api::api_export_meeting,
