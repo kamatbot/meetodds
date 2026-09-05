@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
 
+#[path = "execution_gate.rs"]
+mod execution_gate;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SummaryResponse {
     pub status: String,
@@ -258,12 +261,9 @@ pub async fn api_get_summary<R: Runtime>(
                 None
             };
 
-            // Fetch meeting title from database
+            // Fetch meeting title without logging meeting content.
             let meeting_name = match MeetingsRepository::get_meeting(pool, &meeting_id).await {
-                Ok(Some(meeting_details)) => {
-                    log_info!("Fetched meeting title: {}", &meeting_details.title);
-                    Some(meeting_details.title)
-                }
+                Ok(Some(meeting_details)) => Some(meeting_details.title),
                 Ok(None) => {
                     log_warn!("Meeting not found for meeting_id: {}", meeting_id);
                     None
@@ -285,11 +285,10 @@ pub async fn api_get_summary<R: Runtime>(
             };
 
             log_info!(
-                "Summary status for {}: {}, has_data: {}, meeting_name: {:?}",
+                "Summary status for {}: {}, has_data: {}",
                 meeting_id,
                 status,
-                response.data.is_some(),
-                response.meeting_name
+                response.data.is_some()
             );
             Ok(response)
         }
@@ -340,6 +339,17 @@ pub async fn api_process_transcript<R: Runtime>(
     use uuid::Uuid;
 
     let m_id = meeting_id.unwrap_or_else(|| format!("meeting-{}", Uuid::new_v4()));
+    if text.trim().is_empty() || model_name.trim().is_empty() {
+        return Err("A saved transcript and selected model are required".to_string());
+    }
+    // Acquire before any database reset. React state is not a cross-view job lock.
+    // The owned lease moves into the native task and drops on all exit/unwind paths.
+    let lease = execution_gate::SummaryLease::acquire(&m_id)?;
+    if matches!(model.as_str(), "builtin-ai" | "local-llama")
+        && crate::audio::recording_commands::is_recording().await
+    {
+        return Err("Finish recording before starting a local summary to preserve capture responsiveness".to_string());
+    }
     log_info!(
         "api_process_transcript (native) called for meeting_id: {}, model: {}",
         &m_id,
@@ -363,7 +373,7 @@ pub async fn api_process_transcript<R: Runtime>(
 
     log_info!("✓ Summary process initialized for meeting_id: {}", &m_id);
 
-    // Save transcript chunks data (matching Python backend behavior)
+    // Persist only the processing snapshot, not the canonical transcript table.
     let chunk_size = _chunk_size.unwrap_or(40000);
     let overlap = _overlap.unwrap_or(1000);
 
@@ -396,6 +406,7 @@ pub async fn api_process_transcript<R: Runtime>(
             summary_language,
         )
         .await;
+        drop(lease);
     });
 
     log_info!("🚀 Background task spawned for meeting_id: {}", &m_id);

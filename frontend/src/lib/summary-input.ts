@@ -44,6 +44,8 @@ export function approveSummaryInput(input: SummaryReviewInput, includeNotes: boo
 
 export function summaryFailureMessage(error: unknown): string {
   const value = error instanceof Error ? error.message : String(error);
+  if (/summary is already running/i.test(value)) return 'A summary is already running for this meeting. Check its progress or cancel that job before retrying. No duplicate was started.';
+  if (/finish recording before/i.test(value)) return 'Finish recording before starting a local summary. The recording has priority.';
   if (/429|rate.?limit|usage.?limit|quota/i.test(value)) return 'This provider has reached a usage limit. Retry after its limit resets, or explicitly choose another provider. No paid fallback was used.';
   if (/401|403|unauthori[sz]ed|expired|authentication/i.test(value)) return 'Reconnect the selected account or check its API credentials in Settings. Your recording and previous summary are unchanged.';
   if (/model|not found|unsupported/i.test(value)) return 'The selected model is unavailable or not ready. Refresh the model list in Settings and choose an available model.';
