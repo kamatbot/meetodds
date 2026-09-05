@@ -1,0 +1,39 @@
+name: MeetOdds core checks
+on:
+  push:
+    branches: [feat/p0-capture-summaries, feat/ux-polish]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: meetodds-core-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated TypeScript test runtime
+        run: npm install --prefix "$RUNNER_TEMP/meetodds-test" --ignore-scripts --no-audit --no-fund typescript@5.7.2
+      - name: Focused frontend behavioral and source-contract tests
+        env:
+          NODE_PATH: ${{ runner.temp }}/meetodds-test/node_modules
+        shell: bash
+        run: |
+          cd frontend
+          files=()
+          for test in capture-start summary-input capture-persistence-contract summary-native-contract notes-autosave ux-polish recovery-completion; do
+            if [[ -f "tests/lib/$test.test.cjs" ]]; then files+=("tests/lib/$test.test.cjs"); fi
+          done
+          node --test "${files[@]}"
+      - name: Compile and execute real journal recovery tests
+        shell: bash
+        run: |
+          if [[ -f frontend/src-tauri/src/audio/pcm_journal.rs ]]; then
+            rustc --edition=2021 --test frontend/src-tauri/src/audio/pcm_journal.rs -o "$RUNNER_TEMP/pcm-journal-tests"
+            "$RUNNER_TEMP/pcm-journal-tests"
+          fi
