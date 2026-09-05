@@ -11,7 +11,7 @@ concurrency:
 jobs:
   regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,13 +36,25 @@ jobs:
             if [[ -f "tests/lib/$test.test.cjs" ]]; then files+=("tests/lib/$test.test.cjs"); fi
           done
           node --test "${files[@]}"
-      - name: Compile and execute real journal recovery tests
-        shell: bash
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .core-test-target
+          key: meetodds-core-v2-${{ runner.os }}-${{ hashFiles('tools/recovery/verify-core.py') }}
+      - name: Execute production journal, queue, SQLite and export helper tests
+        run: python3 tools/recovery/verify-core.py
+      - name: Install frontend dependency graph without application build scripts
+        run: cd frontend && npx --yes pnpm@9.15.9 install --frozen-lockfile --ignore-scripts
+      - name: Dependency-aware frontend typecheck against main
+        env:
+          NODE_PATH: ${{ runner.temp }}/meetodds-test/node_modules
         run: |
-          if [[ -f frontend/src-tauri/src/audio/pcm_journal.rs ]]; then
-            rustc --edition=2021 --test frontend/src-tauri/src/audio/pcm_journal.rs -o "$RUNNER_TEMP/pcm-journal-tests"
-            "$RUNNER_TEMP/pcm-journal-tests"
-          fi
+          git fetch --depth=1 origin main
+          git worktree add --detach "$RUNNER_TEMP/meetodds-main" origin/main
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/meetodds-main/frontend/node_modules"
+          node tools/recovery/check-types.cjs "$RUNNER_TEMP/meetodds-main/frontend" frontend
       - name: Commit validated integration to its existing feature branch
         shell: bash
         run: |
@@ -53,5 +65,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add frontend/src frontend/src-tauri/src frontend/tests tools/recovery
           git diff --cached --check
-          git commit -m 'fix: integrate recovered capture and summary safeguards'
+          git commit -m 'fix: integrate recovered meeting safeguards'
           git push origin "HEAD:refs/heads/$GITHUB_REF_NAME"
