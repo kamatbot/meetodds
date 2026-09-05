@@ -1,0 +1,57 @@
+name: MeetOdds core checks
+on:
+  push:
+    branches: [feat/p0-capture-summaries, feat/ux-polish]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: meetodds-core-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply reviewed source integration
+        run: |
+          case "$GITHUB_REF_NAME" in feat/p0-capture-summaries|feat/ux-polish) ;; *) exit 1 ;; esac
+          if [ -f tools/recovery/apply.py ]; then python3 tools/recovery/apply.py; fi
+      - name: Install isolated TypeScript test runtime
+        run: npm install --prefix "$RUNNER_TEMP/meetodds-test" --ignore-scripts --no-audit --no-fund typescript@5.7.2
+      - name: Focused frontend behavioral and source-contract tests
+        env:
+          NODE_PATH: ${{ runner.temp }}/meetodds-test/node_modules
+        shell: bash
+        run: |
+          cd frontend
+          files=()
+          for test in capture-start summary-input capture-persistence-contract summary-native-contract notes-autosave ux-polish recovery-completion; do
+            if [[ -f "tests/lib/$test.test.cjs" ]]; then files+=("tests/lib/$test.test.cjs"); fi
+          done
+          node --test "${files[@]}"
+      - name: Compile and execute real journal recovery tests
+        shell: bash
+        run: |
+          if [[ -f frontend/src-tauri/src/audio/pcm_journal.rs ]]; then
+            rustc --edition=2021 --test frontend/src-tauri/src/audio/pcm_journal.rs -o "$RUNNER_TEMP/pcm-journal-tests"
+            "$RUNNER_TEMP/pcm-journal-tests"
+          fi
+      - name: Commit validated integration to its existing feature branch
+        shell: bash
+        run: |
+          if [ ! -f tools/recovery/apply.py ]; then exit 0; fi
+          case "$GITHUB_REF_NAME" in feat/p0-capture-summaries|feat/ux-polish) ;; *) exit 1 ;; esac
+          rm tools/recovery/apply.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src frontend/src-tauri/src frontend/tests tools/recovery
+          git diff --cached --check
+          git commit -m 'fix: integrate recovered capture and summary safeguards'
+          git push origin "HEAD:refs/heads/$GITHUB_REF_NAME"
