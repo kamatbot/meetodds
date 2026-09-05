@@ -1,7 +1,7 @@
 # Live transcription baseline — main
 
 Reproducible baseline for the live transcription path (mic DSP → Silero VAD →
-serial ASR worker), measured with `frontend/src-tauri/src/bin/perf_baseline.rs`.
+serial ASR worker), measured with `frontend/src-tauri/tools/perf_baseline.rs`.
 
 Numbers here are the "before" side of the live-transcription optimisation work.
 Anyone comparing a branch should re-run the exact commands below on the same
@@ -152,15 +152,15 @@ the first decode). Model load itself is 620 ms, paid once.
 Build and run (Parakeet, the app default):
 
 ```
-cd frontend/src-tauri && cargo run --release --bin perf_baseline -- \
+cd frontend/src-tauri && cargo run --release --example perf_baseline -- \
   --engine parakeet --out ../../docs/perf/baseline-main-parakeet.json
 ```
 
 Full acceptance check as run for this baseline:
 
 ```
-cd frontend/src-tauri && cargo build --release --bin perf_baseline 2>&1 | tail -3 \
-  && cargo run --release --bin perf_baseline -- --engine parakeet \
+cd frontend/src-tauri && cargo build --release --example perf_baseline 2>&1 | tail -3 \
+  && cargo run --release --example perf_baseline -- --engine parakeet \
        --out ../../docs/perf/baseline-main-parakeet.json 2>&1 | tail -40 \
   && test -s ../../docs/perf/baseline-main-parakeet.json && echo ACCEPT_OK
 ```
@@ -168,7 +168,7 @@ cd frontend/src-tauri && cargo build --release --bin perf_baseline 2>&1 | tail -
 To compare another branch, write to a different file and diff the JSON:
 
 ```
-cd frontend/src-tauri && cargo run --release --bin perf_baseline -- \
+cd frontend/src-tauri && cargo run --release --example perf_baseline -- \
   --engine parakeet --out ../../docs/perf/branch-<name>-parakeet.json
 ```
 
@@ -181,7 +181,7 @@ and rebuilds `app_lib` (~2 min), because the build script's
 built binary directly from `frontend/src-tauri` to skip that:
 
 ```
-cd frontend/src-tauri && ../../target/release/perf_baseline \
+cd frontend/src-tauri && ../../target/release/examples/perf_baseline \
   --engine parakeet --out ../../docs/perf/branch-<name>-parakeet.json
 ```
 

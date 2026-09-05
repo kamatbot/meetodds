@@ -13,6 +13,12 @@ autobins = false
 name = "meetily"
 path = "src/main.rs"
 
+# Developer performance harness. An example target is never bundled by Tauri:
+#   cargo run --release --example perf_baseline -- --engine parakeet
+[[example]]
+name = "perf_baseline"
+path = "tools/perf_baseline.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]

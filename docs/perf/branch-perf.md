@@ -34,8 +34,8 @@ fix almost doubled the amount of speech actually decoded.
 ## Re-run
 
 ```
-cd frontend/src-tauri && cargo build --release --bin perf_baseline
-../../target/release/perf_baseline --engine parakeet --out ../../docs/perf/branch-perf-parakeet.json
+cd frontend/src-tauri && cargo build --release --example perf_baseline
+../../target/release/examples/perf_baseline --engine parakeet --out ../../docs/perf/branch-perf-parakeet.json
 ```
 
 `--dsp none|hpf|norm|full` isolates the microphone DSP in front of the VAD.
