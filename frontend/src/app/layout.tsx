@@ -2,6 +2,7 @@
 
 import './globals.css'
 import { Source_Sans_3 } from 'next/font/google'
+import { usePathname } from 'next/navigation'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import AppShell from '@/components/AppShell/AppShell'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
@@ -49,7 +50,7 @@ function ConditionalImportDialog({
   );
 }
 
-export default function RootLayout({
+function MainAppLayout({
   children,
 }: {
   children: React.ReactNode
@@ -227,4 +228,26 @@ export default function RootLayout({
       </body>
     </html>
   )
+}
+
+// The floating manual-notes popup runs in its own Tauri window with no need for
+// (and actively harmed by) the main app's provider tree — a second
+// TranscriptProvider would answer recording-started events with its own
+// meeting id and write duplicate IndexedDB records. Render it bare.
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const pathname = usePathname()
+
+  if (pathname === '/manual-notes') {
+    return (
+      <html lang="en" className={sourceSans3.variable}>
+        <body className="h-screen w-screen overflow-hidden bg-bg text-text">{children}</body>
+      </html>
+    )
+  }
+
+  return <MainAppLayout>{children}</MainAppLayout>
 }

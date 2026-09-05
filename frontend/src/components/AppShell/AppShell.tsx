@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import MainContent from '@/components/MainContent';
 import CommandPalette from '@/components/CommandPalette';
@@ -28,7 +28,6 @@ function restoreAppearance() {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
   const router = useRouter();
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -80,12 +79,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [router, toggleSidebar]);
-
-  // The floating manual-notes popup window renders its own minimal chrome; it must
-  // never show the sidebar/toolbar/command palette meant for the main window.
-  if (pathname === '/manual-notes') {
-    return <div className="h-screen w-screen overflow-hidden bg-bg text-text">{children}</div>;
-  }
 
   return (
     <div className="meetodds-shell flex h-screen w-screen overflow-hidden bg-bg text-text">
