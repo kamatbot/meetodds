@@ -71,6 +71,11 @@ struct Args {
     /// Batch micro-benchmark iterations.
     #[arg(long, default_value_t = 5)]
     batch_iters: usize,
+
+    /// Mic DSP applied before the VAD: full (high-pass + loudness, as the app
+    /// does), hpf, norm, or none.
+    #[arg(long, default_value = "full")]
+    dsp: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,8 +210,8 @@ fn find_fixture(explicit: Option<PathBuf>) -> Result<PathBuf> {
     }
     // Relative to frontend/src-tauri, then the primary checkout (fixture is untracked there).
     let candidates = [
-        "../../backend/whisper.cpp/samples/jfk.wav",
-        "/Volumes/SSD/MeetingRecorder/backend/whisper.cpp/samples/jfk.wav",
+        "../../frontend/src-tauri/tests/fixtures/jfk.wav",
+        "/Volumes/SSD/MeetingRecorder/frontend/src-tauri/tests/fixtures/jfk.wav",
     ];
     candidates
         .iter()
@@ -366,6 +371,7 @@ async fn live_phase(
     engine: Arc<Engine>,
     meeting_48k: Vec<f32>,
     redemption_ms: u32,
+    dsp: String,
 ) -> Result<Value> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Seg>();
     let audio_secs = meeting_48k.len() as f64 / CAPTURE_RATE as f64;
@@ -399,9 +405,13 @@ async fn live_phase(
         };
 
         for (i, chunk) in meeting_48k.chunks(CHUNK_SAMPLES).enumerate() {
-            let filtered = hpf.process(chunk);
-            let normalized = norm.normalize_loudness(&filtered);
-            emit(vad.process_audio(&normalized)?, &mut idx);
+            let processed = match dsp.as_str() {
+                "none" => chunk.to_vec(),
+                "hpf" => hpf.process(chunk),
+                "norm" => norm.normalize_loudness(chunk),
+                _ => norm.normalize_loudness(&hpf.process(chunk)),
+            };
+            emit(vad.process_audio(&processed)?, &mut idx);
             let deadline = t0 + chunk_dur * (i as u32 + 1);
             if let Some(d) = deadline.checked_duration_since(Instant::now()) {
                 std::thread::sleep(d);
@@ -559,7 +569,7 @@ async fn main() -> Result<()> {
 
     println!("[2/3] live simulation ({:.0}s of audio, real-time paced)...", meeting.len() as f64 / CAPTURE_RATE as f64);
     let engine = Arc::new(engine);
-    let live = live_phase(engine.clone(), meeting, args.redemption_ms).await?;
+    let live = live_phase(engine.clone(), meeting, args.redemption_ms, args.dsp.clone()).await?;
 
     println!("[3/3] batch decode x{}...\n", args.batch_iters);
     let batch = batch_phase(&engine, &clip_16k, args.batch_iters).await?;
@@ -572,6 +582,7 @@ async fn main() -> Result<()> {
             "model": model_name,
             "model_load_ms": model_load_ms,
             "redemption_ms": args.redemption_ms,
+            "dsp": args.dsp,
             "capture_rate_hz": CAPTURE_RATE,
             "chunk_samples": CHUNK_SAMPLES,
             "fixture": wav_path.display().to_string(),
