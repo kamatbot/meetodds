@@ -12,6 +12,7 @@ function Review({ input, finish }: { input: SummaryReviewInput; finish: (result:
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const target = input.target;
+  const requiresSendConfirmation = !target.local && target.provider !== 'openai-codex';
   const approve = () => {
     try { finish(approveSummaryInput(input, includeNotes, notes)); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'The selected input could not be prepared.'); }
@@ -49,14 +50,14 @@ function Review({ input, finish }: { input: SummaryReviewInput; finish: (result:
               {includeNotes && <textarea aria-label="Personal notes selected for summary" value={notes} onChange={(event) => { setNotes(event.target.value); setCopied(false); }} rows={5} className="mt-2 w-full resize-y rounded-control border border-border bg-bg p-3 text-ui leading-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" placeholder="Paste only the observations you want the AI to use…" />}
             </div>
             {input.prompt.trim() && <details className="text-ui"><summary className="cursor-pointer">Additional instructions</summary><pre className="mt-2 whitespace-pre-wrap break-words text-caption">{input.prompt}</pre></details>}
-            {!target.local && <label className="flex items-start gap-2 rounded-control border border-border p-3 text-ui"><input type="checkbox" className="mt-1" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>I approve sending the transcript, selected notes, and instructions to this provider for this summary.</span></label>}
+            {requiresSendConfirmation && <label className="flex items-start gap-2 rounded-control border border-border p-3 text-ui"><input type="checkbox" className="mt-1" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>I approve sending the transcript, selected notes, and instructions to this provider for this summary.</span></label>}
             {error && <p role="alert" className="text-ui text-danger">{error}</p>}
             {copied && <p role="status" className="text-caption text-2">Selected text copied. The clipboard may be shared with other apps or devices by your operating system.</p>}
           </div>
           <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
             <button type="button" onClick={() => void copy()} className={`${button} mr-auto`}>Copy for ChatGPT</button>
             <button id="summary-review-cancel" type="button" onClick={() => finish(null)} className={button}>Cancel</button>
-            <button type="button" disabled={!target.local && !confirmed} onClick={approve} className={`${button} bg-accent text-white disabled:cursor-not-allowed disabled:opacity-40`}>{target.local ? 'Generate locally' : 'Send selected text'}</button>
+            <button type="button" disabled={requiresSendConfirmation && !confirmed} onClick={approve} className={`${button} bg-accent text-white disabled:cursor-not-allowed disabled:opacity-40`}>{includeNotes ? (target.local ? 'Generate locally' : 'Send selected text') : 'Skip notes & generate'}</button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

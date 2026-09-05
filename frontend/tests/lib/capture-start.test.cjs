@@ -7,7 +7,7 @@ const ts = require('typescript');
 const file = path.resolve(__dirname, '../../src/lib/capture-start.ts');
 const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
 const loaded = new Module(file, module); loaded._compile(compiled.outputText, file);
-const { createCaptureStartGate, captureStartMessage } = loaded.exports;
+const { createCaptureStartGate, captureStartMessage, loadApprovedCapture, saveApprovedCapture } = loaded.exports;
 
 test('multiple simultaneous entry points start only one recorder', async () => {
   const gate = createCaptureStartGate(); let release; let count = 0;
@@ -32,6 +32,19 @@ test('permissions, downloads and storage have distinct actionable messages', () 
 });
 test('unknown failures do not leak raw operational content', () => {
   assert.doesNotMatch(captureStartMessage('unexpected secret=xyz'), /xyz/);
+});
+test('completed capture confirmation is reused until audio-device settings change', () => {
+  const savedWindow = global.window;
+  const data = new Map();
+  global.window = { localStorage: { getItem: key => data.get(key) || null, setItem: (key, value) => data.set(key, value) } };
+  try {
+    const choice = { microphone: 'MacBook Microphone', systemAudio: 'MacBook Speakers' };
+    saveApprovedCapture(null, null, choice);
+    assert.deepEqual(loadApprovedCapture(null, null), choice);
+    assert.equal(loadApprovedCapture('External Microphone', null), null);
+  } finally {
+    global.window = savedWindow;
+  }
 });
 test('all entry points use selected-model native validation and notifications are isolated', () => {
   const hook = fs.readFileSync(path.resolve(__dirname, '../../src/hooks/useRecordingStart.ts'), 'utf8');

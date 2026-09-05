@@ -6,7 +6,7 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
-import { captureStartMessage, createCaptureStartGate } from '@/lib/capture-start';
+import { captureStartMessage, createCaptureStartGate, loadApprovedCapture, saveApprovedCapture } from '@/lib/capture-start';
 import { toast } from 'sonner';
 
 interface UseRecordingStartReturn {
@@ -43,8 +43,14 @@ export function useRecordingStart(
         }
         const abort = new AbortController();
         activeStart.current = abort;
-        const { reviewCaptureStart } = await import('@/components/Meeting/CapturePreflightReview');
-        const capture = await reviewCaptureStart(selectedDevices?.micDevice || null, selectedDevices?.systemDevice || null, abort.signal);
+        const selectedMicrophone = selectedDevices?.micDevice || null;
+        const selectedSystemAudio = selectedDevices?.systemDevice || null;
+        let capture = loadApprovedCapture(selectedMicrophone, selectedSystemAudio);
+        if (!capture) {
+          const { reviewCaptureStart } = await import('@/components/Meeting/CapturePreflightReview');
+          capture = await reviewCaptureStart(selectedMicrophone, selectedSystemAudio, abort.signal);
+          if (capture) saveApprovedCapture(selectedMicrophone, selectedSystemAudio, capture);
+        }
         if (!capture || abort.signal.aborted) return;
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, '0');
