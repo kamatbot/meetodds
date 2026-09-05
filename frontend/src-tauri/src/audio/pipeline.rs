@@ -727,6 +727,11 @@ const LIVE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_mil
 const LIVE_PREVIEW_MIN_SPEECH_MS: u32 = 700;
 const LIVE_PREVIEW_MAX_WINDOW_MS: u32 = 2_800;
 
+/// Silero redemption window for live recording, in ms. This is pure
+/// end-of-utterance latency; 300 ms still bridges word gaps. Long utterances
+/// are capped inside the VAD processor instead of being held open here.
+pub const LIVE_VAD_REDEMPTION_MS: u32 = 300;
+
 /// VAD-driven audio processing pipeline
 /// Uses Voice Activity Detection to segment canonical speech while also exposing
 /// disposable rolling snapshots for the subtitle preview lane.
@@ -792,10 +797,7 @@ impl AudioPipeline {
             system_device_kind,
         );
 
-        // Redemption is pure end-of-utterance latency; 300 ms still bridges word
-        // gaps. Long utterances are capped inside the VAD processor instead of
-        // being held open with a long redemption window.
-        let redemption_time = 300;
+        let redemption_time = LIVE_VAD_REDEMPTION_MS;
 
         let create_vad_processor =
             |source: &str| match ContinuousVadProcessor::new(sample_rate, redemption_time) {

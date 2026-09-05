@@ -31,7 +31,7 @@ const VAD_RATE: u32 = 16_000;
 
 /// Mirrors `AudioPipeline::new` on macOS (400 elsewhere). Overridable so a
 /// comparison run on another branch can pin the same value.
-const DEFAULT_REDEMPTION_MS: u32 = if cfg!(target_os = "macos") { 1_200 } else { 400 };
+const DEFAULT_REDEMPTION_MS: u32 = app_lib::audio::pipeline::LIVE_VAD_REDEMPTION_MS;
 
 #[derive(Parser, Debug)]
 #[command(about = "Baseline CPU/latency harness for the live transcription path")]
