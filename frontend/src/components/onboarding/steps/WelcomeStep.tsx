@@ -49,7 +49,7 @@ export function WelcomeStep() {
       hideProgress
       hero={null}
     >
-      <div className="mx-auto flex min-h-full w-full max-w-[600px] flex-col justify-center gap-5">
+      <div className="mx-auto flex w-full max-w-[600px] flex-1 flex-col justify-center gap-5">
         <header className="relative mb-1 shrink-0">
           <div
             aria-hidden="true"
