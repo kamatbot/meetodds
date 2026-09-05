@@ -724,9 +724,13 @@ impl AudioCapture {
     }
 }
 
-const LIVE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(450);
-const LIVE_PREVIEW_MIN_SPEECH_MS: u32 = 700;
-const LIVE_PREVIEW_MAX_WINDOW_MS: u32 = 2_800;
+// Display-only caption lane. Snapshots of the open utterance are offered to the
+// preview decoder at most this often; it decodes the last MAX_WINDOW of speech
+// so the caption shows the sentence in progress, not just a 2-3 s tail.
+// ponytail: fixed cadence; the preview task itself duty-cycles on decode time.
+pub const LIVE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(800);
+pub const LIVE_PREVIEW_MIN_SPEECH_MS: u32 = 700;
+pub const LIVE_PREVIEW_MAX_WINDOW_MS: u32 = 6_000;
 
 /// Silero redemption window for live recording, in ms. This is pure
 /// end-of-utterance latency; 300 ms still bridges word gaps. Long utterances

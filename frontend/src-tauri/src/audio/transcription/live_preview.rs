@@ -70,7 +70,12 @@ pub fn start_live_preview_task<R: Runtime>(
                 DeviceType::System => "system",
             };
             let started = Instant::now();
-            let text = match decode_preview(&engine, &chunk).await {
+            // Inference blocks; keep it off the tokio worker threads.
+            let decoded = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(decode_preview(&engine, &chunk))
+            });
+            let decode_time = started.elapsed();
+            let text = match decoded {
                 Ok(text) => text.trim().to_string(),
                 Err(error) => {
                     debug!("Speculative subtitle decode skipped: {}", error);
@@ -110,6 +115,12 @@ pub fn start_live_preview_task<R: Runtime>(
                 latency_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
             };
             let _ = app.emit("live-transcript-preview", update);
+
+            // ponytail: duty-cycle cap. Resting for twice the decode time bounds
+            // this lane to about a third of one core no matter how slow the
+            // machine is; the watch channel drops any snapshots that arrive
+            // meanwhile, so we always resume on the newest audio.
+            tokio::time::sleep(decode_time * 2).await;
         }
     })
 }
