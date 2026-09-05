@@ -1,0 +1,96 @@
+import SwiftUI
+import MeetOddsCore
+
+struct HomeView: View {
+    @Bindable var model: MeetOddsModel
+    @State private var settings = false
+    @State private var templates = false
+    @State private var consent = false
+    @State private var search = ""
+    var body: some View {
+        NavigationStack(path: $model.path) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Be here.\nWe’ll take notes.").font(.system(size: 36, weight: .semibold, design: .rounded)).tracking(-1).accessibilityIdentifier("home-headline")
+                        Text("A little less typing. A lot more listening.").font(.body).foregroundStyle(.secondary)
+                    }.padding(.top, 18)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("YOUR SUMMARY MODEL").font(.caption.weight(.semibold)).tracking(1.2).foregroundStyle(.secondary)
+                        ModelPicker(mode: $model.mode)
+                        if model.mode == .chatGPT && model.pairing == nil {
+                            Button { settings = true } label: { Label("Pair your Mac for ChatGPT summaries", systemImage: "link") }.font(.subheadline)
+                        }
+                    }
+                    Button { templates = true } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc.text").font(.title3).foregroundStyle(.indigo)
+                            VStack(alignment: .leading, spacing: 3) { Text(templateLabel(model.templateID)).font(.headline); Text("Your meeting, your structure").font(.caption).foregroundStyle(.secondary) }
+                            Spacer(); Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        }.padding(18).background(.background, in: RoundedRectangle(cornerRadius: 20))
+                    }.buttonStyle(.plain).accessibilityIdentifier("choose-template")
+                    if let error = model.error { Notice(text: error) }
+                    if !model.headers.isEmpty {
+                        HStack { Text("Your meetings").font(.title2.bold()); Spacer(); Text("\(model.headers.count)").foregroundStyle(.secondary).monospacedDigit() }
+                        TextField("Find a meeting", text: $search).textFieldStyle(.roundedBorder).accessibilityLabel("Find a meeting")
+                        LazyVStack(spacing: 10) {
+                            ForEach(model.headers.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) }) { meeting in
+                                NavigationLink(value: meeting.id) {
+                                    HStack(spacing: 14) {
+                                        Image(systemName: meeting.status == .interrupted ? "arrow.clockwise.circle" : meeting.hasSummary ? "doc.text" : "waveform").font(.title2).foregroundStyle(.indigo).frame(width: 36)
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(meeting.title).font(.headline).lineLimit(2)
+                                            Text("\(meeting.createdAt.formatted(date: .abbreviated, time: .shortened)) · \(Meeting.timestamp(meeting.duration))").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                                    }.padding(18).background(.background, in: RoundedRectangle(cornerRadius: 20))
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    } else {
+                        Surface { VStack(alignment: .leading, spacing: 8) { Label("Just press record", systemImage: "waveform").font(.headline); Text("Your recordings, transcripts and summaries stay together here.").foregroundStyle(.secondary) } }
+                    }
+                }.padding(24).frame(maxWidth: 720)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("MeetOdds").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Settings", systemImage: "slider.horizontal.3") { settings = true }.accessibilityIdentifier("settings") } }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 10) {
+                    PrimaryButton(title: model.phase == .preparing ? "Preparing…" : "Start recording", disabled: model.isBusy) { consent = true }.accessibilityIdentifier("start-recording")
+                    Text("Microphone capture · Always transcribed on device").font(.caption).foregroundStyle(.secondary)
+                }.padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12).frame(maxWidth: 720).background(.regularMaterial)
+            }
+            .navigationDestination(for: UUID.self) { id in MeetingDetailView(model: model, id: id) }
+            .sheet(isPresented: $settings) { SettingsView(model: model) }
+            .sheet(isPresented: $templates) { TemplatePicker(model: model) }
+            .confirmationDialog("Ready to record?", isPresented: $consent, titleVisibility: .visible) {
+                Button("Everyone is informed · Start") { Task { await model.start() } }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Record only with participants’ permission. MeetOdds captures the microphone, not another app’s call audio. Audio is kept on this device for recovery.") }
+        }
+        .fullScreenCover(isPresented: $model.showRecording) { RecordingView(model: model) }
+    }
+}
+
+struct TemplatePicker: View {
+    @Bindable var model: MeetOddsModel
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List(model.templates) { template in
+                Button {
+                    model.templateID = template.id; dismiss()
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack { Text(templateLabel(template.id)).font(.headline); Spacer(); if model.templateID == template.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.indigo) } }
+                        Text(template.description).font(.subheadline).foregroundStyle(.secondary)
+                        Text(template.sections.map(\.title).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                    }.padding(.vertical, 8)
+                }.buttonStyle(.plain)
+            }
+            .navigationTitle("Choose a template").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+}
