@@ -38,7 +38,7 @@ export function WelcomeStep() {
   const features = [
     { icon: Lock, title: 'Recordings stay on your device' },
     { icon: Sparkles, title: 'Local or cloud AI summaries' },
-    { icon: Cpu, title: 'On-device transcription, works offline' },
+    { icon: Cpu, title: 'Offline, on-device transcription' },
   ];
 
   return (
@@ -47,11 +47,13 @@ export function WelcomeStep() {
       step={1}
       totalSteps={4}
       hideProgress
-      hero={
-        <header className="relative mb-6 shrink-0">
+      hero={null}
+    >
+      <div className="mx-auto flex min-h-full w-full max-w-[600px] flex-col justify-center gap-5">
+        <header className="relative mb-1 shrink-0">
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 -top-24 h-72 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(91,63,217,0.16),transparent_70%)]"
+            className="pointer-events-none absolute inset-x-0 -top-24 h-72 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(91,63,217,0.22),transparent_70%)]"
           />
           <div className="relative flex items-center justify-center gap-4">
             <Image
@@ -71,9 +73,7 @@ export function WelcomeStep() {
             Capture the conversation locally, then choose the intelligence layer that fits the meeting.
           </p>
         </header>
-      }
-    >
-      <div className="mx-auto flex min-h-full w-full max-w-[600px] flex-col justify-center gap-5">
+
         <div className="grid grid-cols-3 gap-2">
           {features.map((feature) => {
             const Icon = feature.icon;

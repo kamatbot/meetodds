@@ -82,9 +82,8 @@ export function OnboardingContainer({
           </div>
         )}
 
-        {hero ? (
-          hero
-        ) : (
+        {/* hero === undefined -> default header; hero === null -> no header; otherwise render the given hero node */}
+        {hero === undefined ? (
           <header className="mb-6 shrink-0 text-center">
             <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-accent" aria-hidden="true" />
             <h1 className="text-display text-text">{title}</h1>
@@ -94,6 +93,8 @@ export function OnboardingContainer({
               </p>
             )}
           </header>
+        ) : (
+          hero
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
