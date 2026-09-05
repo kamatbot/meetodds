@@ -36,7 +36,7 @@ export function TranscriptPanel({
   showModal
 }: TranscriptPanelProps) {
   // Contexts
-  const { transcripts, livePreview, transcriptContainerRef, copyTranscript } = useTranscripts();
+  const { transcripts, livePreview, transcriptContainerRef, copyTranscript, captionsVisible, setCaptionsVisible, previewSettled } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
@@ -153,7 +153,7 @@ export function TranscriptPanel({
         </div>
       </div>
 
-      {isRecording && (
+      {isRecording && captionsVisible && (
         <LiveTranscriptSubtitle
           preview={livePreview}
           translation={liveTranslation.previewTranslation}
@@ -161,6 +161,8 @@ export function TranscriptPanel({
           translationDisplayMode={liveTranslation.settings.displayMode}
           translationTargetLanguage={liveTranslation.settings.targetLanguage}
           isPaused={isPaused}
+          settled={previewSettled}
+          onDismiss={() => setCaptionsVisible(false)}
         />
       )}
     </div>

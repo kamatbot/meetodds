@@ -34,7 +34,7 @@ export default function Home() {
 
   const { transcriptModelConfig } = useConfig();
   const { openImportDialog } = useImportDialog();
-  const { currentMeetingId } = useTranscripts();
+  const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscripts();
   const recordingState = useRecordingState();
   const { status, isStopping, isProcessing } = recordingState;
   // A native `recording-started` event can arrive before its frontend listener is
@@ -242,12 +242,14 @@ export default function Home() {
         <LiveMeetingBar
           isPaused={recordingState.isPaused}
           isBusy={isHomeControlBusy || isStopping || isProcessingStop}
+          captionsVisible={captionsVisible}
           onPauseResume={() => void handleHomePauseResume()}
           onStop={() => void handleHomeStop()}
           onOpenNotes={() => {
             const id = currentMeetingId;
             if (id) void openManualNotesWindow(id).catch(() => {});
           }}
+          onToggleCaptions={() => setCaptionsVisible(!captionsVisible)}
         />
       )}
 

@@ -33,7 +33,7 @@ export default function TranscriptDrawer({
   isStopping,
   showModal,
 }: TranscriptDrawerProps) {
-  const { transcripts, livePreview, copyTranscript } = useTranscripts();
+  const { transcripts, livePreview, copyTranscript, captionsVisible, setCaptionsVisible, previewSettled } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const liveTranslation = useLiveTranslation(transcripts);
@@ -210,7 +210,7 @@ export default function TranscriptDrawer({
         )}
       </div>
 
-      {isRecording && (
+      {isRecording && captionsVisible && (
         <LiveTranscriptSubtitle
           preview={livePreview}
           translation={liveTranslation.previewTranslation}
@@ -218,6 +218,8 @@ export default function TranscriptDrawer({
           translationDisplayMode={liveTranslation.settings.displayMode}
           translationTargetLanguage={liveTranslation.settings.targetLanguage}
           isPaused={isPaused}
+          settled={previewSettled}
+          onDismiss={() => setCaptionsVisible(false)}
         />
       )}
 
