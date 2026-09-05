@@ -9,6 +9,7 @@ import { useLiveTranslation } from '@/hooks/useLiveTranslation';
 import { liveTranslationSegmentKey } from '@/lib/live-translation';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { LiveTranslationControl } from '@/components/LiveTranslationControl';
+import { LiveTranscriptSubtitle } from '@/components/LiveTranscriptSubtitle';
 import type { ModalType } from '@/hooks/useModalState';
 
 const DRAWER_VISIBLE_KEY = 'meetodds.meeting.transcriptDrawer.visible';
@@ -32,7 +33,7 @@ export default function TranscriptDrawer({
   isStopping,
   showModal,
 }: TranscriptDrawerProps) {
-  const { transcripts, copyTranscript } = useTranscripts();
+  const { transcripts, livePreview, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const liveTranslation = useLiveTranslation(transcripts);
@@ -208,6 +209,17 @@ export default function TranscriptDrawer({
           />
         )}
       </div>
+
+      {isRecording && (
+        <LiveTranscriptSubtitle
+          preview={livePreview}
+          translation={liveTranslation.previewTranslation}
+          translationEnabled={liveTranslation.settings.enabled}
+          translationDisplayMode={liveTranslation.settings.displayMode}
+          translationTargetLanguage={liveTranslation.settings.targetLanguage}
+          isPaused={isPaused}
+        />
+      )}
 
     </aside>
   );
