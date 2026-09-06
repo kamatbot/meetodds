@@ -5,7 +5,7 @@ import SwiftUI
     @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup {
-            HomeView(model: model)
+            RootView(model: model)
                 .tint(.indigo)
                 .task { await model.launch() }
                 .onOpenURL { url in
