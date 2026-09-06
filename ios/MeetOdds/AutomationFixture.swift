@@ -10,6 +10,8 @@ enum AutomationFixture {
         false
         #endif
     }
+    /// Presents the recording screen without capturing audio, so its layout can be checked on simulators that have no microphone.
+    static var showsRecording: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--show-recording") }
     static let storageRoot: URL? = {
         guard enabled else { return nil }
         return FileManager.default.temporaryDirectory.appendingPathComponent("MeetOdds-UI-\(UUID().uuidString)", isDirectory: true)

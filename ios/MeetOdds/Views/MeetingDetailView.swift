@@ -85,6 +85,7 @@ struct MeetingDetailView: View {
                 }.padding(24).frame(maxWidth: 720)
             } else { ProgressView("Opening meeting…").padding(40) }
         }
+        .frame(maxWidth: .infinity)
         .background(Color(.systemGroupedBackground)).navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(model.summaryProgress != nil)
         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Delete", systemImage: "trash", role: .destructive) { deletion = true }.disabled(model.isBusy) } }
