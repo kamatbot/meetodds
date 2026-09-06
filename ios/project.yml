@@ -40,6 +40,13 @@ targets:
       path: Config/Info.plist
       properties:
         CFBundleDisplayName: MeetOdds
+        # Answers the export-compliance prompt once, so Xcode stops asking on every
+        # upload. False because the app's only cryptography is exempt: TLS through
+        # URLSession and Keychain storage, both Apple OS encryption, plus a SHA-256
+        # certificate fingerprint used solely to authenticate the paired Mac.
+        # Hashing for authentication is not non-exempt encryption. Revisit if the app
+        # ever encrypts user content itself or ships its own cipher.
+        ITSAppUsesNonExemptEncryption: false
         # App Store upload validation (error 90713) reads this top-level key. actool
         # only emits the nested CFBundleIcons/CFBundlePrimaryIcon entries, so without
         # this line the archive is rejected even though the icons are present.
