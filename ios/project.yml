@@ -34,7 +34,14 @@ targets:
       path: Config/Info.plist
       properties:
         CFBundleDisplayName: MeetOdds
-        UILaunchScreen: {}
+        # App Store upload validation (error 90713) reads this top-level key. actool
+        # only emits the nested CFBundleIcons/CFBundlePrimaryIcon entries, so without
+        # this line the archive is rejected even though the icons are present.
+        CFBundleIconName: AppIcon
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchMark
+          UIImageRespectsSafeAreaInsets: false
         NSMicrophoneUsageDescription: Record meetings you choose, entirely on this iPhone.
         NSSpeechRecognitionUsageDescription: Create an on-device transcript of your recorded meetings.
         NSLocalNetworkUsageDescription: Connect to your explicitly paired Mac for ChatGPT subscription summaries.
@@ -49,6 +56,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.meetodds.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   MeetOddsLiveActivity:
     type: app-extension
     platform: iOS
