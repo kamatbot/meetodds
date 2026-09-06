@@ -12,6 +12,9 @@ enum AutomationFixture {
     }
     /// Presents the recording screen without capturing audio, so its layout can be checked on simulators that have no microphone.
     static var showsRecording: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--show-recording") }
+    /// Opens the fixture meeting as though recording had just finished. Reaching that state
+    /// for real requires a microphone, which the simulators on this host do not have.
+    static var showsJustRecorded: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--just-recorded") }
     static let storageRoot: URL? = {
         guard enabled else { return nil }
         return FileManager.default.temporaryDirectory.appendingPathComponent("MeetOdds-UI-\(UUID().uuidString)", isDirectory: true)
