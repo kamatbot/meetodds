@@ -35,10 +35,17 @@ final class AudioCapture: @unchecked Sendable {
         let free = try folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
         if let free, free < 100_000_000 { throw MeetingError.failed("Free at least 100 MB before recording. Nothing has started.") }
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        // `.measurement` bypasses the input processing chain, automatic gain included, so
+        // anyone more than a few inches from the mic recorded almost inaudibly. `.default`
+        // keeps the system's speech-tuned processing, which is what makes normal
+        // across-the-table meeting distance usable.
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try session.setPreferredSampleRate(48_000)
         try session.setPreferredIOBufferDuration(0.02)
         try session.setActive(true)
+        // Built-in mics report gain as fixed, but wired and some Bluetooth inputs allow it,
+        // and those are exactly the ones that otherwise capture too quietly.
+        if session.isInputGainSettable { try? session.setInputGain(1) }
         self.folder = folder
         let stream = AsyncStream<PCMFrame>(bufferingPolicy: .bufferingOldest(48)) { self.continuation = $0 }
         let input = engine.inputNode

@@ -11,9 +11,16 @@ final class MeetOddsUITests: XCTestCase {
     @MainActor func testModelAndTemplateSelection() {
         let app = app()
         XCTAssertTrue(app.buttons["start-recording"].exists)
+        // The summary model is a standing preference, so it lives in Settings instead of
+        // being asked in front of every recording. The template stays per-meeting.
+        app.buttons["settings"].tap()
+        XCTAssertTrue(app.buttons["model-chatgpt"].waitForExistence(timeout: 5))
         app.buttons["model-chatgpt"].tap()
-        XCTAssertTrue(app.buttons["Pair your Mac for ChatGPT summaries"].exists)
+        XCTAssertTrue(app.buttons["model-chatgpt"].isSelected)
         app.buttons["model-local"].tap()
+        XCTAssertTrue(app.buttons["model-local"].isSelected)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["choose-template"].waitForExistence(timeout: 5))
         app.buttons["choose-template"].tap()
         XCTAssertTrue(app.staticTexts["Choose a template"].waitForExistence(timeout: 5))
         app.buttons.containing(.staticText, identifier: "Daily standup").firstMatch.tap()

@@ -153,12 +153,16 @@ import MeetOddsCore
         }
         await currentSpeechTask?.value; watchdog.cancel(); speechTask = nil; speech = nil
         meeting?.duration = duration; meeting?.status = interrupted ? .interrupted : .ready
-        if needsRepair { meeting?.notices.append("Live transcription was incomplete. Rebuild the transcript from retained audio before relying on a summary.") }
+        if needsRepair { meeting?.notices.append("Live transcription was incomplete. Rebuilding the transcript from the retained audio.") }
         changed()
         do { try await flush() } catch { self.error = error.localizedDescription }
         phase = .idle; showRecording = false; preview = ""
         if let id = meeting?.id { path = [id] }
         await refresh()
+        // A transcript the user has to remember to request is a transcript they will not
+        // have. When the live pass fell behind, or produced nothing while audio was
+        // captured, rebuild from the retained segments now instead of leaving a chore.
+        if needsRepair || (meeting?.transcript.isEmpty == true && duration >= 1) { rebuildTranscript() }
     }
     func editNotes(_ notes: String) { meeting?.notes = notes; changed() }
     func editTitle(_ title: String) { meeting?.title = title; changed() }
