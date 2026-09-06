@@ -17,7 +17,7 @@ import MeetOddsCore
     var level: Float = 0
     var duration = 0.0
     var error: String?
-    var noteSaveState = "Saved on iPhone"
+    var noteSaveState = "Saved on \(Brand.device)"
     var summaryProgress: String?
     var pairing: CompanionPairing?
     var companionStatus: CompanionStatus?
@@ -72,7 +72,7 @@ import MeetOddsCore
             try await flush()
             meeting = try await library?.load(id)
             templateID = meeting?.templateID ?? "standard_meeting"; mode = meeting?.mode ?? .local
-            generation = 0; savedGeneration = 0; noteSaveState = "Saved on iPhone"
+            generation = 0; savedGeneration = 0; noteSaveState = "Saved on \(Brand.device)"
         } catch { self.error = error.localizedDescription }
     }
     func start() async {
@@ -183,12 +183,12 @@ import MeetOddsCore
                 guard meeting?.id == saved.id else { throw MeetingError.conflict }
                 meeting?.revision = saved.revision; savedGeneration = target
             }
-            noteSaveState = "Saved on iPhone"
+            noteSaveState = "Saved on \(Brand.device)"
         } catch { noteSaveState = "Save failed · retry"; throw error }
     }
     func rebuildTranscript() {
         guard !isBusy, let snapshot = meeting, let library else { return }
-        summaryProgress = "Rebuilding transcript on iPhone…"
+        summaryProgress = "Rebuilding transcript on \(Brand.device)…"
         summaryTask = Task { [weak self] in
             guard let self else { return }
             let transcriber = LocalTranscription()
@@ -223,7 +223,7 @@ import MeetOddsCore
                 if requestedMode == .local {
                     markdown = try await LocalSummary().generate(input: input, template: template) { message in await MainActor.run { self.summaryProgress = message } }
                 } else {
-                    guard let pairing = requestedPairing else { throw MeetingError.failed("Pair your Mac to use your ChatGPT subscription, or choose On iPhone.") }
+                    guard let pairing = requestedPairing else { throw MeetingError.failed("Pair your Mac to use your ChatGPT subscription, or choose On \(Brand.device).") }
                     self.summaryProgress = "Summarizing with ChatGPT…"
                     markdown = try await CompanionClient(pairing: pairing).summarize(input: input, templateID: template.id, model: requestedModel).markdown
                 }

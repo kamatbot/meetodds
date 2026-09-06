@@ -19,7 +19,7 @@ struct ModelPicker: View {
     @Binding var mode: IntelligenceMode
     var body: some View {
         HStack(spacing: 12) {
-            choice(.local, title: "On iPhone", subtitle: "Private · offline", icon: "iphone")
+            choice(.local, title: "On \(Brand.device)", subtitle: "Private · offline", icon: Brand.deviceSymbol)
             choice(.chatGPT, title: "ChatGPT", subtitle: "Via your paired Mac", icon: "sparkles")
         }.sensoryFeedback(.selection, trigger: mode)
     }

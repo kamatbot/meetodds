@@ -4,6 +4,9 @@ import SwiftUI
 /// Geometry and colours mirror `Scripts/make_brand_assets.py`, so the first animated
 /// frame of the splash is identical to the static launch image and the hand-off is invisible.
 enum Brand {
+    /// Copy names the device the user is holding; layout never branches on this.
+    @MainActor static var device: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone" }
+    @MainActor static var deviceSymbol: String { UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone" }
     static let background = Color("LaunchBackground")
     static let violet = Color(hex: 0x6B22D9)
     static let ink = Color(hex: 0x150F5C)

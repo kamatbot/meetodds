@@ -31,7 +31,7 @@ struct MeetingDetailView: View {
                     if tab == "Summary" {
                         if let summary {
                             HStack {
-                                Label(summary.mode == .local ? "On iPhone" : "ChatGPT", systemImage: "sparkles").font(.caption).foregroundStyle(.secondary)
+                                Label(summary.mode == .local ? "On \(Brand.device)" : "ChatGPT", systemImage: "sparkles").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
                                 Menu("Versions", systemImage: "clock.arrow.circlepath") {
                                     ForEach(meeting.summaries.reversed()) { item in Button(item.createdAt.formatted(date: .omitted, time: .shortened)) { version = item.id } }
@@ -120,10 +120,10 @@ struct SummaryReview: View {
                         Text("Selected transcript and notes will go to your paired Mac, then OpenAI using that Mac’s ChatGPT/Codex session. Audio is not sent.").font(.subheadline)
                         Text(model.pairing?.url.host ?? "No Mac paired. Open Settings to pair.").font(.caption).foregroundStyle(.secondary)
                         Toggle("I approve sending this text", isOn: $consent)
-                    } header: { Text("Before anything leaves your iPhone") } footer: { Text("Your account’s Codex allowance and data policies apply. No API-key fallback.") }
+                    } header: { Text("Before anything leaves your \(Brand.device)") } footer: { Text("Your account’s Codex allowance and data policies apply. No API-key fallback.") }
                 } else if let reason = model.localAvailability { Section { Notice(text: reason) } }
                 Section {
-                    Button(model.mode == .local ? "Generate on iPhone" : "Send selected text & summarize") {
+                    Button(model.mode == .local ? "Generate on \(Brand.device)" : "Send selected text & summarize") {
                         model.summarize(includeNotes: includeNotes); dismiss()
                     }
                     .disabled(model.isBusy || (model.mode == .chatGPT && (!consent || model.pairing == nil)) || (model.mode == .local && model.localAvailability != nil))
