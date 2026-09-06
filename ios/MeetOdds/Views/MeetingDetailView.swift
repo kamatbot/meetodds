@@ -72,6 +72,20 @@ struct MeetingDetailView: View {
                                 } catch { model.error = error.localizedDescription }
                             }
                         }
+                        // Silence needs saying out loud, otherwise an empty tab reads as a
+                        // loading state and the recording looks lost.
+                        if meeting.transcript.isEmpty {
+                            Surface {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Label(model.summaryProgress == nil ? "No speech in this recording" : "Building the transcript…", systemImage: model.summaryProgress == nil ? "waveform.slash" : "waveform")
+                                        .font(.headline)
+                                    Text(model.summaryProgress == nil
+                                         ? "The audio is saved. Rebuild the transcript above, or play it back to check what was captured."
+                                         : "Reading the saved audio on this \(Brand.device). This can take a moment.")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                         LazyVStack(alignment: .leading, spacing: 20) {
                             ForEach(meeting.transcript) { turn in
                                 VStack(alignment: .leading, spacing: 6) {
@@ -91,8 +105,50 @@ struct MeetingDetailView: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Delete", systemImage: "trash", role: .destructive) { deletion = true }.disabled(model.isBusy) } }
         .confirmationDialog("Delete this meeting and its recordings?", isPresented: $deletion, titleVisibility: .visible) { Button("Delete permanently", role: .destructive) { Task { await model.remove(id) } } } message: { Text("Audio, transcripts, personal notes and summaries will be deleted from this device.") }
         .sheet(isPresented: $review) { SummaryReview(model: model) }
-        .task(id: id) { await model.open(id) }
-        .onDisappear { player?.pause(); player = nil; playing = false; Task { try? await model.flush() } }
+        .safeAreaInset(edge: .bottom) { if model.justRecorded == id { justRecordedActions } }
+        .task(id: id) {
+            // Landing on Summary straight after recording shows an empty promise. Open on
+            // the transcript instead, where the words either are or are not.
+            if model.justRecorded == id { tab = "Transcript" }
+            await model.open(id)
+        }
+        .onDisappear {
+            if model.justRecorded == id { model.justRecorded = nil }
+            player?.pause(); player = nil; playing = false; Task { try? await model.flush() }
+        }
+    }
+
+    /// Shown once, on the meeting that recording just produced: read the transcript, then
+    /// pick what happens to it. Falls back to a stack when the two labels cannot share a row.
+    private var justRecordedActions: some View {
+        let notes = Button {
+            tab = "Notes"; model.justRecorded = nil
+        } label: {
+            Label("Add notes", systemImage: "square.and.pencil").frame(maxWidth: .infinity).padding(.vertical, 14)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("finished-add-notes")
+
+        let summarize = Button {
+            model.justRecorded = nil; review = true
+        } label: {
+            Label("Generate summary", systemImage: "sparkles").frame(maxWidth: .infinity).padding(.vertical, 14)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(model.isBusy || model.meeting?.transcript.isEmpty != false)
+        .accessibilityIdentifier("finished-generate-summary")
+
+        // lineLimit lets ViewThatFits judge honestly: without it a wrapped label counts as
+        // fitting, and the row keeps two cramped two-line buttons instead of stacking.
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { notes; summarize }.lineLimit(1)
+            VStack(spacing: 10) { summarize; notes }
+        }
+        .font(.headline)
+        .buttonBorderShape(.roundedRectangle(radius: 18))
+        .padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 10)
+        .frame(maxWidth: 720)
+        .background(.regularMaterial)
     }
 }
 

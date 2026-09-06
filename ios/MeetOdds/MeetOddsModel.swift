@@ -24,6 +24,9 @@ import MeetOddsCore
     var selectedRemoteModel: String?
     var path: [UUID] = []
     var showRecording = false
+    /// The meeting that recording just produced. It opens on its transcript, because the
+    /// first thing anyone needs after stopping is proof that the words were captured.
+    var justRecorded: UUID?
     var speechNotice: String?
     var localAvailability: String? { LocalSummary.availabilityMessage }
     var selectedTemplate: MeetingTemplate? { templates.first { $0.id == templateID } }
@@ -157,7 +160,7 @@ import MeetOddsCore
         changed()
         do { try await flush() } catch { self.error = error.localizedDescription }
         phase = .idle; showRecording = false; preview = ""
-        if let id = meeting?.id { path = [id] }
+        if let id = meeting?.id { justRecorded = id; path = [id] }
         await refresh()
         // A transcript the user has to remember to request is a transcript they will not
         // have. When the live pass fell behind, or produced nothing while audio was
