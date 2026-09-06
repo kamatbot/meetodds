@@ -23,27 +23,49 @@ actor LocalSummary {
             for (index, part) in parts.enumerated() {
                 try Task.checkCancellation()
                 await progress("Reading part \(index + 1) of \(parts.count)\(round > 0 ? " · combining" : "")")
-                compressed.append(try await respond("Extract decisions, explicit commitments, objections and unresolved questions from this evidence excerpt. Keep turn IDs. Under 90 words.\n\n\(part)"))
+                compressed.append(try await respond("Extract decisions, explicit commitments, objections and unresolved questions from this evidence excerpt. Keep turn IDs. Under 90 words.\n\n\(part)", maximumResponseTokens: Self.responseTokensPerSection))
             }
             let reduced = compressed.joined(separator: "\n")
             guard reduced.utf8.count < evidence.utf8.count else { throw MeetingError.failed("The local model could not condense this meeting safely. Try ChatGPT or a shorter meeting; nothing was truncated.") }
             evidence = reduced
         }
         guard evidence.utf8.count <= 2400 else { throw MeetingError.tooLarge }
-        var sections: [String] = []
-        for section in template.sections {
-            try Task.checkCancellation()
-            await progress(section.title)
-            let text = try await respond("Write only the \(section.title) section, under 150 words. \(section.instruction)\n\nEvidence:\n\(evidence)")
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw MeetingError.failed("The local model returned an empty section. Your previous summary is unchanged.") }
-            sections.append("## \(section.title)\n\n\(text)")
+        // One request per section meant fourteen on-device generations for the longer
+        // templates, so a two-line meeting took minutes. Sections are written in batches,
+        // and every response is capped: an uncapped answer to a thin transcript rambles
+        // until it overruns the window shared by instructions, evidence and output.
+        var written: [String] = []
+        let groups = stride(from: 0, to: template.sections.count, by: Self.sectionsPerRequest).map {
+            Array(template.sections[$0..<min($0 + Self.sectionsPerRequest, template.sections.count)])
         }
-        return sections.joined(separator: "\n\n")
+        for (index, group) in groups.enumerated() {
+            try Task.checkCancellation()
+            await progress(groups.count == 1 ? "Writing the summary" : "Writing section \(index * Self.sectionsPerRequest + 1) of \(template.sections.count)")
+            let wanted = group.map { "## \($0.title)\n\($0.instruction)" }.joined(separator: "\n\n")
+            let text = try await respond(
+                "Write each of these sections as Markdown. Keep every heading exactly as written and keep each section under 90 words.\n\n\(wanted)\n\nEvidence:\n\(evidence)",
+                maximumResponseTokens: Self.responseTokensPerSection * group.count)
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw MeetingError.failed("The local model returned an empty section. Your previous summary is unchanged.") }
+            written.append(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return written.joined(separator: "\n\n")
     }
-    private func respond(_ text: String) async throws -> String {
+    private static let sectionsPerRequest = 4
+    private static let responseTokensPerSection = 170
+    private func respond(_ text: String, maximumResponseTokens: Int) async throws -> String {
         try Task.checkCancellation()
         let session = LanguageModelSession(instructions: SummaryInput.rules)
-        // No artificial response-token cutoff: a context failure is visible, not silent truncation.
-        return try await session.respond(to: text, options: GenerationOptions(temperature: 0.2)).content
+        do {
+            return try await session.respond(
+                to: text,
+                options: GenerationOptions(temperature: 0.2, maximumResponseTokens: maximumResponseTokens)
+            ).content
+        } catch let error as LanguageModelSession.GenerationError {
+            // Name the two things the user can change instead of reporting a token count.
+            if case .exceededContextWindowSize = error {
+                throw MeetingError.failed("This meeting is too long for the on-device model with this template. Choose a template with fewer sections, or summarize with ChatGPT.")
+            }
+            throw error
+        }
     }
 }
