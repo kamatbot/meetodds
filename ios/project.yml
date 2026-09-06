@@ -34,6 +34,10 @@ targets:
       path: Config/Info.plist
       properties:
         CFBundleDisplayName: MeetOdds
+        # App Store upload validation (error 90713) reads this top-level key. actool
+        # only emits the nested CFBundleIcons/CFBundlePrimaryIcon entries, so without
+        # this line the archive is rejected even though the icons are present.
+        CFBundleIconName: AppIcon
         UILaunchScreen:
           UIColorName: LaunchBackground
           UIImageName: LaunchMark
