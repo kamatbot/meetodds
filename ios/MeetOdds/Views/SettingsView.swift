@@ -8,11 +8,20 @@ struct SettingsView: View {
     @State private var pairingText = ""
     @State private var pairing = false
     @State private var preparingSpeech = false
+    @State private var speechStatus: String?
     @State private var message: String?
     @State private var locales: [Locale] = []
+    private var languageName: String {
+        Locale.current.localizedString(forIdentifier: model.localeID) ?? model.localeID
+    }
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    ModelPicker(mode: $model.mode)
+                } header: { Text("Summary model") } footer: {
+                    Text("Applies to new recordings, so you are not asked before every meeting. Transcription is always on device either way.")
+                }
                 Section("On \(Brand.device)") {
                     Label("SpeechAnalyzer transcription", systemImage: "waveform")
                     Label("Apple Intelligence summaries", systemImage: Brand.deviceSymbol)
@@ -23,14 +32,33 @@ struct SettingsView: View {
                             ForEach(locales, id: \.identifier) { locale in Text(Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier).tag(locale.identifier) }
                         }
                     }
-                    Button(preparingSpeech ? "Preparing offline transcription…" : "Prepare transcription for offline use") {
+                    // Feedback stays in this section. Reporting the outcome further down the
+                    // form left the button looking like it did nothing at all.
+                    Button {
                         preparingSpeech = true
+                        speechStatus = "Checking the \(languageName) speech model…"
                         Task {
-                            do { _ = try await LocalTranscription.prepare(localeID: model.localeID); message = "The transcription model is ready for this language." }
-                            catch { message = error.localizedDescription }
+                            do {
+                                _ = try await LocalTranscription.prepare(localeID: model.localeID)
+                                speechStatus = "\(languageName) is ready. Transcription works with no network."
+                            } catch {
+                                speechStatus = error.localizedDescription
+                            }
                             preparingSpeech = false
                         }
-                    }.disabled(preparingSpeech)
+                    } label: {
+                        HStack {
+                            Text(preparingSpeech ? "Preparing…" : "Prepare transcription for offline use")
+                            Spacer()
+                            if preparingSpeech { ProgressView() }
+                        }
+                    }
+                    .disabled(preparingSpeech)
+                    .accessibilityIdentifier("prepare-offline")
+                    if let speechStatus {
+                        Text(speechStatus).font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("prepare-offline-status")
+                    }
                     Text("Speech models may download on first use. Preparing them here avoids setup during an important meeting. Meeting audio is never sent for transcription.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
