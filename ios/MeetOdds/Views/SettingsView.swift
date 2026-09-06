@@ -65,6 +65,7 @@ struct SettingsView: View {
                     Text("Microphone only. iOS does not give this app access to another app’s call audio. Use it for in-person conversations or permitted speakerphone capture.")
                     Text("Recordings stay in protected, backup-excluded local storage. Deleting a meeting removes its audio, transcript, notes and summaries. Uninstalling the app deletes its local library.")
                     Text("Live Activities show recording state and duration only. They do not keep a terminated app recording; stale activity asks you to reopen the app.")
+                    Button("Show the welcome again") { UserDefaults.standard.set(false, forKey: "onboardingCompleted"); dismiss() }
                 }.font(.subheadline)
             }
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
