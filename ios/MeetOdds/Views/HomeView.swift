@@ -4,6 +4,9 @@ import MeetOddsCore
 struct HomeView: View {
     @Bindable var model: MeetOddsModel
     @Environment(\.horizontalSizeClass) private var sizeClass
+    /// Consent is about the people in the room, not about this tap. Asking once and
+    /// remembering it keeps the promise visible without gating every single meeting.
+    @AppStorage("recordingConsentAcknowledged") private var consentAcknowledged = false
     @State private var settings = false
     @State private var templates = false
     @State private var consent = false
@@ -26,7 +29,7 @@ struct HomeView: View {
                 ForEach(filtered) { meeting in meetingRow(meeting, chevron: false).padding(.vertical, 6).tag(meeting.id) }
             }
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find a meeting")
-            .navigationTitle("MeetOdds")
+            .navigationTitle("Your meetings")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { settingsButton } }
             .safeAreaInset(edge: .bottom) { recordFooter }
             .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 460)
@@ -38,39 +41,55 @@ struct HomeView: View {
         .modifier(Presentations(model: model, settings: $settings, templates: $templates))
     }
 
+    /// Shown only when no meeting is selected, so it stays a quiet welcome rather than
+    /// a second control panel competing with the sidebar.
     private var hub: some View {
-        let content = VStack(alignment: .leading, spacing: 26) {
-            headline
-            modelSection
-            templateButton
-            if let error = model.error { Notice(text: error) }
-        }.padding(40).frame(maxWidth: 640).frame(maxWidth: .infinity, maxHeight: .infinity)
-        return ViewThatFits(in: .vertical) { content; ScrollView { content } }
-            .background(Color(.systemGroupedBackground))
+        VStack(spacing: 14) {
+            BrandMark()
+            Text("Be here. We’ll take notes.")
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+                .accessibilityIdentifier("home-headline")
+            Text(model.headers.isEmpty ? "Press record when your meeting starts." : "Pick a meeting, or record a new one.")
+                .font(.body).foregroundStyle(.secondary)
+            if let error = model.error { Notice(text: error).padding(.top, 8) }
+        }
+        .multilineTextAlignment(.center)
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
     }
 
-    // MARK: Compact width (iPhone, Split View, Slide Over): one scrolling column.
+    // MARK: Compact width (iPhone, Split View, Slide Over): the library, then the button.
 
     private var stack: some View {
         NavigationStack(path: $model.path) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    headline
-                    modelSection
-                    templateButton
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Your meetings")
+                            .font(.system(size: 30, weight: .semibold, design: .rounded)).tracking(-0.5)
+                            .accessibilityIdentifier("home-headline")
+                        Spacer()
+                        if !model.headers.isEmpty {
+                            Text("\(model.headers.count)").font(.headline).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }.padding(.top, 8)
                     if let error = model.error { Notice(text: error) }
-                    if !model.headers.isEmpty {
-                        HStack { Text("Your meetings").font(.title2.bold()); Spacer(); Text("\(model.headers.count)").foregroundStyle(.secondary).monospacedDigit() }
-                        TextField("Find a meeting", text: $search).textFieldStyle(.roundedBorder).accessibilityLabel("Find a meeting")
+                    if model.headers.isEmpty {
+                        emptyCard.padding(.top, 4)
+                    } else {
+                        if model.headers.count > 4 {
+                            TextField("Find a meeting", text: $search).textFieldStyle(.roundedBorder).accessibilityLabel("Find a meeting")
+                        }
                         LazyVStack(spacing: 10) {
                             ForEach(filtered) { meeting in
                                 NavigationLink(value: meeting.id) {
-                                    meetingRow(meeting).padding(18).background(.background, in: RoundedRectangle(cornerRadius: 20))
+                                    meetingRow(meeting).padding(16).background(.background, in: RoundedRectangle(cornerRadius: 20))
                                 }.buttonStyle(.plain)
                             }
                         }
-                    } else { emptyCard }
-                }.padding(24).frame(maxWidth: 720)
+                    }
+                }.padding(.horizontal, 20).padding(.bottom, 8).frame(maxWidth: 720)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("MeetOdds").navigationBarTitleDisplayMode(.inline)
@@ -91,30 +110,6 @@ struct HomeView: View {
         if sizeClass == .regular, let id = model.meeting?.id { model.path = [id] }
     }
 
-    private var headline: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Be here.\nWe’ll take notes.").font(.system(size: 36, weight: .semibold, design: .rounded)).tracking(-1).accessibilityIdentifier("home-headline")
-            Text("A little less typing. A lot more listening.").font(.body).foregroundStyle(.secondary)
-        }.padding(.top, 18)
-    }
-    private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("YOUR SUMMARY MODEL").font(.caption.weight(.semibold)).tracking(1.2).foregroundStyle(.secondary)
-            ModelPicker(mode: $model.mode)
-            if model.mode == .chatGPT && model.pairing == nil {
-                Button { settings = true } label: { Label("Pair your Mac for ChatGPT summaries", systemImage: "link") }.font(.subheadline)
-            }
-        }
-    }
-    private var templateButton: some View {
-        Button { templates = true } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "doc.text").font(.title3).foregroundStyle(.indigo)
-                VStack(alignment: .leading, spacing: 3) { Text(templateLabel(model.templateID)).font(.headline); Text("Your meeting, your structure").font(.caption).foregroundStyle(.secondary) }
-                Spacer(); Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            }.padding(18).background(.background, in: RoundedRectangle(cornerRadius: 20))
-        }.buttonStyle(.plain).accessibilityIdentifier("choose-template")
-    }
     private func meetingRow(_ meeting: MeetingHeader, chevron: Bool = true) -> some View {
         HStack(spacing: 14) {
             Image(systemName: meeting.status == .interrupted ? "arrow.clockwise.circle" : meeting.hasSummary ? "doc.text" : "waveform").font(.title2).foregroundStyle(.indigo).frame(width: 36)
@@ -131,15 +126,30 @@ struct HomeView: View {
     private var settingsButton: some View {
         Button("Settings", systemImage: "slider.horizontal.3") { settings = true }.accessibilityIdentifier("settings")
     }
+
+    /// One big action, with the only per-meeting choice under it. The summary model is a
+    /// preference, so it lives in Settings rather than in front of every recording.
     private var recordFooter: some View {
-        VStack(spacing: 10) {
-            PrimaryButton(title: model.phase == .preparing ? "Preparing…" : "Start recording", disabled: model.isBusy) { consent = true }.accessibilityIdentifier("start-recording")
-                .confirmationDialog("Ready to record?", isPresented: $consent, titleVisibility: .visible) {
-                    Button("Everyone is informed · Start") { Task { await start() } }
-                    Button("Cancel", role: .cancel) {}
-                } message: { Text("Record only with participants’ permission. MeetOdds captures the microphone, not another app’s call audio. Audio is kept on this device for recovery.") }
-            Text("Microphone capture · Always transcribed on device").font(.caption).foregroundStyle(.secondary)
-        }.padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12).frame(maxWidth: 720).background(.regularMaterial)
+        VStack(spacing: 8) {
+            PrimaryButton(title: model.phase == .preparing ? "Preparing…" : "Start recording", disabled: model.isBusy) {
+                if consentAcknowledged { Task { await start() } } else { consent = true }
+            }
+            .accessibilityIdentifier("start-recording")
+            .confirmationDialog("Ready to record?", isPresented: $consent, titleVisibility: .visible) {
+                Button("Everyone is informed · Start") { consentAcknowledged = true; Task { await start() } }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Record only with participants’ permission. MeetOdds captures the microphone, not another app’s call audio. Audio is kept on this device for recovery. You will not be asked again.") }
+            Button { templates = true } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.text").font(.caption)
+                    Text(templateLabel(model.templateID)).font(.caption.weight(.medium))
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                }.foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("choose-template")
+            .accessibilityLabel("Meeting template: \(templateLabel(model.templateID))")
+        }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 10).frame(maxWidth: 720).background(.regularMaterial)
     }
 }
 
