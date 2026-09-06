@@ -48,7 +48,10 @@ targets:
         NSSupportsLiveActivities: true
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        'UISupportedInterfaceOrientations~ipad': [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # iPad multitasking requires all four orientations, upside-down included, or
+        # upload validation rejects the build with error 90474. UIRequiresFullScreen
+        # is not an escape hatch: it is deprecated and iPadOS 26 expects multitasking.
+        'UISupportedInterfaceOrientations~ipad': [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         CFBundleURLTypes:
           - CFBundleURLSchemes: [meetodds]
         NSAppTransportSecurity:
