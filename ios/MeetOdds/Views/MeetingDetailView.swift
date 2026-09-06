@@ -24,7 +24,6 @@ struct MeetingDetailView: View {
                     if meeting.status == .interrupted || !meeting.notices.isEmpty || meeting.transcript.isEmpty {
                         Button("Rebuild transcript from audio", systemImage: "arrow.clockwise") { model.rebuildTranscript() }.disabled(model.isBusy)
                     }
-                    Picker("Meeting content", selection: $tab) { Text("Summary").tag("Summary"); Text("Notes").tag("Notes"); Text("Transcript").tag("Transcript") }.pickerStyle(.segmented)
                     if let progress = model.summaryProgress {
                         Surface { HStack { ProgressView(); Text(progress).font(.subheadline); Spacer(); Button("Cancel") { model.cancelSummary() } } }
                     }
@@ -105,44 +104,50 @@ struct MeetingDetailView: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Delete", systemImage: "trash", role: .destructive) { deletion = true }.disabled(model.isBusy) } }
         .confirmationDialog("Delete this meeting and its recordings?", isPresented: $deletion, titleVisibility: .visible) { Button("Delete permanently", role: .destructive) { Task { await model.remove(id) } } } message: { Text("Audio, transcripts, personal notes and summaries will be deleted from this device.") }
         .sheet(isPresented: $review) { SummaryReview(model: model) }
-        .safeAreaInset(edge: .bottom) { if model.justRecorded == id { justRecordedActions } }
+        .safeAreaInset(edge: .bottom) { actions }
         .task(id: id) {
             // Landing on Summary straight after recording shows an empty promise. Open on
             // the transcript instead, where the words either are or are not.
             if model.justRecorded == id { tab = "Transcript" }
             await model.open(id)
         }
-        .onDisappear {
-            if model.justRecorded == id { model.justRecorded = nil }
-            player?.pause(); player = nil; playing = false; Task { try? await model.flush() }
-        }
+        // Deliberately not cleared here: navigation can build and discard a transient
+        // instance, and clearing on its disappearance stole the flag from the real one.
+        .onDisappear { player?.pause(); player = nil; playing = false; Task { try? await model.flush() } }
     }
 
-    /// Shown once, on the meeting that recording just produced: read the transcript, then
-    /// pick what happens to it. Falls back to a stack when the two labels cannot share a row.
-    private var justRecordedActions: some View {
-        let notes = Button {
-            tab = "Notes"; model.justRecorded = nil
+    /// Two equal buttons carry all the navigation now that the segmented header is gone.
+    /// Each one names where it goes, so the current view never has to be labelled.
+    private var actions: some View {
+        let hasSummary = model.meeting?.summaries.isEmpty == false
+        let leftIsNotes = tab != "Notes"
+        let left = Button {
+            model.justRecorded = nil; tab = leftIsNotes ? "Notes" : "Transcript"
         } label: {
-            Label("Add notes", systemImage: "square.and.pencil").frame(maxWidth: .infinity).padding(.vertical, 14)
+            Label(leftIsNotes ? "Add notes" : "Transcript", systemImage: leftIsNotes ? "square.and.pencil" : "text.alignleft")
+                .frame(maxWidth: .infinity).padding(.vertical, 14)
         }
         .buttonStyle(.bordered)
-        .accessibilityIdentifier("finished-add-notes")
+        .accessibilityIdentifier("detail-left")
 
-        let summarize = Button {
-            model.justRecorded = nil; review = true
+        let rightIsTranscript = tab == "Summary"
+        let right = Button {
+            model.justRecorded = nil
+            if rightIsTranscript { tab = "Transcript" } else if hasSummary { tab = "Summary" } else { review = true }
         } label: {
-            Label("Generate summary", systemImage: "sparkles").frame(maxWidth: .infinity).padding(.vertical, 14)
+            Label(rightIsTranscript ? "Transcript" : hasSummary ? "View summary" : "Generate summary",
+                  systemImage: rightIsTranscript ? "text.alignleft" : "sparkles")
+                .frame(maxWidth: .infinity).padding(.vertical, 14)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(model.isBusy || model.meeting?.transcript.isEmpty != false)
-        .accessibilityIdentifier("finished-generate-summary")
+        .disabled(!rightIsTranscript && !hasSummary && (model.isBusy || model.meeting?.transcript.isEmpty != false))
+        .accessibilityIdentifier("detail-right")
 
         // lineLimit lets ViewThatFits judge honestly: without it a wrapped label counts as
-        // fitting, and the row keeps two cramped two-line buttons instead of stacking.
+        // fitting, and the row keeps two mismatched two-line buttons instead of stacking.
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { notes; summarize }.lineLimit(1)
-            VStack(spacing: 10) { summarize; notes }
+            HStack(spacing: 12) { left; right }.lineLimit(1)
+            VStack(spacing: 10) { right; left }
         }
         .font(.headline)
         .buttonBorderShape(.roundedRectangle(radius: 18))
