@@ -127,10 +127,29 @@ struct HomeView: View {
         Button("Settings", systemImage: "slider.horizontal.3") { settings = true }.accessibilityIdentifier("settings")
     }
 
-    /// One big action, with the only per-meeting choice under it. The summary model is a
-    /// preference, so it lives in Settings rather than in front of every recording.
+    /// The template sits above the button, in reading order: choose the shape of the
+    /// meeting, then start it. The summary model is a standing preference and lives in
+    /// Settings rather than in front of every recording.
     private var recordFooter: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
+            Button { templates = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "doc.text").font(.body).foregroundStyle(.indigo)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(templateLabel(model.templateID)).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                        Text("Meeting template").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(.background, in: RoundedRectangle(cornerRadius: 16))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("choose-template")
+            .accessibilityLabel("Meeting template: \(templateLabel(model.templateID))")
+            .accessibilityHint("Choose how the next meeting is structured")
+
             PrimaryButton(title: model.phase == .preparing ? "Preparing…" : "Start recording", disabled: model.isBusy) {
                 if consentAcknowledged { Task { await start() } } else { consent = true }
             }
@@ -139,16 +158,6 @@ struct HomeView: View {
                 Button("Everyone is informed · Start") { consentAcknowledged = true; Task { await start() } }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Record only with participants’ permission. MeetOdds captures the microphone, not another app’s call audio. Audio is kept on this device for recovery. You will not be asked again.") }
-            Button { templates = true } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "doc.text").font(.caption)
-                    Text(templateLabel(model.templateID)).font(.caption.weight(.medium))
-                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
-                }.foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("choose-template")
-            .accessibilityLabel("Meeting template: \(templateLabel(model.templateID))")
         }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 10).frame(maxWidth: 720).background(.regularMaterial)
     }
 }
@@ -161,7 +170,7 @@ private struct Presentations: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(isPresented: $settings) { SettingsView(model: model) }
-            .sheet(isPresented: $templates) { TemplatePicker(model: model) }
+            .fullScreenCover(isPresented: $templates) { TemplatePicker(model: model) }
     }
 }
 
@@ -174,15 +183,21 @@ struct TemplatePicker: View {
                 Button {
                     model.templateID = template.id; dismiss()
                 } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack { Text(templateLabel(template.id)).font(.headline); Spacer(); if model.templateID == template.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.indigo) } }
-                        Text(template.description).font(.subheadline).foregroundStyle(.secondary)
-                        Text(template.sections.map(\.title).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
-                    }.padding(.vertical, 8)
+                    // One name and one short line. The full prose description and the
+                    // eight-item section list turned this into a wall of text.
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(templateLabel(template.id)).font(.headline)
+                            Text("\(template.sections.count) sections · \(template.sections.prefix(3).map(\.title).joined(separator: ", "))")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        if model.templateID == template.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.indigo) }
+                    }.padding(.vertical, 6)
                 }.buttonStyle(.plain)
             }
             .navigationTitle("Choose a template").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+        }
     }
 }
