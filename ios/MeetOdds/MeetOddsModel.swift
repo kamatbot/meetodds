@@ -80,7 +80,7 @@ import MeetOddsCore
     }
     func start() async {
         guard phase == .idle, summaryProgress == nil, let library, selectedTemplate != nil else { return }
-        phase = .preparing; error = nil; speechNotice = nil; preview = ""; duration = 0; needsRepair = false; lastCheckpoint = 0
+        phase = .preparing; error = nil; speechNotice = nil; preview = ""; duration = 0; needsRepair = false; lastCheckpoint = 0; justRecorded = nil
         do {
             try await flush()
             let granted = await AVAudioApplication.requestRecordPermission()

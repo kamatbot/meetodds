@@ -33,15 +33,16 @@ final class MeetOddsUITests: XCTestCase {
         let meeting = app.buttons.containing(.staticText, identifier: "Product weekly").firstMatch
         XCTAssertTrue(meeting.waitForExistence(timeout: 5)); meeting.tap()
         XCTAssertTrue(app.textViews["meeting-title"].waitForExistence(timeout: 5) || app.textFields["meeting-title"].exists)
-        app.segmentedControls.buttons["Notes"].tap()
+        // The segmented header is gone; the two bottom buttons carry navigation now.
+        app.buttons["detail-left"].tap()
         let notes = app.textViews["personal-notes"]
         XCTAssertTrue(notes.waitForExistence(timeout: 5))
         XCTAssertTrue((notes.value as? String)?.contains("Private:") == true)
         notes.tap(); notes.typeText(" Follow up tomorrow.")
         app.swipeDown()
-        app.segmentedControls.buttons["Transcript"].tap()
+        app.buttons["detail-left"].tap()
         XCTAssertTrue(app.staticTexts["Let's test the revised onboarding with ten customers before deciding."].waitForExistence(timeout: 5))
-        app.segmentedControls.buttons["Summary"].tap()
+        app.buttons["detail-right"].tap()
         XCTAssertTrue(app.buttons["Share summary"].waitForExistence(timeout: 5))
         capture("Summary", app)
     }
