@@ -13,9 +13,9 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("On iPhone") {
+                Section("On \(Brand.device)") {
                     Label("SpeechAnalyzer transcription", systemImage: "waveform")
-                    Label("Apple Intelligence summaries", systemImage: "iphone")
+                    Label("Apple Intelligence summaries", systemImage: Brand.deviceSymbol)
                     Text(model.localAvailability ?? "The local summary model is ready.").font(.caption).foregroundStyle(.secondary)
                     if !locales.isEmpty {
                         Picker("Spoken language", selection: $model.localeID) {
@@ -36,7 +36,7 @@ struct SettingsView: View {
                 Section {
                     if let configured = model.pairing {
                         Label(configured.url.host ?? "Paired Mac", systemImage: "checkmark.shield")
-                        Text("The Mac must be awake and reachable. Your ChatGPT credentials remain on that Mac; this iPhone stores only its pairing key.").font(.caption).foregroundStyle(.secondary)
+                        Text("The Mac must be awake and reachable. Your ChatGPT credentials remain on that Mac; this \(Brand.device) stores only its pairing key.").font(.caption).foregroundStyle(.secondary)
                         Button("Check connection") { Task { do { try await model.refreshCompanion(); message = "Connected" } catch { message = error.localizedDescription } } }
                         if let status = model.companionStatus {
                             if let plan = status.plan { Text("ChatGPT plan: \(plan)").font(.caption) }

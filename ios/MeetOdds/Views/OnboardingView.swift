@@ -43,6 +43,8 @@ struct OnboardingView: View {
     @State private var microphone: Microphone = .undetermined
     @State private var asking = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @ScaledMetric(relativeTo: .largeTitle) private var heroTitle: CGFloat = 54
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     @AccessibilityFocusState private var focus: Step?
@@ -82,6 +84,12 @@ struct OnboardingView: View {
         .onChange(of: scenePhase) { _, phase in if phase == .active { microphone = Self.currentMicrophone } }
     }
 
+    /// Wide canvases (iPad, Stage Manager) get a broader column, larger type and actions right under the copy
+    /// instead of pinned to a far-away bottom edge.
+    private var regular: Bool { sizeClass == .regular }
+    private var column: CGFloat { regular ? 660 : 560 }
+    private var titleFont: Font { regular ? .system(size: heroTitle, weight: .bold, design: .rounded) : .system(.largeTitle, design: .rounded, weight: .bold) }
+    private var bodyFont: Font { regular ? .title2 : .title3 }
     private static var currentMicrophone: Microphone {
         switch AVAudioApplication.shared.recordPermission { case .granted: .granted; case .denied: .denied; default: .undetermined }
     }
@@ -120,40 +128,42 @@ struct OnboardingView: View {
                 Spacer(minLength: 0)
                 BrandMark(listening: step == .splash)
                     .accessibilityAddTraits(.isImage)
-                    .padding(.bottom, step == .welcome ? 36 : 0)
+                    .scaleEffect(regular && step == .welcome ? 1.5 : 1)
+                    .padding(.bottom, step == .welcome ? (regular ? 72 : 36) : 0)
                 if step == .welcome {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("MeetOdds").font(.system(.title3, design: .rounded, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
                             .transition(rise(0))
-                        Text("Every meeting,\nremembered.").font(.system(.largeTitle, design: .rounded, weight: .bold)).tracking(-0.5)
+                        Text("Every meeting,\nremembered.").font(titleFont).tracking(-0.5)
                             .accessibilityAddTraits(.isHeader).accessibilityFocused($focus, equals: .welcome)
                             .transition(rise(1))
-                        Text("Record, read it back, get the gist.\nNothing leaves your iPhone.").font(.title3).foregroundStyle(.white.opacity(0.78))
+                        Text("Record, read it back, get the gist.\nNothing leaves your \(Brand.device).").font(bodyFont).foregroundStyle(.white.opacity(0.78))
                             .transition(rise(2))
+                        if regular { welcomeButton.padding(.top, 34).transition(rise(3)) }
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 28).frame(maxWidth: 560).frame(maxWidth: .infinity)
+            .padding(.horizontal, 28).frame(maxWidth: column).frame(maxWidth: .infinity)
         }
         // The launch image is centred on the full screen; centre the mark there too until the reveal.
         .offset(y: step == .splash ? (proxy.safeAreaInsets.bottom - proxy.safeAreaInsets.top) / 2 : 0)
         .safeAreaInset(edge: .bottom) {
-            if step == .welcome {
-                bottomBar { Button("Let’s set up") { go(.microphone) }.buttonStyle(HeroButtonStyle()).accessibilityIdentifier("onboarding-continue") }
-                    .transition(rise(3))
-            }
+            if step == .welcome, !regular { bottomBar { welcomeButton }.transition(rise(3)) }
         }
+    }
+    private var welcomeButton: some View {
+        Button("Let’s set up") { go(.microphone) }.buttonStyle(HeroButtonStyle()).accessibilityIdentifier("onboarding-continue")
     }
 
     private var microphonePage: some View {
         let symbol = switch microphone { case .undetermined: "mic.fill"; case .granted: "checkmark"; case .denied: "mic.slash.fill" }
         let title = switch microphone { case .undetermined: "First, your microphone."; case .granted: "Microphone is on."; case .denied: "Microphone is off." }
         let text = switch microphone {
-        case .undetermined: "MeetOdds listens only while you’re recording, and only to this phone’s mic — never another app’s call. Audio stays here, on your iPhone."
-        case .granted: "You can record whenever you’re ready. Audio never leaves this iPhone."
+        case .undetermined: "MeetOdds listens only while you’re recording, and only to this \(Brand.device)’s mic — never another app’s call. Audio stays here, on your \(Brand.device)."
+        case .granted: "You can record whenever you’re ready. Audio never leaves this \(Brand.device)."
         case .denied: "That’s okay. Earlier meetings, transcripts and summaries still work. To record, turn the microphone on in Settings."
         }
         let tint = switch microphone { case .undetermined: Color.white; case .granted: Brand.barColors[1]; case .denied: Brand.barColors[6] }
@@ -188,7 +198,7 @@ struct OnboardingView: View {
     private var readyPage: some View {
         page(symbol: "waveform", tint: .white, title: "All set.", text: "Press record when the meeting starts. We’ll write it up while you listen.", step: .ready) {
             VStack(alignment: .leading, spacing: 18) {
-                row("mic.fill", "Recorded here", "Only this phone’s microphone.", 3)
+                row("mic.fill", "Recorded here", "Only this \(Brand.device)’s microphone.", 3)
                 row("text.quote", "Transcribed on device", "Nothing is uploaded.", 4)
                 row("sparkles", "Summarized your way", "On device, or via your paired Mac.", 5)
             }.padding(.top, 30)
@@ -213,35 +223,36 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 24)
                 ZStack {
-                    Circle().fill(.white.opacity(0.12)).frame(width: 96, height: 96)
+                    Circle().fill(.white.opacity(0.12)).frame(width: regular ? 124 : 96, height: regular ? 124 : 96)
                         .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
-                    Image(systemName: symbol).font(.system(size: 40, weight: .medium)).foregroundStyle(tint)
+                    Image(systemName: symbol).font(.system(size: regular ? 52 : 40, weight: .medium)).foregroundStyle(tint)
                         .contentTransition(.symbolEffect(.replace.downUp))
                         .symbolEffect(.breathe, options: .repeat(.continuous), isActive: symbol == "mic.fill" && !reduceMotion)
                 }
                 .accessibilityHidden(true)
                 .padding(.bottom, 30).transition(rise(0))
-                Text(title).font(.system(.largeTitle, design: .rounded, weight: .bold)).tracking(-0.5)
+                Text(title).font(titleFont).tracking(-0.5)
                     .accessibilityAddTraits(.isHeader).accessibilityFocused($focus, equals: step)
                     .contentTransition(.opacity)
                     .padding(.bottom, 14).transition(rise(1))
-                Text(text).font(.title3).foregroundStyle(.white.opacity(0.78))
+                Text(text).font(bodyFont).foregroundStyle(.white.opacity(0.78))
                     .contentTransition(.opacity)
                     .transition(rise(2))
                 extra()
+                if regular { VStack(spacing: 8) { buttons() }.padding(.top, 40).transition(rise(3)) }
                 Spacer(minLength: 24)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 28).frame(maxWidth: 560, alignment: .leading).frame(maxWidth: .infinity)
+            .padding(.horizontal, 28).frame(maxWidth: column, alignment: .leading).frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.smooth(duration: 0.45), value: title)
-        .safeAreaInset(edge: .bottom) { bottomBar(buttons).transition(rise(3)) }
+        .safeAreaInset(edge: .bottom) { if !regular { bottomBar(buttons).transition(rise(3)) } }
     }
     /// Pinned actions with a fade behind them, so text scrolling underneath at large type sizes stays legible.
     private func bottomBar<B: View>(@ViewBuilder _ content: () -> B) -> some View {
         VStack(spacing: 8) { content() }
-            .padding(.horizontal, 28).padding(.top, 24).padding(.bottom, 8).frame(maxWidth: 560).frame(maxWidth: .infinity)
+            .padding(.horizontal, 28).padding(.top, 24).padding(.bottom, 8).frame(maxWidth: column).frame(maxWidth: .infinity)
             .background(LinearGradient(colors: [Brand.ink.opacity(0), Brand.ink.opacity(0.9)], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
     }
 }

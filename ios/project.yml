@@ -48,7 +48,7 @@ targets:
           UIColorName: LaunchBackground
           UIImageName: LaunchMark
           UIImageRespectsSafeAreaInsets: false
-        NSMicrophoneUsageDescription: Record meetings you choose, entirely on this iPhone.
+        NSMicrophoneUsageDescription: Record meetings you choose, entirely on this device.
         NSSpeechRecognitionUsageDescription: Create an on-device transcript of your recorded meetings.
         NSLocalNetworkUsageDescription: Connect to your explicitly paired Mac for ChatGPT subscription summaries.
         NSSupportsLiveActivities: true
