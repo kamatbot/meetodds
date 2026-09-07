@@ -50,6 +50,10 @@ function MeetingContent() {
   const meetingId = searchParams.get('id');
   const source = searchParams.get('source');
   const requestedTab = searchParams.get('tab');
+  const evidenceSegmentId = searchParams.get('evidence');
+  const rawEvidenceTime = searchParams.get('at');
+  const parsedEvidenceTime = rawEvidenceTime === null ? null : Number(rawEvidenceTime);
+  const evidenceTime = parsedEvidenceTime !== null && Number.isFinite(parsedEvidenceTime) ? parsedEvidenceTime : null;
   const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
   const { isAutoSummary } = useConfig();
   const router = useRouter();
@@ -75,7 +79,11 @@ function MeetingContent() {
     loadMore,
     refetch,
     error: transcriptError,
-  } = usePaginatedTranscripts({ meetingId: meetingId || '' });
+  } = usePaginatedTranscripts({
+    meetingId: meetingId || '',
+    initialTimestamp: evidenceTime ?? undefined,
+    initialTranscriptId: evidenceSegmentId,
+  });
 
   useEffect(() => {
     if (isMeetingTab(requestedTab)) setActiveTab(requestedTab);
@@ -340,10 +348,11 @@ function MeetingContent() {
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={loadMore}
+          focusSegmentId={evidenceSegmentId}
         />
       </div>
       {activeTab === 'transcript' && (
-        <AudioPlayer key={meetingDetails.id} meetingId={meetingDetails.id} />
+        <AudioPlayer key={meetingDetails.id} meetingId={meetingDetails.id} initialSeek={evidenceTime} />
       )}
     </div>
   );

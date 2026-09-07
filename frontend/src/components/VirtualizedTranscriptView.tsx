@@ -45,6 +45,8 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+    /** Segment selected from a summary/memory evidence link. */
+    focusSegmentId?: string | null;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -92,6 +94,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     translationTargetLanguage,
     isStreaming,
     showConfidence,
+    isFocused,
 }: {
     id: string;
     timestamp: number;
@@ -109,6 +112,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     translationTargetLanguage?: string;
     isStreaming: boolean;
     showConfidence: boolean;
+    isFocused: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
     const showOriginal = !translationEnabled || translationDisplayMode === 'bilingual' || !translatedText;
@@ -125,7 +129,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     return (
         <div
             id={`segment-${id}`}
-            className="mb-3"
+            className={`mb-3 rounded-control px-2 py-1 transition-colors ${isFocused ? 'bg-accent-soft ring-1 ring-accent/40' : ''}`}
             aria-label={`${speaker ? `${speaker.label}: ` : ''}${displayText}${translatedText ? `. Translation: ${translatedText}` : ''}`}
         >
             <div className="flex items-start gap-2">
@@ -224,6 +228,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
+    focusSegmentId = null,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -245,6 +250,23 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
             });
         },
     });
+
+    useEffect(() => {
+        if (!focusSegmentId) return;
+        const index = segments.findIndex((segment) => segment.id === focusSegmentId);
+        if (index < 0) return;
+
+        if (segments.length >= VIRTUALIZATION_THRESHOLD) {
+            virtualizer.scrollToIndex(index, { align: 'center' });
+        } else {
+            requestAnimationFrame(() => {
+                document.getElementById(`segment-${focusSegmentId}`)?.scrollIntoView({
+                    block: 'center',
+                    behavior: 'smooth',
+                });
+            });
+        }
+    }, [focusSegmentId, segments, virtualizer]);
 
     // Custom hook for auto-scrolling (supports both virtualized and non-virtualized)
     useAutoScroll({
@@ -406,6 +428,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         translationTargetLanguage={translationTargetLanguage}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        isFocused={segment.id === focusSegmentId}
                                     />
                                 </div>
                             );
@@ -472,6 +495,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         translationTargetLanguage={translationTargetLanguage}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        isFocused={segment.id === focusSegmentId}
                                     />
                                 </motion.div>
                             );

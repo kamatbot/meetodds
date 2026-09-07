@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import { Command } from 'cmdk';
 import {
   Bot,
+  Brain,
   Download,
   Home,
   Library,
+  ListChecks,
   LoaderCircle,
   Mic,
   PanelLeft,
@@ -238,6 +240,22 @@ export default function CommandPalette({ onToggleSidebar }: CommandPaletteProps)
                     <Library className="h-4 w-4 text-2" strokeWidth={1.75} />
                     Meetings
                     <span className="ml-auto text-caption text-3">⌘2</span>
+                  </Command.Item>
+                  <Command.Item
+                    value="actions commitments action inbox"
+                    onSelect={() => run(() => router.push('/actions'))}
+                    className={itemClass}
+                  >
+                    <ListChecks className="h-4 w-4 text-2" strokeWidth={1.75} />
+                    Action inbox
+                  </Command.Item>
+                  <Command.Item
+                    value="meeting memory ask recall search"
+                    onSelect={() => run(() => router.push('/memory'))}
+                    className={itemClass}
+                  >
+                    <Brain className="h-4 w-4 text-2" strokeWidth={1.75} />
+                    Meeting memory
                   </Command.Item>
                   <Command.Item
                     value="toggle sidebar show hide"

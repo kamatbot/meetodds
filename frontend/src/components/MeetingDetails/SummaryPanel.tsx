@@ -18,6 +18,7 @@ import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
 import type { MeetingExportFormat } from '@/lib/meeting-export';
 import ExportSheet from '@/components/Meeting/ExportSheet';
+import MeetingOutcomeWorkspace from '@/components/Meeting/MeetingOutcomeWorkspace';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
@@ -339,7 +340,10 @@ export function SummaryPanel({
       {summaryError && <div role="alert" className="mx-4 my-3 rounded-control border border-border bg-surface p-3 text-ui text-danger">{summaryError}</div>}
       {isSummaryLoading && aiSummary && <div role="status" className="flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3 text-ui text-2"><span>{getSummaryStatusMessage(summaryStatus)} Your previous summary remains available.</span><button type="button" onClick={onStopGeneration} className="rounded-control border border-border px-3 py-1.5">Cancel</button></div>}
       {isSummaryLoading && !aiSummary ? (
-        <div className="flex flex-col h-full">
+        <div className="flex h-full flex-col overflow-y-auto">
+          <div className="px-6 pt-6">
+            <MeetingOutcomeWorkspace meetingId={meeting.id} />
+          </div>
           {/* Show button group during generation */}
           <div className="flex items-center justify-center pt-8 pb-4">
             <SummaryGeneratorButtonGroup
@@ -367,7 +371,10 @@ export function SummaryPanel({
           </div>
         </div>
       ) : !aiSummary ? (
-        <div className="flex flex-col h-full">
+        <div className="flex h-full flex-col overflow-y-auto">
+          <div className="px-6 pt-6">
+            <MeetingOutcomeWorkspace meetingId={meeting.id} />
+          </div>
           {/* Centered Summary Generator Button Group when no summary */}
           <div className="flex items-center justify-center gap-2 pt-8 pb-4">
             <SummaryGeneratorButtonGroup
@@ -397,6 +404,13 @@ export function SummaryPanel({
         </div>
       ) : transcripts?.length > 0 && (
         <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="p-6 pb-4">
+            <MeetingOutcomeWorkspace meetingId={meeting.id} />
+          </div>
+          <div className="border-t border-border px-6 pt-5">
+            <h3 className="text-ui font-semibold text-2">Detailed AI notes</h3>
+            <p className="mt-1 text-caption text-3">Editable narrative output. Confirmed decisions and actions above are stored separately and are not overwritten by regeneration.</p>
+          </div>
           {summaryResponse && (
             <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto">
               <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
@@ -442,7 +456,7 @@ export function SummaryPanel({
               ) : null}
             </div>
           )}
-          <div className="p-6 w-full" aria-busy={isSummaryLoading} style={isSummaryLoading ? { pointerEvents: "none" } : undefined}>
+          <div className="w-full px-6 pb-6 pt-3" aria-busy={isSummaryLoading} style={isSummaryLoading ? { pointerEvents: "none" } : undefined}>
             <BlockNoteSummaryView
               key={meeting.id}
               ref={summaryRef}

@@ -174,6 +174,14 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
             setSummaryStatus('completed'); setSummaryError(null);
             const title = (parsed.MeetingName ?? poll.meetingName);
             if (typeof title === 'string' && title.trim()) updateMeetingTitle(title);
+            try {
+              // Keep the editable AI document separate from reviewed decisions/actions.
+              // Refresh only unconfirmed derived items; confirmed/dismissed work survives.
+              await invoke('api_refresh_meeting_intelligence', { meetingId: id });
+              window.dispatchEvent(new CustomEvent('meetodds:meeting-intelligence-updated', { detail: { meetingId: id } }));
+            } catch (intelligenceError) {
+              console.warn('[MeetingIntelligence] Summary saved but evidence refresh failed:', intelligenceError);
+            }
             try { await onMeetingUpdated?.(); } catch { /* Summary is saved; list refresh can retry. */ }
           } else {
             setSummaryStatus('error'); setSummaryError('The provider returned an empty or unreadable summary. Your previous summary has not been overwritten in this view.');

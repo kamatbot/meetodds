@@ -2,8 +2,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Brain,
   Home,
   Library,
+  ListChecks,
   Mic,
   MoreHorizontal,
   Pencil,
@@ -234,6 +236,8 @@ export default function Sidebar() {
 
   const isHome = pathname === '/';
   const isMeetings = pathname === '/meetings';
+  const isActions = pathname === '/actions';
+  const isMemory = pathname === '/memory';
   const durationLabel = formatDuration(recordingDuration);
 
   return (
@@ -283,6 +287,22 @@ export default function Sidebar() {
           <Library className="h-4 w-4" strokeWidth={1.75} />
           Meetings
           <span className="ml-auto text-caption text-3">⌘2</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/actions')}
+          className={`${navButtonClass} ${isActions ? 'bg-accent-soft font-semibold text-accent' : ''}`}
+        >
+          <ListChecks className="h-4 w-4" strokeWidth={1.75} />
+          Actions
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/memory')}
+          className={`${navButtonClass} ${isMemory ? 'bg-accent-soft font-semibold text-accent' : ''}`}
+        >
+          <Brain className="h-4 w-4" strokeWidth={1.75} />
+          Memory
         </button>
         <button
           type="button"

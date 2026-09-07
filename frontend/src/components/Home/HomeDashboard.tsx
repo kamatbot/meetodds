@@ -21,6 +21,7 @@ import { useMeetingList } from '@/hooks/useMeetingList';
 import type { MeetingMetadata } from '@/services/indexedDBService';
 import type { MeetingListItem } from '@/types/meeting';
 import { RecordingStatus } from '@/contexts/RecordingStateContext';
+import ActionInboxPreview from '@/components/Home/ActionInboxPreview';
 
 interface HomeDashboardProps {
   hasMicrophone: boolean;
@@ -232,6 +233,10 @@ export default function HomeDashboard({
             </span>
           </div>
         )}
+
+        <div className="mt-7">
+          <ActionInboxPreview />
+        </div>
 
         <section className="mt-6 overflow-hidden rounded-card border border-border bg-surface" aria-label="Capture readiness">
           <button

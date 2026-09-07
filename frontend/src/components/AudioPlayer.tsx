@@ -17,6 +17,7 @@ import type { MeetingExportInfo } from '@/types/meeting';
 
 interface AudioPlayerProps {
   meetingId: string;
+  initialSeek?: number | null;
 }
 
 function formatTime(value: number | null): string {
@@ -36,8 +37,9 @@ function messageFromError(error: unknown): string {
   return String(error);
 }
 
-export default function AudioPlayer({ meetingId }: AudioPlayerProps) {
+export default function AudioPlayer({ meetingId, initialSeek = null }: AudioPlayerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const appliedEvidenceSeekRef = useRef<string | null>(null);
   const [info, setInfo] = useState<MeetingExportInfo | null>(null);
   const [infoLoading, setInfoLoading] = useState(true);
   const [infoError, setInfoError] = useState<string | null>(null);
@@ -54,6 +56,19 @@ export default function AudioPlayer({ meetingId }: AudioPlayerProps) {
     seekBy,
     setPlaybackRate,
   } = useAudioPlayer(info?.audioPath ?? null);
+
+  useEffect(() => {
+    if (initialSeek == null || !Number.isFinite(initialSeek) || duration == null) return;
+    const key = `${meetingId}:${initialSeek}`;
+    if (appliedEvidenceSeekRef.current === key) return;
+    appliedEvidenceSeekRef.current = key;
+    // Start slightly before the cited words so the user hears their context.
+    seek(Math.max(0, initialSeek - 1.5));
+  }, [duration, initialSeek, meetingId, seek]);
+
+  useEffect(() => {
+    appliedEvidenceSeekRef.current = null;
+  }, [initialSeek, meetingId]);
 
   const loadInfo = useCallback(async () => {
     setInfoLoading(true);

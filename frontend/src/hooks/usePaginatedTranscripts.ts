@@ -8,6 +8,8 @@ interface UsePaginatedTranscriptsProps {
     meetingId: string | null;
     /** Optional initial timestamp (in seconds) from URL for loading the correct page */
     initialTimestamp?: number;
+    /** Exact persisted transcript selected by an evidence link. */
+    initialTranscriptId?: string | null;
 }
 
 interface UsePaginatedTranscriptsReturn {
@@ -47,6 +49,7 @@ function convertTranscriptsToSegments(transcripts: Transcript[]): TranscriptSegm
 export function usePaginatedTranscripts({
     meetingId,
     initialTimestamp,
+    initialTranscriptId,
 }: UsePaginatedTranscriptsProps): UsePaginatedTranscriptsReturn {
     const [metadata, setMetadata] = useState<MeetingMetadata | null>(null);
     const [transcripts, setTranscripts] = useState<Transcript[]>([]);
@@ -60,6 +63,7 @@ export function usePaginatedTranscripts({
     const loadedMeetingIdRef = useRef<string | null>(null);
     const isLoadingRef = useRef(false);
     const lastLoadTimeRef = useRef(0); // Debounce protection
+    const loadedEvidenceKeyRef = useRef<string | null>(null);
 
     // Reset state when meeting changes
     const reset = useCallback(() => {
@@ -135,6 +139,52 @@ export function usePaginatedTranscripts({
         }
     }, [meetingId]);
 
+    const loadThroughEvidence = useCallback(async (
+        transcriptId?: string | null,
+        timestamp?: number,
+    ) => {
+        if (!meetingId) return;
+        const collected: Transcript[] = [];
+        let offset = 0;
+        let lastHasMore = false;
+        let total = 0;
+
+        while (true) {
+            const response = await invoke<PaginatedTranscriptsResponse>(
+                'api_get_meeting_transcripts',
+                { meetingId, limit: DEFAULT_PAGE_SIZE, offset },
+            );
+            total = response.total_count;
+            lastHasMore = response.has_more;
+            collected.push(...response.transcripts);
+
+            const foundId = transcriptId
+                ? response.transcripts.some((transcript) => transcript.id === transcriptId)
+                : false;
+            const foundTime = timestamp != null && Number.isFinite(timestamp)
+                ? response.transcripts.some((transcript) => {
+                    const start = transcript.audio_start_time;
+                    const end = transcript.audio_end_time ?? start;
+                    return start != null && end != null && timestamp >= start && timestamp <= end + 1;
+                })
+                : false;
+
+            if (foundId || foundTime || !response.has_more || response.transcripts.length === 0) {
+                break;
+            }
+            offset += response.transcripts.length;
+        }
+
+        const byId = new Map(collected.map((transcript) => [transcript.id, transcript]));
+        const ordered = [...byId.values()].sort(
+            (left, right) => (left.audio_start_time ?? 0) - (right.audio_start_time ?? 0),
+        );
+        setTranscripts(ordered);
+        setTotalCount(total);
+        setHasMore(lastHasMore);
+        offsetRef.current = ordered.length;
+    }, [meetingId]);
+
     // Load next page with debounce protection
     const loadMore = useCallback(async () => {
         const now = Date.now();
@@ -181,20 +231,51 @@ export function usePaginatedTranscripts({
         if (loadedMeetingIdRef.current === meetingId) return;
         loadedMeetingIdRef.current = meetingId;
 
+        const evidenceKey = initialTranscriptId || (initialTimestamp != null ? `time:${initialTimestamp}` : null);
+        loadedEvidenceKeyRef.current = evidenceKey;
         reset();
 
         const loadInitial = async () => {
             setIsLoading(true);
             try {
                 await loadMetadata();
-                await loadTranscriptsAtOffset(0, false);
+                if (evidenceKey) {
+                    await loadThroughEvidence(initialTranscriptId, initialTimestamp);
+                } else {
+                    await loadTranscriptsAtOffset(0, false);
+                }
+            } catch (initialError) {
+                console.error('Failed to load initial transcript evidence:', initialError);
+                setError('Failed to load transcripts');
             } finally {
                 setIsLoading(false);
             }
         };
 
-        loadInitial();
-    }, [meetingId, reset, loadMetadata, loadTranscriptsAtOffset]);
+        void loadInitial();
+    }, [meetingId, reset, loadMetadata, loadTranscriptsAtOffset, loadThroughEvidence, initialTimestamp, initialTranscriptId]);
+
+    // Evidence links can change while the same meeting route remains mounted.
+    useEffect(() => {
+        if (!meetingId) return;
+        const evidenceKey = initialTranscriptId || (initialTimestamp != null ? `time:${initialTimestamp}` : null);
+        if (!evidenceKey || loadedMeetingIdRef.current !== meetingId || loadedEvidenceKeyRef.current === evidenceKey) return;
+        loadedEvidenceKeyRef.current = evidenceKey;
+        let cancelled = false;
+        const loadEvidence = async () => {
+            setIsLoadingMore(true);
+            try {
+                await loadThroughEvidence(initialTranscriptId, initialTimestamp);
+            } catch (evidenceError) {
+                if (!cancelled) setError('Could not load the cited transcript segment');
+                console.error('Failed to load transcript evidence:', evidenceError);
+            } finally {
+                if (!cancelled) setIsLoadingMore(false);
+            }
+        };
+        void loadEvidence();
+        return () => { cancelled = true; };
+    }, [initialTimestamp, initialTranscriptId, loadThroughEvidence, meetingId]);
 
     // Convert to segments (memoized)
     const segments = useMemo(() =>
