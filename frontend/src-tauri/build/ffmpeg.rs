@@ -3,16 +3,26 @@
 // ============================================================================
 // MeetOdds does not download executable binaries from an upstream project at
 // build time. Release/dev environments must provide FFmpeg explicitly through
-// MEETODDS_FFMPEG_BINARY or install `ffmpeg` on PATH. The build then copies and
-// verifies that binary in the Tauri sidecar location for the active target.
+// MEETODDS_FFMPEG_BINARY or install `ffmpeg` on PATH. Source-only Tauri checks
+// can disable all sidecars/resources through TAURI_CONFIG, in which case there
+// is intentionally nothing to provision.
 
 /// Provision and bundle FFmpeg for the current target platform.
 pub fn ensure_ffmpeg_binary() {
+    println!("cargo:rerun-if-env-changed=MEETODDS_FFMPEG_BINARY");
+    println!("cargo:rerun-if-env-changed=TAURI_CONFIG");
+
+    if is_source_only_tauri_build() {
+        println!(
+            "cargo:warning=ℹ️  Source-only Tauri validation: skipping FFmpeg sidecar provisioning"
+        );
+        return;
+    }
+
     let target = std::env::var("TARGET")
         .or_else(|_| std::env::var("HOST"))
         .expect("Neither TARGET nor HOST environment variable set");
 
-    println!("cargo:rerun-if-env-changed=MEETODDS_FFMPEG_BINARY");
     println!("cargo:warning=🎬 Checking FFmpeg binary for target: {}", target);
 
     let binary_name = if target.contains("windows") {
@@ -96,6 +106,29 @@ pub fn ensure_ffmpeg_binary() {
         source.display(),
         binary_name
     );
+}
+
+/// Tauri's source-only CI configuration removes both external binaries and
+/// resources. In that mode build.rs must not require packaging prerequisites.
+fn is_source_only_tauri_build() -> bool {
+    let Ok(config) = std::env::var("TAURI_CONFIG") else {
+        return false;
+    };
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&config) else {
+        return false;
+    };
+
+    let external_bin_empty = value
+        .pointer("/bundle/externalBin")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty);
+    let resources_empty = value
+        .pointer("/bundle/resources")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty);
+
+    external_bin_empty && resources_empty
 }
 
 fn explicit_ffmpeg_binary() -> Option<std::path::PathBuf> {
