@@ -40,6 +40,8 @@ targets:
       path: Config/Info.plist
       properties:
         CFBundleDisplayName: MeetOdds
+        CFBundleShortVersionString: '$(MARKETING_VERSION)'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         # Answers the export-compliance prompt once, so Xcode stops asking on every
         # upload. False because the app's only cryptography is exempt: TLS through
         # URLSession and Keychain storage, both Apple OS encryption, plus a SHA-256
