@@ -74,6 +74,12 @@ node_modules/
 *.sw?
 experiments/
 .cursor/
+.claude/
+.serena/
+*.xcuserdatad
+.swiftpm/
+*.patch
+*.zip
 target/
 
 frontend/src-tauri/binaries/

@@ -6,11 +6,7 @@ export async function getManualNotes(meetingId: string): Promise<string> {
 }
 
 export async function saveManualNotes(meetingId: string, content: string, expectedContent?: string): Promise<void> {
-  if (expectedContent !== undefined) {
-    await invoke<void>('api_save_manual_notes_checked', { meetingId, content, expectedContent });
-  } else {
-    await invoke<void>('api_save_manual_notes', { meetingId, content });
-  }
+  await invoke<void>('api_save_manual_notes_checked', { meetingId, content, expectedContent: expectedContent ?? null });
 }
 
 export async function linkManualNotes(draftMeetingId: string, meetingId: string): Promise<void> {

@@ -20,25 +20,13 @@ function DocumentEditor({ target, flushRef, onChanged }: {
   const initialAppended = useRef(false);
 
   const load = useCallback(async (): Promise<NoteValue> => {
-    let markdown = await getManualNotes(target.meetingId);
-    if (target.appendText && !initialAppended.current) {
-      initialAppended.current = true;
-      if (!markdown.trim()) {
-        markdown = `${target.appendText}\n`;
-      } else {
-        const trimmed = markdown.trimEnd();
-        markdown = `${trimmed}\n\n${target.appendText}\n`;
-      }
-      requestAnimationFrame(() => {
-        editorRef.current?.focusAndScrollEnd();
-      });
-    }
+    const markdown = await getManualNotes(target.meetingId);
     return { markdown, includeInSummary: true, revision: 0 };
-  }, [target.meetingId, target.appendText]);
+  }, [target.meetingId]);
 
   const write = useCallback(async (base: NoteValue, next: NoteValue): Promise<NoteValue> => {
-    await saveManualNotes(target.meetingId, next.markdown, base.markdown);
-    return { ...next, revision: 0 };
+    await saveManualNotes(target.meetingId, next.markdown);
+    return { ...next, revision: (base.revision || 0) + 1 };
   }, [target.meetingId]);
 
   const draft = useNoteDraft(`meeting:${target.meetingId}`, load, write);
@@ -49,6 +37,32 @@ function DocumentEditor({ target, flushRef, onChanged }: {
     return () => { if (flushRef.current === draft.flush) flushRef.current = waiting; };
   }, [draft.flush, flushRef]);
 
+  const appendNoteText = useCallback((toAppend: string) => {
+    const current = draft.value.markdown || '';
+    const trimmed = current.trimEnd();
+    const tagTrimmed = toAppend.trim();
+    if (trimmed.endsWith(tagTrimmed)) {
+      requestAnimationFrame(() => {
+        editorRef.current?.focusAndScrollEnd();
+      });
+      return;
+    }
+    const nextMarkdown = !trimmed ? `${tagTrimmed}\n` : `${trimmed}\n\n${tagTrimmed}\n`;
+    draft.change({ markdown: nextMarkdown });
+    requestAnimationFrame(() => {
+      editorRef.current?.focusAndScrollEnd();
+    });
+  }, [draft]);
+
+  // Handle cold start appendText once draft is loaded
+  useEffect(() => {
+    if (draft.status === 'loading' || initialAppended.current) return;
+    initialAppended.current = true;
+    if (target.appendText) {
+      appendNoteText(target.appendText);
+    }
+  }, [draft.status, target.appendText, appendNoteText]);
+
   // Listen for append events while the window is already open
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -56,21 +70,10 @@ function DocumentEditor({ target, flushRef, onChanged }: {
       if (event.payload.meetingId !== target.meetingId) return;
       const toAppend = event.payload.text;
       if (!toAppend) return;
-      const current = draft.value.markdown || '';
-      let nextMarkdown = '';
-      if (!current.trim()) {
-        nextMarkdown = `${toAppend}\n`;
-      } else {
-        const trimmed = current.trimEnd();
-        nextMarkdown = `${trimmed}\n\n${toAppend}\n`;
-      }
-      draft.change({ markdown: nextMarkdown });
-      requestAnimationFrame(() => {
-        editorRef.current?.focusAndScrollEnd();
-      });
+      appendNoteText(toAppend);
     }).then(fn => { unlisten = fn; });
     return () => { unlisten?.(); };
-  }, [target.meetingId, draft]);
+  }, [target.meetingId, appendNoteText]);
 
   const saveNow = () => { void draft.flush().then(onChanged).catch(() => undefined); };
   const saved = draft.status === 'saved';
@@ -137,6 +140,10 @@ function NotebookWorkspace({ target, flushRef }: { target: NotesWindowTarget; fl
   const close = async () => {
     try {
       await flushRef.current();
+    } catch (e) {
+      console.warn('Could not flush notes on close:', e);
+    }
+    try {
       await closeManualNotesWindow();
     } catch (error) {
       setWindowError(error instanceof Error ? error.message : String(error));
@@ -187,31 +194,46 @@ export default function NotesWindow() {
   const flushRef = useRef<Flush>(waiting);
   const syncing = useRef<Promise<void> | null>(null);
   const alive = useRef(false);
+
   const sync = useCallback(() => {
     if (syncing.current) return syncing.current;
     const work = async () => {
       try {
         let requested = await getNotesWindowTarget();
-        if (!requested || requested.version === targetRef.current?.version) return;
-        if (targetRef.current) await flushRef.current();
-        // Another + may have been clicked while SQLite saved. Use the latest intent.
-        requested = await getNotesWindowTarget();
-        if (requested && alive.current) {
-          targetRef.current = requested; setTarget(requested); setError(null);
+        if (!requested) return;
+        if (targetRef.current && requested.version === targetRef.current.version && requested.meetingId === targetRef.current.meetingId) return;
+        if (targetRef.current) {
+          try {
+            await flushRef.current();
+          } catch (e) {
+            console.warn('Could not flush previous notes before switching meeting:', e);
+          }
         }
-      } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : String(e)); }
-      finally { syncing.current = null; }
+        const latest = await getNotesWindowTarget();
+        const next = latest || requested;
+        if (alive.current) {
+          targetRef.current = next;
+          setTarget(next);
+          setError(null);
+        }
+      } catch (e) {
+        if (alive.current) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        syncing.current = null;
+      }
     };
     syncing.current = work();
     return syncing.current;
   }, []);
+
   useEffect(() => {
     alive.current = true;
     let disposed = false;
     const disposers: (() => void)[] = [];
     const add = (fn: () => void) => { if (disposed) fn(); else disposers.push(fn); };
     const close = async () => {
-      try { await flushRef.current(); await closeManualNotesWindow(); }
+      try { await flushRef.current(); } catch (e) { console.warn('Flush before close failed:', e); }
+      try { await closeManualNotesWindow(); }
       catch (e) { if (alive.current) setError(e instanceof Error ? e.message : String(e)); }
     };
     void (async () => {
@@ -230,7 +252,20 @@ export default function NotesWindow() {
     window.addEventListener('keydown', keyboard);
     return () => { disposed = true; alive.current = false; disposers.forEach(fn => fn()); window.removeEventListener('keydown', keyboard); };
   }, [sync]);
-  return <>{error && <div role="alert" className="fixed bottom-5 left-1/2 z-50 w-[min(580px,90vw)] -translate-x-1/2 rounded-xl border border-warn bg-surface p-4 text-sm text-danger shadow-lg">
-    {error}<button type="button" className="ml-3 font-medium underline" onClick={() => void sync()}>Retry opening requested note</button>
-  </div>}{target ? <NotebookWorkspace key={target.meetingId} target={target} flushRef={flushRef} /> : <div className="flex h-screen items-center justify-center bg-surface text-sm text-2">Opening notebook…</div>}</>;
+
+  return (
+    <>
+      {error && (
+        <div role="alert" className="fixed bottom-5 left-1/2 z-50 w-[min(580px,90vw)] -translate-x-1/2 rounded-xl border border-warn bg-surface p-4 text-sm text-danger shadow-lg">
+          {error}
+          <button type="button" className="ml-3 font-medium underline" onClick={() => void sync()}>Retry opening requested note</button>
+        </div>
+      )}
+      {target ? (
+        <NotebookWorkspace key={target.meetingId} target={target} flushRef={flushRef} />
+      ) : (
+        <div className="flex h-screen items-center justify-center bg-surface text-sm text-2">Opening notes…</div>
+      )}
+    </>
+  );
 }

@@ -56,7 +56,6 @@ export function useNoteDraft(
     cancelTimer();
     const s = session.current;
     if (!s.base || !s.value) return Promise.reject(new Error('Notes are still loading. Retry after they appear.'));
-    if (s.blocked) return Promise.reject(new Error('Resolve the note conflict before continuing.'));
     if (s.inFlight) return s.inFlight;
     if (sameNoteValue(s.base, s.value)) return Promise.resolve();
     const work = async () => {
@@ -73,20 +72,13 @@ export function useNoteDraft(
         if (alive.current) { setStatus('saved'); setRecovered(false); }
       } catch (failure) {
         const message = failure instanceof Error ? failure.message : String(failure);
-        if (message.includes('NOTES_CONFLICT')) {
-          s.blocked = true;
-          try {
-            const latest = await load();
-            if (alive.current) setConflict(latest);
-          } catch { /* Keep the draft and block blind overwrite. */ }
-        }
         if (alive.current) { setError(message); setStatus('error'); }
         throw failure;
       } finally { s.inFlight = null; }
     };
     s.inFlight = work();
     return s.inFlight;
-  }, [cancelTimer, journal, load, write]);
+  }, [cancelTimer, journal, write]);
 
   useEffect(() => {
     alive.current = true;
@@ -107,15 +99,14 @@ export function useNoteDraft(
         }
       } catch { setStorageWarning(true); }
       const unsaved = draft && !sameNoteValue(draft.value, server) ? draft : null;
-      const conflicting = !!unsaved && (unsaved.base.revision !== server.revision || !sameNoteValue(unsaved.base, server));
       session.current.base = server;
       session.current.value = unsaved ? { ...unsaved.value, revision: server.revision } : server;
-      session.current.blocked = conflicting;
+      session.current.blocked = false;
       setValue(session.current.value);
-      setConflict(conflicting ? server : null);
-      setRecovered(Boolean(unsaved));
+      setConflict(null);
+      setRecovered(Boolean(unsaved && unsaved.value.markdown.trim()));
       setStatus(unsaved ? 'dirty' : 'saved');
-      if (unsaved && !conflicting) void flush().catch(() => undefined);
+      if (unsaved) void flush().catch(() => undefined);
     }).catch(() => {
       if (!disposed) { setStatus('error'); setError('Notes could not be loaded. Retry; the existing note has not been replaced.'); }
     });
@@ -155,7 +146,7 @@ export function useNoteDraft(
   }, [conflict, flush, journal]);
 
   return { value, status, error, conflict, recovered, storageWarning, change, flush, resolveConflict,
-    ready: session.current.base !== null && !session.current.blocked,
-    retry: () => { if (session.current.base && !session.current.blocked) void flush().catch(() => undefined); else setReloadVersion(n => n + 1); },
+    ready: session.current.base !== null,
+    retry: () => { if (session.current.base) void flush().catch(() => undefined); else setReloadVersion(n => n + 1); },
   };
 }

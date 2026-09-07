@@ -75,14 +75,11 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
       const tagToAppend = alreadyNoted ? null : timestampTag;
 
       await openManualNotesWindow(meetingId, null, tagToAppend);
-      if (tagToAppend) {
-        await emit('manual-notes:append', { meetingId, text: tagToAppend });
-        if (label) {
-          setNotesContent(prev => {
-            const trimmed = prev.trimEnd();
-            return trimmed ? `${trimmed}\n\n${tagToAppend}\n` : `${tagToAppend}\n`;
-          });
-        }
+      if (tagToAppend && label) {
+        setNotesContent(prev => {
+          const trimmed = prev.trimEnd();
+          return trimmed ? `${trimmed}\n\n${tagToAppend}\n` : `${tagToAppend}\n`;
+        });
       }
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : String(e));

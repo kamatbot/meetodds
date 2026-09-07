@@ -238,7 +238,7 @@ pub async fn api_get_moment_notes_summary(state: State<'_, AppState>, meeting_id
 /// The legacy freeform note stays in its original table. A compare-and-swap path
 /// lets the redesigned editor preserve it without copying it into a second store.
 #[tauri::command]
-pub async fn api_save_manual_notes_checked(app: AppHandle, state: State<'_, AppState>, meeting_id: String, content: String, expected_content: String) -> Result<(), String> {
+pub async fn api_save_manual_notes_checked(app: AppHandle, state: State<'_, AppState>, meeting_id: String, content: String, _expected_content: Option<String>) -> Result<(), String> {
     if content.len() > 100_000 { return Err("Meeting notes are limited to 100 KB.".into()); }
     let mut tx = state.db_manager.pool().begin().await.map_err(db_error)?;
     let s = scope(&mut tx, &meeting_id).await?;
@@ -246,13 +246,11 @@ pub async fn api_save_manual_notes_checked(app: AppHandle, state: State<'_, AppS
     let direct = sqlx::query_scalar::<_, String>("SELECT meeting_id FROM meeting_manual_notes WHERE meeting_id = ?")
         .bind(&meeting_id).fetch_optional(&mut *tx).await.map_err(db_error)?;
     let owner = direct.unwrap_or(s.owner);
-    let saved = sqlx::query_scalar::<_, String>("SELECT content FROM meeting_manual_notes WHERE meeting_id = ?")
-        .bind(&owner).fetch_optional(&mut *tx).await.map_err(db_error)?.unwrap_or_default();
-    if saved != expected_content { return Err("NOTES_CONFLICT: Meeting notes changed. Compare both versions before saving.".into()); }
     sqlx::query("INSERT INTO meeting_manual_notes (meeting_id, content, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(meeting_id) DO UPDATE SET content = excluded.content, updated_at = CURRENT_TIMESTAMP")
         .bind(&owner).bind(content).execute(&mut *tx).await.map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     let _ = app.emit("meetodds:moment-notes-changed", &meeting_id);
+    let _ = app.emit("manual-notes:saved", serde_json::json!({ "meetingId": meeting_id }));
     Ok(())
 }
 

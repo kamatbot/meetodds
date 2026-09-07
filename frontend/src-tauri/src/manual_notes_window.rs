@@ -196,10 +196,12 @@ pub async fn open_manual_notes_window<R: Runtime>(
         return Err("Invalid meeting or note ID".into());
     }
     let _opening = OPEN_LOCK.lock().await;
+    let is_warm = app.get_webview_window(MANUAL_NOTES_WINDOW).is_some();
     let target = NotesWindowTarget {
         meeting_id: meeting_id.clone(),
         note_id: note_id.clone(),
-        append_text: append_text.clone(),
+        // Warm window receives text directly via manual-notes:append event; cold window loads it from target.
+        append_text: if is_warm { None } else { append_text.clone() },
         version: TARGET_VERSION.fetch_add(1, Ordering::SeqCst) + 1,
     };
     *TARGET.lock().map_err(|_| "Notes window state is unavailable")? = Some(target);
