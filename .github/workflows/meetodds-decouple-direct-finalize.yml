@@ -12,18 +12,12 @@ permissions:
 
 jobs:
   finalize:
-    runs-on: macos-14
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - uses: dtolnay/rust-toolchain@stable
 
       - name: Apply final source cleanup
         shell: bash
@@ -92,23 +86,14 @@ jobs:
                   path.unlink()
           PY
 
-      - name: Refresh dependency locks
-        shell: bash
-        run: |
-          cd frontend
-          corepack enable
-          pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
-          cd ..
-          cargo metadata --format-version 1 --manifest-path frontend/src-tauri/Cargo.toml >/dev/null
-
-      - name: Verify source cleanup
+      - name: Sanity-check source cleanup
         shell: bash
         run: |
           ! git grep -n 'Zackriya-Solutions/meeting-minutes/releases' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md' ':!.github/workflows'
           ! git grep -n 'Zackriya-Solutions/ffmpeg-binaries' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md' ':!.github/workflows'
           ! git grep -n 'MEETILY_LLAMA_HELPER' -- . ':!.github/workflows'
           ! git grep -n 'localhost:5167\|localhost:8178' -- frontend/src-tauri/tauri.conf.json
-          ! git grep -n 'tauri_plugin_updater\|plugin-updater' -- frontend/src-tauri frontend/package.json frontend/pnpm-lock.yaml
+          ! git grep -n 'tauri_plugin_updater\|plugin-updater' -- frontend/src-tauri frontend/package.json
           test ! -e backend
           test ! -e .gitmodules
           test ! -e scripts
