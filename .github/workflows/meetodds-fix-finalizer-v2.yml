@@ -1,0 +1,47 @@
+name: Repair MeetOdds decoupling finalizer
+
+on:
+  push:
+    branches:
+      - refactor/meetodds-decouple-phase1
+    paths:
+      - .github/workflows/meetodds-fix-finalizer-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Make source-only Rust tests ignore packaged sidecars
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/meetodds-decouple-finalize.yml')
+          text = path.read_text()
+          old = """      - name: Run identity migration tests\n        run: cargo test --manifest-path frontend/src-tauri/Cargo.toml identity_migration_tests --lib --locked\n"""
+          new = """      - name: Run identity migration tests\n        env:\n          TAURI_CONFIG: '{\"bundle\":{\"externalBin\":[],\"resources\":[]}}'\n        run: cargo test --manifest-path frontend/src-tauri/Cargo.toml identity_migration_tests --lib --locked\n"""
+          if old not in text:
+              raise SystemExit('identity migration test block not found')
+          text = text.replace(old, new)
+          needle = "          ! git grep -n 'Zackriya-Solutions/meeting-minutes/releases' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md'\n"
+          replacement = needle + "          ! git grep -n 'Zackriya-Solutions/ffmpeg-binaries' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md'\n"
+          if "Zackriya-Solutions/ffmpeg-binaries" not in text:
+              text = text.replace(needle, replacement)
+          path.write_text(text)
+          PY
+
+      - name: Commit repaired finalizer
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/meetodds-decouple-finalize.yml
+          git commit -m 'ci: make decoupling migration test source-only'
+          git push origin HEAD:refactor/meetodds-decouple-phase1

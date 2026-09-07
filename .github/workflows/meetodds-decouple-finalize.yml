@@ -1,0 +1,300 @@
+name: Finalize MeetOdds decoupling source cleanup
+
+on:
+  push:
+    branches:
+      - refactor/meetodds-decouple-phase1
+    paths:
+      - .github/workflows/meetodds-decouple-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Apply source cleanup
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import shutil
+          import textwrap
+
+          def read(path):
+              return Path(path).read_text()
+
+          def write(path, content):
+              p = Path(path)
+              p.parent.mkdir(parents=True, exist_ok=True)
+              p.write_text(content)
+
+          def replace_if_present(path, old, new):
+              text = read(path)
+              if old in text:
+                  write(path, text.replace(old, new))
+
+          replace_if_present(
+              'frontend/src-tauri/src/lib.rs',
+              '        .plugin(tauri_plugin_updater::Builder::new().build())\n',
+              ''
+          )
+          replace_if_present('frontend/src-tauri/build.rs', 'Building Meetily for:', 'Building MeetOdds for:')
+          replace_if_present(
+              'frontend/src-tauri/src/summary/summary_engine/sidecar.rs',
+              'MEETILY_LLAMA_HELPER',
+              'MEETODDS_LLAMA_HELPER'
+          )
+          replace_if_present(
+              'frontend/src-tauri/src/audio/recording_preferences.rs',
+              'meetily-recordings',
+              'meetodds-recordings'
+          )
+
+          write('frontend/.env.example', textwrap.dedent('''\
+          # Optional MeetOdds-owned integrations.
+          # Compile-time PostHog project key. Leave blank to keep usage analytics unavailable.
+          MEETODDS_POSTHOG_API_KEY=
+
+          # Runtime/development override for the local LLM helper binary.
+          MEETODDS_LLAMA_HELPER=
+
+          # Build-time FFmpeg source. Point this at a trusted local executable when
+          # ffmpeg is not already installed on PATH.
+          MEETODDS_FFMPEG_BINARY=
+          '''))
+
+          write('README.md', textwrap.dedent('''\
+          # MeetOdds
+
+          MeetOdds is a local-first meeting capture, transcription, notes, and summary application. The desktop app is a Tauri/React application with a Rust core; the native iOS app lives under `ios/`.
+
+          ## Desktop architecture
+
+          - Audio capture, transcription, persistence, recovery, and summary orchestration run in `frontend/src-tauri`.
+          - The React/Next.js UI lives in `frontend/src`.
+          - Local speech-to-text uses Whisper/Parakeet paths; local summary generation uses the bundled local-LLM helper.
+          - There is no supported Python/FastAPI backend.
+          - Release builds provision FFmpeg from `MEETODDS_FFMPEG_BINARY` or a trusted `ffmpeg` already on the build machine; MeetOdds does not download upstream executable binaries at build time.
+
+          ## Existing meeting migration
+
+          Desktop builds now use the MeetOdds bundle identifier `com.meetodds.app`. On first launch after upgrading from the older identifier `com.meetily.ai`, MeetOdds copies the existing application-data tree into the new location before opening the database or model stores.
+
+          The migration is deliberately conservative:
+
+          - `meeting_minutes.sqlite` and its WAL/SHM files are copied, not moved.
+          - Existing recording folders are not renamed and stored absolute `folder_path` values are not rewritten.
+          - Models, settings, onboarding state, and other app-data files are copied when missing.
+          - The legacy app-data directory is retained as a rollback copy.
+          - If both locations contain different meeting databases, MeetOdds refuses to overwrite either database.
+
+          Close the older desktop build before launching an identifier-migrating build so its SQLite files are not changing during the copy.
+
+          ## Development
+
+          ```bash
+          cd frontend
+          pnpm install
+          pnpm tauri:dev
+          ```
+
+          Rust checks:
+
+          ```bash
+          cargo test --manifest-path frontend/src-tauri/Cargo.toml --lib
+          cargo check --manifest-path frontend/src-tauri/Cargo.toml --lib --locked
+          ```
+
+          Frontend regressions are checked against the synchronized `main` baseline in CI so pre-existing test-environment diagnostics do not hide new type errors.
+
+          ## Provenance and licenses
+
+          MeetOdds began from the MIT-licensed Meetily Community Edition and still contains derived code. Attribution is retained in `LICENSE.md` and `THIRD_PARTY_NOTICES.md`. MeetOdds-specific development does not depend on Meetily services, release infrastructure, updater keys, analytics projects, executable-binary hosting, or the retired Python backend.
+          '''))
+
+          write('PRIVACY_POLICY.md', textwrap.dedent('''\
+          # MeetOdds Privacy Policy
+
+          *Last updated: September 7, 2026*
+
+          MeetOdds is designed as a local-first meeting assistant. Recordings, transcripts, notes, and the local meeting database remain on the user's device unless the user explicitly chooses a cloud-backed AI feature or exports/shares content.
+
+          ## Local meeting data
+
+          Meeting history is stored in the local MeetOdds SQLite database. Recording folders may be configured separately and MeetOdds preserves those paths when migrating from older desktop builds. MeetOdds does not require a hosted MeetOdds backend to capture or read meetings.
+
+          ## Optional AI providers
+
+          Local transcription and local summary options run on the device. If a user explicitly selects a cloud provider, the text needed for that requested operation is sent to that provider and is then subject to that provider's terms and privacy policy.
+
+          ## Usage analytics
+
+          Usage analytics is off by default. MeetOdds contains no inherited Meetily analytics project credential. Analytics can initialize only in a build explicitly configured with a MeetOdds-owned `MEETODDS_POSTHOG_API_KEY`, and the user must also opt in in Settings.
+
+          ## Data control and desktop identity migration
+
+          Users can inspect, export, and delete locally stored meeting data. The desktop identifier migration from `com.meetily.ai` to `com.meetodds.app` is copy-first. MeetOdds keeps the old app-data directory as a rollback copy and does not automatically delete it.
+
+          ## Contact
+
+          Privacy questions and bug reports can be filed at https://github.com/kamatbot/notes/issues.
+          '''))
+
+          write('CLAUDE.md', textwrap.dedent('''\
+          # MeetOdds development guide
+
+          MeetOdds is a local-first meeting assistant. The supported desktop architecture is React/Next.js in `frontend/src` plus the Rust/Tauri core in `frontend/src-tauri`. The native iOS implementation is in `ios/`.
+
+          ## Architecture rules
+
+          - Do not introduce a Python/FastAPI backend dependency.
+          - Preserve the local SQLite database and recording-folder contracts.
+          - Treat meeting capture and persistence as higher priority than summary/background work.
+          - Existing meeting `folder_path` values are absolute and must remain valid across migrations.
+          - The legacy desktop identifier `com.meetily.ai` is migration input only. New code uses `com.meetodds.app`.
+          - Do not add updater endpoints, signing keys, analytics keys, release URLs, or executable-binary downloads owned by another project.
+          - `llama-helper` remains an active local-summary component and is intentionally retained in this phase.
+
+          ## Checks
+
+          Run frontend regression checks and Rust tests before merging desktop changes. Changes to identity, database paths, recording paths, migrations, or local model storage require explicit migration tests.
+          '''))
+
+          write('CONTRIBUTING.md', textwrap.dedent('''\
+          # Contributing to MeetOdds
+
+          Keep changes local-first and preserve existing meeting data. Desktop changes should pass the frontend regression check plus the Rust library tests/checks documented in `README.md`. Changes to app identity, database paths, recording paths, migrations, or local model storage require explicit migration tests.
+
+          MeetOdds contains MIT-licensed code derived from Meetily; retain applicable attribution and third-party notices when modifying derived areas.
+          '''))
+
+          license_text = read('LICENSE.md')
+          if 'Copyright (c) 2026 MeetOdds contributors' not in license_text:
+              license_text = license_text.replace(
+                  'Copyright (c) 2024 Zackriya Solutions\n',
+                  'Copyright (c) 2024 Zackriya Solutions\nCopyright (c) 2026 MeetOdds contributors\n'
+              )
+              write('LICENSE.md', license_text)
+
+          write('THIRD_PARTY_NOTICES.md', textwrap.dedent('''\
+          # Third-Party Notices
+
+          ## Meetily Community Edition
+
+          MeetOdds began from and still contains source code derived from Meetily Community Edition by Zackriya Solutions.
+
+          Original project: `Zackriya-Solutions/meetily`  
+          License: MIT  
+          Original copyright: Copyright (c) 2024 Zackriya Solutions
+
+          The applicable MIT permission notice is retained in `LICENSE.md`. This notice records source provenance; MeetOdds does not rely on Meetily-hosted backend, updater, release, analytics, or executable-binary services.
+          '''))
+
+          write('docs/APP_IDENTITY_MIGRATION.md', textwrap.dedent('''\
+          # Desktop app identity migration
+
+          MeetOdds changed its Tauri bundle identifier from `com.meetily.ai` to `com.meetodds.app`.
+
+          At startup, before database/model/store initialization, MeetOdds looks for the sibling legacy app-data directory. If present, it copies the legacy tree into the new app-data directory and writes `.meetodds-app-data-v1` only after the copy completes.
+
+          Safety properties:
+
+          1. The old directory is never deleted by the migration.
+          2. Existing recording-folder paths are not renamed or rewritten.
+          3. SQLite main/WAL/SHM files are treated as canonical meeting-history files.
+          4. An existing different database in the new location is never overwritten.
+          5. A partially completed copy is resumable when database files are identical.
+
+          Close older desktop builds before launching the identifier-migrating build so SQLite files are not changing during the copy.
+          '''))
+
+          for path in [
+              'backend',
+              'scripts',
+              '.github/upstream-workflows-disabled',
+              'frontend/src-tauri/src/audio_v2',
+          ]:
+              p = Path(path)
+              if p.exists():
+                  shutil.rmtree(p)
+
+          for path in [
+              '.gitmodules',
+              '.github/UPSTREAM_IMPORT.md',
+              'frontend/API.md',
+              'frontend/src-tauri/src/lib_old_complex.rs',
+              'frontend/src-tauri/CLEANUP_PLAN.md',
+              'frontend/src-tauri/LOGGING_OPTIMIZATIONS.md',
+              'frontend/src-tauri/NOTIFICATION_TESTING.md',
+          ]:
+              p = Path(path)
+              if p.exists():
+                  p.unlink()
+          PY
+
+      - name: Refresh lockfiles
+        shell: bash
+        run: |
+          cd frontend
+          corepack enable
+          pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
+          cd ..
+          cargo metadata --format-version 1 --manifest-path frontend/src-tauri/Cargo.toml >/dev/null
+
+      - name: Install frontend dependencies
+        run: cd frontend && pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Frontend type regression
+        shell: bash
+        run: |
+          git worktree add --detach /tmp/meetodds-baseline effbcb791492a7ca65cd8e3069cca9d7c8306e74
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" /tmp/meetodds-baseline/frontend/node_modules
+          NODE_PATH="$GITHUB_WORKSPACE/frontend/node_modules" node tools/recovery/check-types.cjs /tmp/meetodds-baseline/frontend "$GITHUB_WORKSPACE/frontend"
+          git worktree remove --force /tmp/meetodds-baseline
+
+      - name: Run identity migration tests
+        env:
+          TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":[]}}'
+        run: cargo test --manifest-path frontend/src-tauri/Cargo.toml identity_migration_tests --lib --locked
+
+      - name: Compile Rust/Tauri library
+        env:
+          TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":[]}}'
+        run: cargo check --manifest-path frontend/src-tauri/Cargo.toml --lib --locked
+
+      - name: Verify decoupling invariants
+        shell: bash
+        run: |
+          ! git grep -n 'Zackriya-Solutions/meeting-minutes/releases' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md'
+          ! git grep -n 'Zackriya-Solutions/ffmpeg-binaries' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md'
+          ! git grep -n 'MEETILY_LLAMA_HELPER' -- .
+          ! git grep -n 'localhost:5167\|localhost:8178' -- frontend/src-tauri/tauri.conf.json
+          ! git grep -n 'tauri_plugin_updater\|plugin-updater' -- frontend/src-tauri frontend/package.json frontend/pnpm-lock.yaml
+          test ! -e backend
+          test ! -e .gitmodules
+          test ! -e scripts
+          test ! -e frontend/src-tauri/src/audio_v2
+          git diff --check
+
+      - name: Commit validated source cleanup
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A ':!.github/workflows'
+          git commit -m 'refactor: remove dead Meetily runtime and metadata [skip ci]' \
+            -m 'Preserve current meetings with the copy-first identity migration while removing the retired backend, whisper submodule, stale package metadata, backup code and obsolete non-workflow docs/tooling.'
+          git push origin HEAD:refactor/meetodds-decouple-phase1

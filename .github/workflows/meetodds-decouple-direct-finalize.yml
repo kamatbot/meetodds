@@ -1,0 +1,115 @@
+name: Complete MeetOdds decoupling cleanup
+
+on:
+  push:
+    branches:
+      - refactor/meetodds-decouple-phase1
+    paths:
+      - .github/workflows/meetodds-decouple-direct-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply final source cleanup
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import shutil
+
+          replacements = {
+              'frontend/src-tauri/src/lib.rs': [
+                  ('        .plugin(tauri_plugin_updater::Builder::new().build())\n', ''),
+              ],
+              'frontend/src-tauri/build.rs': [
+                  ('Building Meetily for:', 'Building MeetOdds for:'),
+              ],
+              'frontend/src-tauri/src/summary/summary_engine/sidecar.rs': [
+                  ('MEETILY_LLAMA_HELPER', 'MEETODDS_LLAMA_HELPER'),
+              ],
+              'frontend/src-tauri/src/audio/recording_preferences.rs': [
+                  ('meetily-recordings', 'meetodds-recordings'),
+              ],
+          }
+          for filename, pairs in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in pairs:
+                  text = text.replace(old, new)
+              path.write_text(text)
+
+          Path('frontend/.env.example').write_text('''# Optional MeetOdds-owned integrations.\n# Leave analytics blank unless a MeetOdds-owned PostHog project is configured.\nMEETODDS_POSTHOG_API_KEY=\n\n# Runtime/development override for the local LLM helper.\nMEETODDS_LLAMA_HELPER=\n\n# Trusted FFmpeg executable used when packaging the desktop app.\nMEETODDS_FFMPEG_BINARY=\n''')
+
+          Path('docs/APP_IDENTITY_MIGRATION.md').write_text('''# MeetOdds desktop identity migration\n\nMeetOdds changed its Tauri bundle identifier from `com.meetily.ai` to `com.meetodds.app`.\n\nBefore database, model, onboarding, or settings initialization, the new app looks for the sibling legacy app-data directory and performs a copy-first migration.\n\nSafety properties:\n\n- `meeting_minutes.sqlite` plus WAL/SHM files are copied, never moved.\n- Existing recording folders and stored absolute `folder_path` values are not renamed or rewritten.\n- Models, settings, onboarding state, and other app-data files are copied when missing.\n- The legacy app-data directory remains intact as a rollback copy.\n- If both locations contain different meeting databases, MeetOdds refuses to overwrite either one.\n- A migration marker is written only after the copy completes, so interrupted copies can resume safely.\n\nClose older MeetOdds/Meetily desktop builds before the first launch of an identifier-migrating build so SQLite files are not changing during the copy.\n''')
+
+          Path('THIRD_PARTY_NOTICES.md').write_text('''# Third-Party Notices\n\n## Meetily Community Edition\n\nMeetOdds began from and still contains source code derived from Meetily Community Edition by Zackriya Solutions.\n\nOriginal project: `Zackriya-Solutions/meetily`  \nLicense: MIT  \nOriginal copyright: Copyright (c) 2024 Zackriya Solutions\n\nThe applicable MIT permission notice is retained in `LICENSE.md`. This notice records source provenance; MeetOdds does not depend on Meetily-hosted backend, updater, analytics, release, or executable-binary services.\n''')
+
+          license_path = Path('LICENSE.md')
+          license_text = license_path.read_text()
+          if 'Copyright (c) 2026 MeetOdds contributors' not in license_text:
+              license_text = license_text.replace(
+                  'Copyright (c) 2024 Zackriya Solutions\n',
+                  'Copyright (c) 2024 Zackriya Solutions\nCopyright (c) 2026 MeetOdds contributors\n',
+              )
+              license_path.write_text(license_text)
+
+          for directory in [
+              'backend',
+              'scripts',
+              '.github/upstream-workflows-disabled',
+              'frontend/src-tauri/src/audio_v2',
+          ]:
+              path = Path(directory)
+              if path.exists():
+                  shutil.rmtree(path)
+
+          for filename in [
+              '.gitmodules',
+              '.github/UPSTREAM_IMPORT.md',
+              'frontend/API.md',
+              'frontend/src-tauri/src/lib_old_complex.rs',
+              'frontend/src-tauri/CLEANUP_PLAN.md',
+              'frontend/src-tauri/LOGGING_OPTIMIZATIONS.md',
+              'frontend/src-tauri/NOTIFICATION_TESTING.md',
+          ]:
+              path = Path(filename)
+              if path.exists():
+                  path.unlink()
+          PY
+
+      - name: Sanity-check source cleanup
+        shell: bash
+        run: |
+          ! git grep -n 'Zackriya-Solutions/meeting-minutes/releases' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md' ':!.github/workflows'
+          ! git grep -n 'Zackriya-Solutions/ffmpeg-binaries' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md' ':!.github/workflows'
+          ! git grep -n 'MEETILY_LLAMA_HELPER' -- . ':!.github/workflows'
+          ! git grep -n 'localhost:5167\|localhost:8178' -- frontend/src-tauri/tauri.conf.json
+          ! git grep -n 'tauri_plugin_updater\|plugin-updater' -- frontend/src-tauri frontend/package.json
+          test ! -e backend
+          test ! -e .gitmodules
+          test ! -e scripts
+          test ! -e frontend/src-tauri/src/audio_v2
+          git diff --check
+
+      - name: Commit source cleanup
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A ':!.github/workflows'
+          if git diff --cached --quiet; then
+            echo 'No source cleanup changes remain to commit.'
+            exit 0
+          fi
+          git commit -m 'refactor: remove dead Meetily runtime and metadata [skip ci]' \
+            -m 'Preserve current meetings with copy-first app-data migration while removing the retired backend, whisper submodule, obsolete source trees, upstream updater integration, and stale metadata.'
+          git push origin HEAD:refactor/meetodds-decouple-phase1

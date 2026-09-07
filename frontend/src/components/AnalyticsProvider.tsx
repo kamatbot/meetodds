@@ -53,9 +53,18 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
       }
 
       setIsAnalyticsOptedIn(analyticsOptedIn as boolean);
-      // Fix: Use fresh value from store, not stale state
+      // A migrated user may have opted in when the old upstream analytics key
+      // was bundled. MeetOdds never silently substitutes another analytics
+      // project: if this build has no MeetOdds-owned key, persist analytics off.
       if (analyticsOptedIn) {
-        await initAnalytics2();
+        try {
+          await initAnalytics2();
+        } catch (error) {
+          console.warn('Analytics is unavailable in this MeetOdds build:', error);
+          setIsAnalyticsOptedIn(false);
+          await store.set('analyticsOptedIn', false);
+          await store.save();
+        }
       }
     }
 

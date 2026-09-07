@@ -8,17 +8,27 @@ static ANALYTICS_CLIENT: std::sync::Mutex<Option<Arc<AnalyticsClient>>> = std::s
 
 #[command]
 pub async fn init_analytics() -> Result<(), String> {
+    let api_key = option_env!("MEETODDS_POSTHOG_API_KEY")
+        .unwrap_or("")
+        .trim();
+
+    if api_key.is_empty() {
+        let mut guard = ANALYTICS_CLIENT.lock().unwrap();
+        *guard = None;
+        return Err("Analytics is not configured in this MeetOdds build".to_string());
+    }
+
     let config = AnalyticsConfig {
-        api_key: "phc_Aa9PqeCkDkVbtbRsYjtmHANBfcscjCVupxZwrtL5vZ77".to_string(),
+        api_key: api_key.to_string(),
         host: Some("https://us.i.posthog.com".to_string()),
         enabled: true,
     };
-    
+
     let client = Arc::new(AnalyticsClient::new(config).await);
-    
+
     let mut guard = ANALYTICS_CLIENT.lock().unwrap();
     *guard = Some(client);
-    
+
     Ok(())
 }
 
@@ -35,7 +45,7 @@ pub async fn track_event(event_name: String, properties: Option<HashMap<String, 
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_event(&event_name, properties).await
     } else {
@@ -49,7 +59,7 @@ pub async fn identify_user(user_id: String, properties: Option<HashMap<String, S
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.identify(user_id, properties).await
     } else {
@@ -63,7 +73,7 @@ pub async fn track_meeting_started(meeting_id: String) -> Result<(), String> {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_meeting_started(&meeting_id).await
     } else {
@@ -77,7 +87,7 @@ pub async fn track_recording_started(meeting_id: String) -> Result<(), String> {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_recording_started(&meeting_id).await
     } else {
@@ -91,7 +101,7 @@ pub async fn track_recording_stopped(meeting_id: String, duration_seconds: Optio
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_recording_stopped(&meeting_id, duration_seconds).await
     } else {
@@ -105,7 +115,7 @@ pub async fn track_meeting_deleted(meeting_id: String) -> Result<(), String> {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_meeting_deleted(&meeting_id).await
     } else {
@@ -119,7 +129,7 @@ pub async fn track_settings_changed(setting_type: String, new_value: String) -> 
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_settings_changed(&setting_type, &new_value).await
     } else {
@@ -133,7 +143,7 @@ pub async fn track_feature_used(feature_name: String) -> Result<(), String> {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_feature_used(&feature_name).await
     } else {
@@ -154,7 +164,7 @@ pub async fn start_analytics_session(user_id: String) -> Result<String, String> 
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.start_session(user_id).await
     } else {
@@ -168,7 +178,7 @@ pub async fn end_analytics_session() -> Result<(), String> {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.end_session().await
     } else {
@@ -182,7 +192,7 @@ pub async fn track_daily_active_user() -> Result<(), String> {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_daily_active_user().await
     } else {
@@ -196,7 +206,7 @@ pub async fn track_user_first_launch() -> Result<(), String> {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_user_first_launch().await
     } else {
@@ -211,7 +221,7 @@ pub async fn track_summary_generation_started(model_provider: String, model_name
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_summary_generation_started(&model_provider, &model_name, transcript_length).await
     } else {
@@ -225,7 +235,7 @@ pub async fn track_summary_generation_completed(model_provider: String, model_na
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_summary_generation_completed(&model_provider, &model_name, success, duration_seconds, error_message.as_deref()).await
     } else {
@@ -239,7 +249,7 @@ pub async fn track_summary_regenerated(model_provider: String, model_name: Strin
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_summary_regenerated(&model_provider, &model_name).await
     } else {
@@ -253,7 +263,7 @@ pub async fn track_model_changed(old_provider: String, old_model: String, new_pr
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_model_changed(&old_provider, &old_model, &new_provider, &new_model).await
     } else {
@@ -364,7 +374,7 @@ pub async fn is_analytics_session_active() -> bool {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.is_session_active().await
     } else {
