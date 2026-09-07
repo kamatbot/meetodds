@@ -16,8 +16,11 @@ interface Props extends VirtualizedTranscriptViewProps {
 }
 const realTime = (value: number | undefined) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 
-/** The note affordance is outside the audio/ASR path. Only finalized turns can
- * be annotated; speculative live captions are not evidence and have no +.
+/** The note affordance is outside the audio/ASR path. `noteTranscripts` contains
+ * canonical transcript rows; speculative captions are rendered through the
+ * separate live-preview stream and never reach this component. Do not use the
+ * legacy `is_partial` flag to hide note controls here because some canonical
+ * live rows still carry it while they are visible in the transcript.
  */
 export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNotes = false, ...view }: Props) {
   const { notebook, error, loading, refresh } = useMomentNotes(meetingId);
@@ -38,7 +41,9 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
   const open = async (segment: TranscriptSegmentData) => {
     if (!meetingId || pending.current) return;
     const original = originals.get(segment.id);
-    if (liveNotes && (!original || original.is_partial)) return;
+    // A live row is noteable as soon as it exists in the canonical transcript
+    // collection. Speculative captions are not part of `originals` at all.
+    if (liveNotes && !original) return;
     pending.current = true; setOpening(segment.id); setOpenError(null);
     try {
       const existing = notesBySegment.get(segment.id)?.[0];
@@ -57,20 +62,20 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
     finally { pending.current = false; setOpening(null); }
   };
   const renderAction = (segment: TranscriptSegmentData) => {
-    if (!meetingId || (liveNotes && (!originals.get(segment.id) || originals.get(segment.id)?.is_partial))) return null;
+    if (!meetingId || (liveNotes && !originals.has(segment.id))) return null;
     const count = notesBySegment.get(segment.id)?.length ?? 0;
     const timestamp = originals.get(segment.id)?.audio_start_time;
     const label = `${count ? 'View personal note' : 'Add personal note'} · ${timestamp == null ? 'this transcript moment' : momentLabel(timestamp)}`;
     return <button type="button" title={label} aria-label={label} disabled={loading || Boolean(error) || opening !== null}
       onClick={() => void open(segment)}
-      className={`relative inline-grid h-8 w-8 shrink-0 place-items-center rounded-full border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-35 ${count ? 'border-accent/40 bg-accent-soft text-accent' : 'border-border bg-surface text-3 hover:border-accent hover:text-accent'}`}>
+      className={`relative inline-grid h-8 w-8 shrink-0 place-items-center rounded-full border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-35 ${count ? 'border-accent/50 bg-accent-soft text-accent' : 'border-accent/35 bg-accent-soft/60 text-accent hover:border-accent hover:bg-accent-soft'}`}>
       {opening === segment.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" strokeWidth={1.75} />}
       {count > 0 && <span aria-hidden="true" className="absolute -right-1 -top-1 grid h-3.5 min-w-[14px] place-items-center rounded-full bg-accent px-0.5 text-[9px] font-semibold text-white">{count}</span>}
     </button>;
   };
   return <div className="flex h-full min-h-0 flex-col">
     {meetingId && <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-3">
-      <span>“+” adds a note at this moment</span>
+      <span>Use + beside a transcript line to add a note at that moment</span>
       <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-accent hover:bg-accent-soft"
         onClick={() => void openManualNotesWindow(meetingId).catch(() => setOpenError('Could not open the notebook. Retry.'))}>
         <NotebookPen className="h-3.5 w-3.5" />{notebook ? `${notebook.notes.length} linked notes` : 'Notebook'}
