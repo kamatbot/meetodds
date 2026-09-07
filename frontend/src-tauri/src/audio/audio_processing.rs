@@ -224,7 +224,9 @@ impl LoudnessNormalizer {
                     // Update gain based on cumulative loudness
                     if let Ok(current_lufs) = self.ebur128.loudness_global() {
                         if current_lufs.is_finite() && current_lufs < 0.0 {
-                            let gain_db = self.target_lufs - current_lufs;
+                            // Clamp gain adjustment: max 3 dB attenuation so impulsive noises
+                            // (like keyboard typing) do not duck microphone sensitivity and starve VAD.
+                            let gain_db = (self.target_lufs - current_lufs).clamp(-3.0, 12.0);
                             self.gain_linear = 10_f32.powf(gain_db as f32 / 20.0);
                         }
                     }

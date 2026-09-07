@@ -742,18 +742,12 @@ impl WhisperEngine {
                 Err(_) => continue,
             };
 
-            // Calculate confidence based on segment length and duration (simplified approach)
-            let segment_length = segment_text.len() as f32;
-            let segment_confidence = if segment_length > 0.0 {
-                (segment_length / 100.0).min(0.9) + 0.1 // 0.1 to 1.0 confidence based on text length
-            } else {
-                0.1
-            };
-            total_confidence += segment_confidence;
-            segment_count += 1;
-
             let cleaned_text = segment_text.trim();
             if !cleaned_text.is_empty() {
+                // Whisper's internal no_speech_thold, entropy_thold, and logprob_thold already
+                // gate non-speech. Decoded segments are high confidence; do not penalize short phrases.
+                total_confidence += 0.90;
+                segment_count += 1;
                 if !result.is_empty() {
                     result.push(' ');
                 }

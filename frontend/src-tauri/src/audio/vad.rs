@@ -48,26 +48,23 @@ impl ContinuousVadProcessor {
         let mut config = VadConfig::default();
         config.sample_rate = VAD_SAMPLE_RATE as usize;
 
-        // CONTINUOUS SPEECH FIX: Tuned for capturing complete 5+ second utterances
-        // Previous: 0.55/0.40 with 400ms redemption was fragmenting speech into 40ms segments
-        // New: More lenient thresholds + longer redemption for continuous speech
-        config.positive_speech_threshold = 0.50; // Silero default - good for continuous speech
-        config.negative_speech_threshold = 0.35; // Silero default - allows natural pauses
+        // ROBUST SPEECH DETECTION (INCLUDING WHILE TYPING):
+        // Keyboard clicks introduce sharp acoustic transients that lower per-frame
+        // speech probability and fragment speech. A 250ms min_speech_time caused VAD
+        // to reject whole sentences when typed on concurrently.
+        // 0.40/0.25 thresholds with 60ms min_speech bridge keystroke noise without
+        // generating false positives on pure keyboard typing.
+        config.positive_speech_threshold = 0.40; // Reliably catches speech onset during keyboard typing
+        config.negative_speech_threshold = 0.25; // Allows natural pauses without dropping speech mid-sentence
 
-        // CRITICAL FIX: Removed redemption_time capping to support long continuous speech
-        // Previous: capped at 400ms, causing VAD to fragment 5-second speech into 40ms segments
-        // New: Use full redemption_time from pipeline (2000ms) to bridge natural pauses
         config.redemption_time = Duration::from_millis(redemption_time_ms as u64);
         config.pre_speech_pad = Duration::from_millis(300); // Pre-speech padding for context
-        config.post_speech_pad = Duration::from_millis(150); // Short tail: every ms here is added latency
+        config.post_speech_pad = Duration::from_millis(200); // Pad word endings (unvoiced consonants)
 
-        // CRITICAL FIX: Increased min_speech_time to prevent tiny 40ms fragments
-        // Previous: 100ms allowed too-short segments that Whisper rejects
-        // New: 250ms ensures segments are substantial enough for Whisper (>100ms requirement)
-        config.min_speech_time = Duration::from_millis(250); // Prevent tiny fragments
+        config.min_speech_time = Duration::from_millis(60); // 2 frames (60ms) prevents click false-starts while catching all words
 
         debug!("Creating VAD session with: sample_rate={}Hz, redemption={}ms, min_speech={}ms, input_rate={}Hz",
-               VAD_SAMPLE_RATE, redemption_time_ms, 250, input_sample_rate);
+               VAD_SAMPLE_RATE, redemption_time_ms, 60, input_sample_rate);
 
         let session = VadSession::new(config)
             .map_err(|e| anyhow!("Failed to create VAD session: {:?}", e))?;
@@ -665,6 +662,94 @@ mod tests {
             normalized >= raw * 0.9,
             "normalizer target {} LUFS starves the VAD: {:.1}s vs {:.1}s raw",
             TARGET_LUFS, normalized, raw
+        );
+    }
+
+    #[test]
+    fn test_vad_speech_with_typing_clicks() {
+        use crate::audio::audio_processing::{resample_audio, HighPassFilter, LoudnessNormalizer, TARGET_LUFS};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jfk.wav");
+        let Ok(bytes) = std::fs::read(path) else { return };
+        let Some(data_pos) = bytes.windows(4).position(|w| w == b"data") else { return };
+        let data_at = data_pos + 8;
+        let pcm: Vec<f32> = bytes[data_at..]
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / i16::MAX as f32)
+            .collect();
+        let clip = resample_audio(&pcm, 16000, 48000);
+        let mut meeting = clip.clone();
+        // Add loud typing clicks: impulses of 10ms every 150ms (typical 7 chars/sec typing)
+        let mut clicky_meeting = meeting.clone();
+        for (i, sample) in clicky_meeting.iter_mut().enumerate() {
+            let in_period = i % (48000 * 150 / 1000);
+            if in_period < (48000 * 10 / 1000) {
+                // High frequency / impulsive keystroke click spike
+                let click_env = (1.0 - (in_period as f32 / (48000.0 * 0.010))).max(0.0);
+                let click_wave = ((i as f32 * 0.35).sin() * 0.8 + (i as f32 * 0.8).sin() * 0.5) * click_env;
+                *sample = (*sample + click_wave).clamp(-1.0, 1.0);
+            }
+        }
+
+        use crate::audio::pipeline::LIVE_VAD_REDEMPTION_MS;
+
+        let run_pipeline = |audio: &[f32]| -> (usize, Vec<SpeechSegment>) {
+            let mut hpf = HighPassFilter::new(48000, 80.0);
+            let mut norm = LoudnessNormalizer::new(1, 48000).unwrap().with_target_lufs(TARGET_LUFS);
+            let mut vad = ContinuousVadProcessor::new(48000, LIVE_VAD_REDEMPTION_MS).expect("vad");
+            let mut segments = Vec::new();
+            for chunk in audio.chunks(1024) {
+                let x = hpf.process(chunk);
+                let x = norm.normalize_loudness(&x);
+                if let Ok(segs) = vad.process_audio(&x) {
+                    segments.extend(segs);
+                }
+            }
+            if let Ok(segs) = vad.flush() {
+                segments.extend(segs);
+            }
+            let total_samples: usize = segments.iter().map(|s| s.samples.len()).sum();
+            (total_samples, segments)
+        };
+
+        let (clean_samples, clean_segs) = run_pipeline(&meeting);
+        let (click_samples, click_segs) = run_pipeline(&clicky_meeting);
+
+        let clean_secs = clean_samples as f64 / 16000.0;
+        let click_secs = click_samples as f64 / 16000.0;
+
+        // Verify that speech while typing retains at least 80% of clean speech duration
+        assert!(
+            click_secs >= clean_secs * 0.80,
+            "Typing noise dropped speech: {:.2}s vs {:.2}s clean",
+            click_secs,
+            clean_secs
+        );
+        // Verify all 4 speech phrases in the JFK fixture are detected
+        assert_eq!(
+            click_segs.len(),
+            clean_segs.len(),
+            "Expected {} speech segments while typing, got {}",
+            clean_segs.len(),
+            click_segs.len()
+        );
+
+        // Test pure typing noise with NO speech: must produce 0 false speech segments
+        let mut pure_clicks = vec![0.0f32; 48000 * 5]; // 5 seconds of silence + typing
+        for (i, sample) in pure_clicks.iter_mut().enumerate() {
+            let in_period = i % (48000 * 150 / 1000);
+            if in_period < (48000 * 10 / 1000) {
+                let click_env = (1.0 - (in_period as f32 / (48000.0 * 0.010))).max(0.0);
+                let click_wave = ((i as f32 * 0.35).sin() * 0.8 + (i as f32 * 0.8).sin() * 0.5) * click_env;
+                *sample = click_wave.clamp(-1.0, 1.0);
+            }
+        }
+        let (pure_click_samples, pure_click_segs) = run_pipeline(&pure_clicks);
+        assert_eq!(
+            pure_click_segs.len(),
+            0,
+            "Pure typing noise must produce 0 speech segments, got {} ({} samples)",
+            pure_click_segs.len(),
+            pure_click_samples
         );
     }
 

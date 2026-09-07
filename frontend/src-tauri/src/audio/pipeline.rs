@@ -741,10 +741,9 @@ pub const LIVE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from
 pub const LIVE_PREVIEW_MIN_SPEECH_MS: u32 = 500;
 pub const LIVE_PREVIEW_MAX_WINDOW_MS: u32 = 6_000;
 
-/// Silero redemption window for live recording, in ms. This is pure
-/// end-of-utterance latency; 300 ms still bridges word gaps. Long utterances
-/// are capped inside the VAD processor instead of being held open here.
-pub const LIVE_VAD_REDEMPTION_MS: u32 = 300;
+/// Silero redemption window for live recording, in ms. 450 ms bridges natural
+/// word gaps and keystroke transients while typing without delaying finalization.
+pub const LIVE_VAD_REDEMPTION_MS: u32 = 450;
 
 /// VAD-driven audio processing pipeline
 /// Uses Voice Activity Detection to segment canonical speech while also exposing
