@@ -7,21 +7,21 @@ import remarkGfm from 'remark-gfm';
 import { Bold, Italic, Heading2, List, ListChecks, Quote, Code2 } from 'lucide-react';
 
 export function NoteMarkdown({ content }: { content: string }) {
-  return <div className="prose max-w-none break-words text-[18px] leading-[1.85] text-text prose-headings:font-semibold prose-headings:text-text prose-p:my-3 prose-a:text-accent prose-blockquote:border-accent prose-blockquote:text-2 prose-code:text-text prose-pre:bg-bg prose-pre:text-text prose-th:text-text prose-td:text-text">
+  return <div className="prose max-w-none break-words text-sm leading-relaxed text-text prose-headings:font-semibold prose-headings:text-text prose-p:my-2 prose-a:text-accent prose-blockquote:border-accent prose-blockquote:text-2 prose-code:text-text prose-pre:bg-bg prose-pre:text-text prose-th:text-text prose-td:text-text">
     <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
-      h1: ({ children }) => <h2 className="mb-4 mt-8 text-3xl font-semibold leading-tight">{children}</h2>,
-      h2: ({ children }) => <h2 className="mb-3 mt-7 text-2xl font-semibold leading-snug">{children}</h2>,
-      h3: ({ children }) => <h3 className="mb-2 mt-6 text-xl font-semibold">{children}</h3>,
-      p: ({ children }) => <p className="my-3">{children}</p>,
-      ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
-      ol: ({ children, start }) => <ol start={start} className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
-      blockquote: ({ children }) => <blockquote className="my-4 border-l-2 border-accent/40 pl-5 text-2">{children}</blockquote>,
-      pre: ({ children }) => <pre className="my-4 overflow-x-auto rounded-lg bg-bg p-4 text-sm leading-6 text-text">{children}</pre>,
-      table: ({ children }) => <div className="my-4 overflow-x-auto"><table className="w-full border-collapse text-base">{children}</table></div>,
-      th: ({ children }) => <th className="border border-border bg-bg px-3 py-2 text-left font-semibold">{children}</th>,
-      td: ({ children }) => <td className="border border-border px-3 py-2 align-top">{children}</td>,
+      h1: ({ children }) => <h2 className="mb-3 mt-5 text-xl font-semibold leading-snug">{children}</h2>,
+      h2: ({ children }) => <h2 className="mb-2.5 mt-4 text-lg font-semibold leading-snug">{children}</h2>,
+      h3: ({ children }) => <h3 className="mb-2 mt-3.5 text-base font-semibold">{children}</h3>,
+      p: ({ children }) => <p className="my-2">{children}</p>,
+      ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
+      ol: ({ children, start }) => <ol start={start} className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+      blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-accent/40 pl-4 text-2">{children}</blockquote>,
+      pre: ({ children }) => <pre className="my-3 overflow-x-auto rounded-lg bg-bg p-3 text-xs leading-5 text-text">{children}</pre>,
+      table: ({ children }) => <div className="my-3 overflow-x-auto"><table className="w-full border-collapse text-xs">{children}</table></div>,
+      th: ({ children }) => <th className="border border-border bg-bg px-2.5 py-1.5 text-left font-semibold">{children}</th>,
+      td: ({ children }) => <td className="border border-border px-2.5 py-1.5 align-top">{children}</td>,
       // Never load remote pixels merely because a private note is previewed.
-      img: ({ alt }) => <span className="rounded border border-border px-2 py-1 text-sm text-2">Image not loaded{alt ? `: ${alt}` : ''}</span>,
+      img: ({ alt }) => <span className="rounded border border-border px-2 py-1 text-xs text-2">Image not loaded{alt ? `: ${alt}` : ''}</span>,
       a: ({ href, children }) => <a href={href} rel="noreferrer noopener" onClick={event => {
         event.preventDefault();
         if (href && /^(https?:|mailto:)/i.test(href)) void invoke('open_external_url', { url: href }).catch(() => undefined);
@@ -61,18 +61,18 @@ export default function MarkdownNoteEditor({ value, onChange, readOnly, onSave }
     { title: 'Code', Icon: Code2, run: () => insert('`', '`', 'code') },
   ];
   return <div className="flex min-h-[360px] flex-1 flex-col">
-    <div className="mb-5 flex flex-wrap items-center gap-1 border-b border-border pb-3">
+    <div className="mb-4 flex flex-wrap items-center gap-1 border-b border-border pb-2.5">
       {tools.map(({ title, Icon, run }) => <button key={title} type="button" aria-label={title} title={title}
         disabled={readOnly || mode !== 'write'} onMouseDown={e => e.preventDefault()} onClick={run}
-        className="inline-grid h-9 w-9 place-items-center rounded-lg text-2 hover:bg-bg hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-30"><Icon className="h-[17px] w-[17px]" /></button>)}
-      <div className="ml-auto flex rounded-lg bg-bg p-1" role="group" aria-label="Markdown view">
+        className="inline-grid h-8 w-8 place-items-center rounded-md text-2 hover:bg-bg hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-30"><Icon className="h-4 w-4" /></button>)}
+      <div className="ml-auto flex rounded-md bg-bg p-0.5" role="group" aria-label="Markdown view">
         {(['write', 'preview'] as const).map(option => <button type="button" key={option} aria-pressed={mode === option}
-          onClick={() => setMode(option)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${mode === option ? 'bg-surface text-text shadow-sm' : 'text-2'}`}>
+          onClick={() => setMode(option)} className={`rounded px-2.5 py-1 text-xs font-medium ${mode === option ? 'bg-surface text-text shadow-sm' : 'text-2'}`}>
           {option === 'write' ? 'Write' : 'Preview'}</button>)}
       </div>
     </div>
-    {mode === 'preview' ? <div className="min-h-[360px] pb-16" aria-label="Markdown preview">
-      {value.trim() ? <NoteMarkdown content={value} /> : <p className="text-[18px] text-3">Your formatted note will appear here.</p>}
+    {mode === 'preview' ? <div className="min-h-[300px] pb-12" aria-label="Markdown preview">
+      {value.trim() ? <NoteMarkdown content={value} /> : <p className="text-sm text-3">Your formatted note will appear here.</p>}
     </div> : <textarea ref={input} value={value} readOnly={readOnly} autoFocus spellCheck aria-label="Personal Markdown note"
       placeholder="What stood out? Capture a thought, question, or next step…"
       onChange={e => onChange(e.target.value)}
@@ -84,7 +84,7 @@ export default function MarkdownNoteEditor({ value, onChange, readOnly, onSave }
         if (key === 'i') { event.preventDefault(); insert('*', '*'); }
         if (key === 'k') { event.preventDefault(); insert('[', '](https://)', 'link text'); }
       }}
-      className="min-h-[45vh] w-full flex-1 resize-y border-0 bg-transparent pb-16 text-[18px] font-normal leading-[1.85] text-text outline-none placeholder:text-3 read-only:opacity-60" />}
-    <p className="pb-6 text-xs text-3">Markdown supported · Headings, lists, checkboxes, links and code · ⌘S to save</p>
+      className="min-h-[45vh] w-full flex-1 resize-y border-0 bg-transparent pb-12 text-sm font-normal leading-relaxed text-text outline-none placeholder:text-3 read-only:opacity-60" />}
+    <p className="pb-4 text-[11px] text-3">Markdown supported · Headings, lists, checkboxes, links and code · ⌘S to save</p>
   </div>;
 }

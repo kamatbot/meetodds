@@ -52,54 +52,53 @@ function DocumentEditor({ target, note, flushRef, onChanged }: {
   };
   const saved = draft.status === 'saved';
   const title = target.noteId ? noteTitle(draft.value.markdown) : 'Meeting notes';
-  return <article className="mx-auto flex w-full max-w-[820px] flex-1 flex-col px-8 pb-12 pt-10 lg:px-12 lg:pt-14">
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-      <div className="flex items-center gap-2 font-medium text-accent"><Clock3 className="h-4 w-4" />
-        {note?.segmentId ? (note.audioStartTime == null ? 'Transcript note' : `At ${momentLabel(note.audioStartTime)}`) : 'Personal notebook'}
+  return <article className="mx-auto flex w-full max-w-[540px] flex-1 flex-col px-5 pb-8 pt-4">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+      <div className="flex items-center gap-1.5 font-medium text-accent"><Clock3 className="h-3.5 w-3.5" />
+        {note?.segmentId ? (note.audioStartTime == null ? 'Transcript note' : `At ${momentLabel(note.audioStartTime)}`) : 'Meeting notes'}
       </div>
       <div className="flex items-center gap-1.5 text-xs text-2" role="status" aria-live="polite">
         {draft.status === 'loading' || draft.status === 'saving' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : saved ? <Check className="h-3.5 w-3.5" /> : null}
-        {draft.status === 'loading' ? 'Opening…' : draft.status === 'saving' ? 'Saving…' : saved ? 'Saved on this Mac' : draft.status === 'dirty' ? 'Unsaved changes' : 'Save needs attention'}
+        {draft.status === 'loading' ? 'Opening…' : draft.status === 'saving' ? 'Saving…' : saved ? 'Saved on Mac' : draft.status === 'dirty' ? 'Unsaved' : 'Save needed'}
       </div>
     </div>
-    <h1 className="mb-8 break-words font-serif text-[34px] font-medium leading-tight tracking-[-0.025em] text-text">{title}</h1>
-    {note?.sourceText && <section className="mb-8 border-l-2 border-accent/40 pl-5" aria-label="Transcript moment linked to this note">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-[0.09em] text-2">What was being said{note.sourceSpeaker ? ` · ${note.sourceSpeaker}` : ''}</span>
-        <button type="button" onClick={() => void jump()} className="inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline">View transcript <ArrowUpRight className="h-3.5 w-3.5" /></button>
+    <h1 className="mb-4 break-words text-xl font-semibold leading-snug tracking-tight text-text">{title}</h1>
+    {note?.sourceText && <section className="mb-4 rounded-lg border border-border bg-bg/50 p-3" aria-label="Transcript moment linked to this note">
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-2">Quoted transcript{note.sourceSpeaker ? ` · ${note.sourceSpeaker}` : ''}</span>
+        <button type="button" onClick={() => void jump()} className="inline-flex items-center gap-1 text-[11px] font-medium text-accent hover:underline">View in meeting <ArrowUpRight className="h-3 w-3" /></button>
       </div>
-      <details open><summary className="cursor-pointer text-xs text-3">Original transcript context</summary>
-        <blockquote className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-[16px] leading-7 text-2">{note.sourceText}</blockquote>
-      </details>
-      {note.anchorState === 'changed' && <p className="mt-2 text-xs text-warn">The transcript has changed since this note was created. The original context is preserved above.</p>}
-      {note.anchorState === 'unresolved' && <p className="mt-2 text-xs text-3">Linked to the captured moment. A saved transcript segment has not yet been matched.</p>}
+      <blockquote className="max-h-28 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-2">{note.sourceText}</blockquote>
+      {note.anchorState === 'changed' && <p className="mt-1.5 text-[11px] text-warn">The transcript was updated since this note was created. Original quote preserved.</p>}
+      {note.anchorState === 'unresolved' && <p className="mt-1.5 text-[11px] text-3">Linked to captured moment.</p>}
     </section>}
-    {!target.noteId && <p className="mb-6 text-sm leading-6 text-2">Your existing meeting notes are kept here. Use a “+” beside any transcript turn to add a note linked to that moment.</p>}
-    {draft.storageWarning && <p role="alert" className="mb-4 rounded-lg border border-warn p-3 text-sm text-warn">Local draft recovery is unavailable. Keep this window open until the note shows Saved.</p>}
-    {draft.recovered && <p role="status" className="mb-4 text-sm text-2">Recovered an unsaved draft from this device.</p>}
-    {draft.conflict && <div role="alert" className="mb-5 rounded-xl border border-warn p-4 text-sm">
+    {!target.noteId && <p className="mb-4 text-xs leading-relaxed text-2">Meeting notes are saved locally. Use “+” beside any transcript turn to link a note to that moment.</p>}
+    {draft.storageWarning && <p role="alert" className="mb-3 rounded-lg border border-warn p-2.5 text-xs text-warn">Local draft recovery is unavailable. Keep this window open until Saved.</p>}
+    {draft.recovered && <p role="status" className="mb-3 text-xs text-2">Recovered an unsaved draft from this device.</p>}
+    {draft.conflict && <div role="alert" className="mb-4 rounded-xl border border-warn p-3 text-xs">
       <p className="font-semibold text-text">Two versions of this note differ</p>
       <p className="mt-1 text-2">Your draft is preserved. Choose deliberately before replacing the saved note.</p>
-      <details className="mt-3"><summary className="cursor-pointer">Review saved version</summary><div className="mt-3 max-h-52 overflow-y-auto"><NoteMarkdown content={draft.conflict.markdown || '(Empty note)'} /></div></details>
-      <div className="mt-3 flex gap-2"><button type="button" className={button} onClick={() => draft.resolveConflict(true)}>Keep my draft</button><button type="button" className={button} onClick={() => draft.resolveConflict(false)}>Use saved version</button></div>
+      <details className="mt-2"><summary className="cursor-pointer">Review saved version</summary><div className="mt-2 max-h-40 overflow-y-auto"><NoteMarkdown content={draft.conflict.markdown || '(Empty note)'} /></div></details>
+      <div className="mt-3 flex gap-2"><button type="button" className={button} onClick={() => draft.resolveConflict(true)}>Keep draft</button><button type="button" className={button} onClick={() => draft.resolveConflict(false)}>Use saved</button></div>
     </div>}
-    {(draft.error || navigationError) && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-border p-3 text-sm text-danger">
+    {(draft.error || navigationError) && <div role="alert" className="mb-3 flex items-start justify-between gap-2 rounded-lg border border-border p-2.5 text-xs text-danger">
       <p>{navigationError || draft.error}</p><button type="button" className="shrink-0 underline" onClick={() => { setNavigationError(null); draft.retry(); }}>Retry</button>
     </div>}
-    {target.noteId && <label className="mb-6 flex cursor-pointer items-start gap-3 text-sm text-2">
-      <input type="checkbox" checked={draft.value.includeInSummary} disabled={!draft.ready} onChange={e => draft.change({ includeInSummary: e.target.checked })} className="mt-1 accent-accent" />
-      <span><span className="font-medium text-text">Use this note in AI summaries</span><span className="mt-0.5 block text-xs leading-5 text-3">Selected notes are included in the summary input review. Personal observations are kept separate from what participants actually said.</span></span>
+    {target.noteId && <label className="mb-4 flex cursor-pointer items-start gap-2.5 text-xs text-2">
+      <input type="checkbox" checked={draft.value.includeInSummary} disabled={!draft.ready} onChange={e => draft.change({ includeInSummary: e.target.checked })} className="mt-0.5 accent-accent" />
+      <span><span className="font-medium text-text">Include in AI summary</span><span className="mt-0.5 block text-[11px] leading-4 text-3">Notes are kept separate from spoken transcript.</span></span>
     </label>}
-    {!draft.ready && draft.status === 'error' && !draft.conflict && <button type="button" className="mb-4 self-start text-sm text-2 underline" onClick={() => void closeManualNotesWindow()}>Close without changing saved notes or recovery drafts</button>}
+    {!draft.ready && draft.status === 'error' && !draft.conflict && <button type="button" className="mb-3 self-start text-xs text-2 underline" onClick={() => void closeManualNotesWindow()}>Close</button>}
     <MarkdownNoteEditor value={draft.value.markdown} readOnly={!draft.ready} onChange={markdown => draft.change({ markdown })} onSave={saveNow} />
   </article>;
 }
 
 function NotebookWorkspace({ target, flushRef }: { target: NotesWindowTarget; flushRef: MutableRefObject<Flush> }) {
   const { notebook, error, loading, refresh } = useMomentNotes(target.meetingId);
-  const [sidebar, setSidebar] = useState(true);
+  const [sidebar, setSidebar] = useState(false);
   const [windowError, setWindowError] = useState<string | null>(null);
   const open = async (id: string | null) => {
+    setSidebar(false);
     try { await flushRef.current(); await openManualNotesWindow(target.meetingId, id); }
     catch (error) { setWindowError(error instanceof Error ? error.message : String(error)); }
   };
@@ -110,35 +109,47 @@ function NotebookWorkspace({ target, flushRef }: { target: NotesWindowTarget; fl
   const selected = notebook?.notes.find(n => n.id === target.noteId) ?? null;
   const validSelection = !target.noteId || Boolean(selected);
   return <div className="flex h-screen flex-col bg-surface font-sans text-text">
-    <header data-tauri-drag-region className="flex h-14 shrink-0 items-center gap-2 border-b border-border pl-[92px] pr-5">
-      <button type="button" aria-label="Toggle notebook sidebar" aria-expanded={sidebar} className={button} onClick={() => setSidebar(v => !v)}><PanelLeft className="h-[17px] w-[17px]" /></button>
-      <span data-tauri-drag-region className="min-w-0 flex-1 truncate text-sm font-medium">{notebook?.title || 'Meeting notebook'}</span>
-      <button type="button" className={button} title="Toggle full screen" aria-label="Toggle notes full screen" onClick={() => {
-        void invoke('toggle_manual_notes_fullscreen').catch(() => setWindowError('Could not change full screen mode. Use the macOS window controls.'));
-      }}><Expand className="h-[17px] w-[17px]" /></button>
-      <button type="button" className={button} onClick={() => void close()}><ArrowLeft className="h-4 w-4" /> Return to meeting</button>
+    <header data-tauri-drag-region className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border pl-[78px] pr-3">
+      <button type="button" aria-label="Toggle notebook sidebar" aria-expanded={sidebar} title="All notes in this meeting" className={button} onClick={() => setSidebar(v => !v)}>
+        <PanelLeft className="h-4 w-4" />
+      </button>
+      <span data-tauri-drag-region className="min-w-0 flex-1 truncate text-xs font-semibold">{notebook?.title || 'Meeting notebook'}</span>
+      <button type="button" className={button} title="Close notes and return to meeting" aria-label="Return to meeting" onClick={() => void close()}>
+        <ArrowLeft className="h-4 w-4" />
+        <span className="text-xs">Close</span>
+      </button>
     </header>
-    <div className="flex min-h-0 flex-1">
-      {sidebar && <aside className="flex w-[230px] shrink-0 flex-col border-r border-border bg-bg/60 px-3 py-6" aria-label="Meeting notebook">
-        <p className="px-3 pb-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-3">Notebook</p>
-        <button type="button" onClick={() => void open(null)} aria-current={!target.noteId ? 'page' : undefined} className={`flex items-center gap-2 rounded-lg px-3 py-3 text-left text-sm ${!target.noteId ? 'bg-accent-soft font-semibold text-accent' : 'text-2 hover:bg-bg'}`}><FileText className="h-4 w-4" /> Meeting notes</button>
-        <p className="px-3 pb-2 pt-7 text-[11px] font-semibold uppercase tracking-[0.12em] text-3">Transcript moments</p>
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-          {notebook?.notes.map(n => <button type="button" key={n.id} onClick={() => void open(n.id)} aria-current={target.noteId === n.id ? 'page' : undefined}
-            className={`w-full rounded-lg px-3 py-3 text-left ${target.noteId === n.id ? 'bg-accent-soft text-accent' : 'text-text hover:bg-bg'}`}>
-            <span className="mb-1 flex items-center gap-1.5 text-xs text-3"><Clock3 className="h-3 w-3" />{n.segmentId ? momentLabel(n.audioStartTime) : 'General note'}{!n.includeInSummary && <span className="ml-auto" title="Excluded from AI summaries">Private</span>}</span>
-            <span className="block line-clamp-2 text-sm font-medium leading-5">{noteTitle(n.markdown)}</span>
-          </button>)}
-          {!loading && notebook?.notes.length === 0 && <p className="px-3 py-4 text-sm leading-6 text-3">Click “+” beside a transcript turn. Your notes will appear here, linked to the conversation.</p>}
-        </div>
-        <p className="flex items-center gap-1.5 px-3 pt-6 text-xs text-3"><ShieldCheck className="h-3.5 w-3.5" /> Saved locally</p>
-      </aside>}
+    <div className="relative flex min-h-0 flex-1">
+      {sidebar && (
+        <>
+          <div className="absolute inset-0 z-20 bg-black/30 backdrop-blur-xs transition-opacity" onClick={() => setSidebar(false)} />
+          <aside className="absolute inset-y-0 left-0 z-30 flex w-[280px] max-w-[85%] flex-col border-r border-border bg-surface px-3 py-4 shadow-2xl" aria-label="Meeting notebook">
+            <div className="mb-2 flex items-center justify-between px-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-3">Notebook</p>
+              <button type="button" onClick={() => setSidebar(false)} className="rounded p-1 text-3 hover:text-text">
+                <PanelLeft className="h-4 w-4" />
+              </button>
+            </div>
+            <button type="button" onClick={() => void open(null)} aria-current={!target.noteId ? 'page' : undefined} className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm ${!target.noteId ? 'bg-accent-soft font-semibold text-accent' : 'text-2 hover:bg-bg'}`}><FileText className="h-4 w-4" /> Meeting notes</button>
+            <p className="px-3 pb-2 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-3">Transcript moments</p>
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+              {notebook?.notes.map(n => <button type="button" key={n.id} onClick={() => void open(n.id)} aria-current={target.noteId === n.id ? 'page' : undefined}
+                className={`w-full rounded-lg px-3 py-2.5 text-left ${target.noteId === n.id ? 'bg-accent-soft text-accent' : 'text-text hover:bg-bg'}`}>
+                <span className="mb-1 flex items-center gap-1.5 text-xs text-3"><Clock3 className="h-3 w-3" />{n.segmentId ? momentLabel(n.audioStartTime) : 'General note'}{!n.includeInSummary && <span className="ml-auto text-[10px]" title="Excluded from AI summaries">Private</span>}</span>
+                <span className="block line-clamp-2 text-xs font-medium leading-5">{noteTitle(n.markdown)}</span>
+              </button>)}
+              {!loading && notebook?.notes.length === 0 && <p className="px-3 py-4 text-xs leading-5 text-3">Click “+” beside a transcript turn to create notes linked to that conversation moment.</p>}
+            </div>
+            <p className="flex items-center gap-1.5 px-3 pt-4 text-xs text-3"><ShieldCheck className="h-3.5 w-3.5" /> Saved locally</p>
+          </aside>
+        </>
+      )}
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        {windowError && <div role="alert" className="m-5 rounded-lg border border-border p-3 text-sm text-danger">{windowError}<button className="ml-3 underline" onClick={() => setWindowError(null)}>Dismiss</button></div>}
-        {error && <div role="alert" className="m-5 text-sm text-danger">{error}<button type="button" className="ml-3 underline" onClick={() => void refresh()}>Retry</button></div>}
+        {windowError && <div role="alert" className="m-4 rounded-lg border border-border p-3 text-xs text-danger">{windowError}<button className="ml-3 underline" onClick={() => setWindowError(null)}>Dismiss</button></div>}
+        {error && <div role="alert" className="m-4 text-xs text-danger">{error}<button type="button" className="ml-3 underline" onClick={() => void refresh()}>Retry</button></div>}
         {validSelection ? <DocumentEditor key={`${target.version}:${target.meetingId}:${target.noteId || 'general'}`} target={target} note={selected} flushRef={flushRef} onChanged={refresh} />
-          : loading ? <p role="status" className="m-auto flex gap-2 text-sm text-2"><LoaderCircle className="h-4 w-4 animate-spin" /> Opening your note…</p>
-          : <div role="alert" className="m-8 text-sm text-danger"><p>This note could not be found. Your other notes remain available in the notebook.</p><button type="button" className="mt-3 underline" onClick={() => void closeManualNotesWindow()}>Close without changing notes</button></div>}
+          : loading ? <p role="status" className="m-auto flex gap-2 text-xs text-2"><LoaderCircle className="h-4 w-4 animate-spin" /> Opening note…</p>
+          : <div role="alert" className="m-6 text-xs text-danger"><p>This note could not be found.</p><button type="button" className="mt-2 underline" onClick={() => void closeManualNotesWindow()}>Close</button></div>}
       </main>
     </div>
   </div>;
