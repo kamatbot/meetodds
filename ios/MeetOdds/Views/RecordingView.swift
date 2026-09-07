@@ -34,13 +34,8 @@ struct RecordingView: View {
                             Text("Live text may change. Only finalized text is used in summaries.").font(.caption).foregroundStyle(.tertiary)
                         }
                     }
-                    Surface {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("A thought to remember", systemImage: "square.and.pencil").font(.headline)
-                            TextField("Your private notes…", text: Binding(get: { model.meeting?.notes ?? "" }, set: model.editNotes), axis: .vertical).lineLimit(3...8)
-                            Text(model.noteSaveState).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+                    Text("After recording, use Meeting Memory to find decisions and commitments in the saved transcript.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }.padding(.horizontal, 24).frame(maxWidth: 720)
             }
             HStack(spacing: 16) {

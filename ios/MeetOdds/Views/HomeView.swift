@@ -8,6 +8,7 @@ struct HomeView: View {
     /// remembering it keeps the promise visible without gating every single meeting.
     @AppStorage("recordingConsentAcknowledged") private var consentAcknowledged = false
     @State private var settings = false
+    @State private var showingMemory = false
     @State private var templates = false
     @State private var consent = false
     @State private var search = ""
@@ -17,7 +18,14 @@ struct HomeView: View {
     private var selection: Binding<UUID?> { Binding(get: { model.path.last }, set: { model.path = $0.map { [$0] } ?? [] }) }
 
     var body: some View {
-        if sizeClass == .regular { split } else { stack }
+        Group { if sizeClass == .regular { split } else { stack } }
+            .sheet(isPresented: $showingMemory) {
+                if let controller = model.memory {
+                    MeetingMemoryView(controller: controller, meetingID: nil) { evidence in
+                        model.memoryFocus = evidence; model.path = [evidence.meetingID]; showingMemory = false
+                    }
+                } else { Text("Local meeting storage is unavailable.").padding() }
+            }
     }
 
     // MARK: Regular width (iPad, Stage Manager): library beside the selected meeting.
@@ -30,7 +38,7 @@ struct HomeView: View {
             }
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find a meeting")
             .navigationTitle("Your meetings")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { settingsButton } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { HStack { memoryButton; settingsButton } } }
             .safeAreaInset(edge: .bottom) { recordFooter }
             .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 460)
         } detail: {
@@ -46,7 +54,7 @@ struct HomeView: View {
     private var hub: some View {
         VStack(spacing: 14) {
             BrandMark()
-            Text("Be here. We’ll take notes.")
+            Text("Be here. Remember what matters.")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
                 .accessibilityIdentifier("home-headline")
             Text(model.headers.isEmpty ? "Press record when your meeting starts." : "Pick a meeting, or record a new one.")
@@ -93,7 +101,7 @@ struct HomeView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("MeetOdds").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { settingsButton } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { HStack { memoryButton; settingsButton } } }
             .safeAreaInset(edge: .bottom) { recordFooter }
             .navigationDestination(for: UUID.self) { id in MeetingDetailView(model: model, id: id) }
             .modifier(Presentations(model: model, settings: $settings, templates: $templates))
@@ -122,6 +130,10 @@ struct HomeView: View {
     }
     private var emptyCard: some View {
         Surface { VStack(alignment: .leading, spacing: 8) { Label("Just press record", systemImage: "waveform").font(.headline); Text("Your recordings, transcripts and summaries stay together here.").foregroundStyle(.secondary) } }
+    }
+    private var memoryButton: some View {
+        Button("Meeting Memory", systemImage: "brain.head.profile") { showingMemory = true }
+            .accessibilityIdentifier("open-meeting-memory").disabled(model.isBusy || model.memory == nil)
     }
     private var settingsButton: some View {
         Button("Settings", systemImage: "slider.horizontal.3") { settings = true }.accessibilityIdentifier("settings")

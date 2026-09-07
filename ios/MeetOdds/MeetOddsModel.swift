@@ -6,7 +6,11 @@ import MeetOddsCore
 
 @MainActor @Observable final class MeetOddsModel {
     enum Phase: Equatable { case idle, preparing, recording, paused, stopping }
-    var phase: Phase = .idle
+    var phase: Phase = .idle {
+        didSet { if phase == .idle && summaryProgress == nil { memory?.resume() } else { memory?.suspend() } }
+    }
+    var memory: MeetingMemoryController?
+    var memoryFocus: MemoryEvidence?
     var mode: IntelligenceMode = .local
     var templateID = "standard_meeting"
     var localeID = Locale.current.identifier
@@ -18,7 +22,12 @@ import MeetOddsCore
     var duration = 0.0
     var error: String?
     var noteSaveState = "Saved on \(Brand.device)"
-    var summaryProgress: String?
+    var summaryProgress: String? {
+        didSet {
+            if summaryProgress != nil { memory?.suspend() }
+            else if phase == .idle { memory?.resume() }
+        }
+    }
     var pairing: CompanionPairing?
     var companionStatus: CompanionStatus?
     var selectedRemoteModel: String?
@@ -51,6 +60,7 @@ import MeetOddsCore
         do {
             let root = try AutomationFixture.storageRoot ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("MeetOdds", isDirectory: true)
             library = try MeetingLibrary(root: root)
+            if let library { memory = MeetingMemoryController(library: library) }
             let ids = ["standard_meeting", "daily_standup", "mayur_product_review", "mayur_decision_review", "mayur_pm_one_on_one"]
             templates = try ids.map { id in
                 guard let url = Bundle.main.url(forResource: id, withExtension: "json", subdirectory: "templates") else { throw MeetingError.failed("Bundled meeting templates are missing.") }
@@ -68,7 +78,10 @@ import MeetOddsCore
             headers = try await library?.recoverInterrupted() ?? []
         } catch { self.error = "Some saved meetings could not be read. Their files have not been deleted. \(error.localizedDescription)" }
     }
-    func refresh() async { do { headers = try await library?.list() ?? [] } catch { self.error = error.localizedDescription } }
+    func refresh() async {
+        do { headers = try await library?.list() ?? []; memory?.invalidate() }
+        catch { self.error = error.localizedDescription }
+    }
     func open(_ id: UUID) async {
         guard phase == .idle, summaryProgress == nil else { return }
         do {
@@ -216,7 +229,7 @@ import MeetOddsCore
         }
     }
     func summarize(includeNotes: Bool) {
-        guard !isBusy, let template = selectedTemplate else { return }
+        guard !isBusy, memory?.isBusy != true, let template = selectedTemplate else { return }
         let requestedMode = mode; let requestedPairing = pairing; let requestedModel = selectedRemoteModel
         summaryProgress = "Preparing summary…"
         summaryTask = Task { [weak self] in
@@ -225,7 +238,8 @@ import MeetOddsCore
                 try await self.flush()
                 guard let snapshot = self.meeting else { throw MeetingError.missing }
                 guard snapshot.status == .ready && snapshot.notices.isEmpty else { throw MeetingError.failed("Rebuild the incomplete transcript from saved audio before summarizing. Your prior summaries remain available.") }
-                let input = try SummaryInput.build(meeting: snapshot, includeNotes: includeNotes)
+                // iOS has no notes surface. Legacy stored notes remain intact but are not sent.
+                let input = try SummaryInput.build(meeting: snapshot, includeNotes: false)
                 let markdown: String
                 if requestedMode == .local {
                     markdown = try await LocalSummary().generate(input: input, template: template) { message in await MainActor.run { self.summaryProgress = message } }
@@ -237,7 +251,7 @@ import MeetOddsCore
                 try Task.checkCancellation()
                 guard self.meeting?.id == snapshot.id else { throw MeetingError.conflict }
                 guard !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw MeetingError.failed("An empty summary was returned. Your previous version is unchanged.") }
-                self.meeting?.summaries.append(SummaryVersion(mode: requestedMode, templateID: template.id, markdown: markdown, includesPersonalNotes: includeNotes))
+                self.meeting?.summaries.append(SummaryVersion(mode: requestedMode, templateID: template.id, markdown: markdown, includesPersonalNotes: false))
                 self.meeting?.mode = requestedMode; self.meeting?.templateID = template.id
                 self.changed(); try await self.flush(); await self.refresh()
             } catch is CancellationError { } catch { self.error = error.localizedDescription }
@@ -258,8 +272,13 @@ import MeetOddsCore
     func disconnect() { do { try PairingKeychain.remove(); pairing = nil; companionStatus = nil; selectedRemoteModel = nil } catch { self.error = error.localizedDescription } }
     func remove(_ id: UUID) async {
         guard !isBusy else { return }
-        do { try await library?.remove(id); if meeting?.id == id { meeting = nil; path = [] }; await refresh() }
-        catch { self.error = error.localizedDescription }
+        do {
+            try await library?.remove(id)
+            if meeting?.id == id { meeting = nil; path = [] }
+            if memoryFocus?.meetingID == id { memoryFocus = nil }
+            memory?.invalidate()
+            await refresh()
+        } catch { self.error = error.localizedDescription }
     }
     func audioFiles() async throws -> [URL] {
         guard let meeting, let library else { return [] }
