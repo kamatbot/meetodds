@@ -47,7 +47,7 @@ function Review({ input, finish }: { input: SummaryReviewInput; finish: (result:
             </details>
             {hasManualNotes && (
               <div>
-                <label className="flex items-start gap-2 text-ui font-medium"><input type="checkbox" className="mt-1" checked={includeManualNotes} onChange={(event) => { setIncludeManualNotes(event.target.checked); setCopied(false); }} /> Include notes taken during the meeting</label>
+                <label className="flex items-start gap-2 text-ui font-medium"><input type="checkbox" className="mt-1" checked={includeManualNotes} onChange={(event) => { setIncludeManualNotes(event.target.checked); setCopied(false); }} /> Include meeting notes and selected timestamp-linked notes</label>
                 {includeManualNotes && <pre className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-caption leading-6">{input.manualNotes}</pre>}
               </div>
             )}
@@ -65,7 +65,7 @@ function Review({ input, finish }: { input: SummaryReviewInput; finish: (result:
           <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
             <button type="button" onClick={() => void copy()} className={`${button} mr-auto`}>Copy for ChatGPT</button>
             <button id="summary-review-cancel" type="button" onClick={() => finish(null)} className={button}>Cancel</button>
-            <button type="button" disabled={requiresSendConfirmation && !confirmed} onClick={approve} className={`${button} bg-accent text-white disabled:cursor-not-allowed disabled:opacity-40`}>{includeNotes ? (target.local ? 'Generate locally' : 'Send selected text') : 'Skip notes & generate'}</button>
+            <button type="button" disabled={requiresSendConfirmation && !confirmed} onClick={approve} className={`${button} bg-accent text-white disabled:cursor-not-allowed disabled:opacity-40`}>{target.local ? 'Generate locally' : 'Send selected text'}</button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

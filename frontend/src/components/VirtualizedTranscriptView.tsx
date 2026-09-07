@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useReducer, startTransition, useEffect, useState, memo } from "react";
+import type { ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
@@ -47,6 +48,8 @@ export interface VirtualizedTranscriptViewProps {
     onLoadMore?: () => void;
     /** Segment selected from a summary/memory evidence link. */
     focusSegmentId?: string | null;
+    /** Optional, independent personal-note control; never mutates transcript text. */
+    renderSegmentAction?: (segment: TranscriptSegmentData) => ReactNode;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -95,6 +98,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming,
     showConfidence,
     isFocused,
+    action,
 }: {
     id: string;
     timestamp: number;
@@ -113,6 +117,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming: boolean;
     showConfidence: boolean;
     isFocused: boolean;
+    action?: ReactNode;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
     const showOriginal = !translationEnabled || translationDisplayMode === 'bilingual' || !translatedText;
@@ -206,6 +211,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         </p>
                     )}
                 </div>
+                {action && <div className="shrink-0 pt-0.5">{action}</div>}
             </div>
         </div>
     );
@@ -229,6 +235,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     loadedCount = 0,
     onLoadMore,
     focusSegmentId = null,
+    renderSegmentAction,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -429,6 +436,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         isFocused={segment.id === focusSegmentId}
+                                        action={renderSegmentAction?.(segment)}
                                     />
                                 </div>
                             );
@@ -496,6 +504,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         isFocused={segment.id === focusSegmentId}
+                                        action={renderSegmentAction?.(segment)}
                                     />
                                 </motion.div>
                             );

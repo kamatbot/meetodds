@@ -5,6 +5,7 @@ import type { Transcript, Summary } from '@/types';
 import type { ModelConfig } from '@/components/ModelSettingsModal';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { withSpeakerPrefix } from '@/lib/speaker-labels';
+import { flushOpenNotes, getMomentNotesSummary } from '@/services/momentNotesService';
 import { parseSummaryData, sameSummaryTarget, summaryFailureMessage, summaryTarget } from '@/lib/summary-input';
 import {
   detectAndCacheSummaryLanguage, readMeetingSummaryLanguage, readCachedDetectedSummaryLanguage,
@@ -134,12 +135,20 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
         if (visible()) setSummaryStatus(previousStatus);
         release(); return;
       }
+      // Commit the open notebook before taking a reviewed input snapshot.
+      await flushOpenNotes();
       let notes = ''; let notesUnavailable = false;
       try { notes = (await invoke<{ notesMarkdown: string }>('api_get_meeting_notes', { meetingId: id })).notesMarkdown; }
       catch { notesUnavailable = true; }
       let manualNotes = '';
-      try { manualNotes = (await invoke<{ content: string }>('api_get_manual_notes', { meetingId: id })).content; }
-      catch { /* Manual notes are optional context; a summary can proceed without them. */ }
+      try {
+        manualNotes = (await invoke<{ content: string }>('api_get_manual_notes', { meetingId: id })).content;
+        const linked = await getMomentNotesSummary(id);
+        manualNotes = [manualNotes, linked.content].filter(text => text.trim()).join('\n\n');
+      } catch {
+        // A failed read is not evidence that the meeting has no notes.
+        throw new Error('NOTES_NOT_SAVED: Meeting notes could not be read. Reopen the notebook and retry. Nothing was sent.');
+      }
       const { reviewSummaryInput } = await import('@/components/Meeting/SummaryInputReview');
       const approved = await reviewSummaryInput({ target, transcript: transcriptText(turns), notes, notesUnavailable, manualNotes, prompt: customPrompt, template: selectedTemplate }, abort.signal);
       if (!approved || abort.signal.aborted) {

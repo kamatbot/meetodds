@@ -5,6 +5,7 @@ import { Source_Sans_3 } from 'next/font/google'
 import { usePathname } from 'next/navigation'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import AppShell from '@/components/AppShell/AppShell'
+import NotesNavigationBridge from '@/components/Notes/NotesNavigationBridge'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
 import { Toaster, toast } from 'sonner'
 import "sonner/dist/styles.css"
@@ -123,6 +124,7 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
                       <TooltipProvider>
                         <RecordingPostProcessingProvider>
                           <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                            <NotesNavigationBridge />
                             <DownloadProgressToastProvider />
                             {showOnboarding ? <OnboardingFlow onComplete={handleOnboardingComplete} /> : <AppShell>{children}</AppShell>}
                             <ImportDropOverlay visible={showDropOverlay} />

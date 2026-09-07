@@ -7,7 +7,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useLiveTranslation } from '@/hooks/useLiveTranslation';
 import { liveTranslationSegmentKey } from '@/lib/live-translation';
-import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
+import NotedTranscriptView from '@/components/Notes/NotedTranscriptView';
 import { LiveTranslationControl } from '@/components/LiveTranslationControl';
 import { LiveTranscriptSubtitle } from '@/components/LiveTranscriptSubtitle';
 import type { ModalType } from '@/hooks/useModalState';
@@ -33,7 +33,7 @@ export default function TranscriptDrawer({
   isStopping,
   showModal,
 }: TranscriptDrawerProps) {
-  const { transcripts, livePreview, copyTranscript, captionsVisible, setCaptionsVisible, previewSettled } = useTranscripts();
+  const { transcripts, currentMeetingId, livePreview, copyTranscript, captionsVisible, setCaptionsVisible, previewSettled } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const liveTranslation = useLiveTranslation(transcripts);
@@ -195,7 +195,10 @@ export default function TranscriptDrawer({
             Original transcript text will appear here as speech is recognised.
           </div>
         ) : (
-          <VirtualizedTranscriptView
+          <NotedTranscriptView
+            meetingId={currentMeetingId}
+            noteTranscripts={transcripts}
+            liveNotes
             segments={segments}
             isRecording={isRecording}
             isPaused={isPaused}

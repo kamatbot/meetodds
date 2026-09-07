@@ -2,7 +2,7 @@
 
 import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
-import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
+import NotedTranscriptView from '@/components/Notes/NotedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useMemo } from 'react';
 
@@ -86,7 +86,9 @@ export function TranscriptPanel({
 
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
-        <VirtualizedTranscriptView
+        <NotedTranscriptView
+          meetingId={meetingId}
+          noteTranscripts={transcripts}
           segments={convertedSegments}
           isRecording={isRecording}
           isPaused={false}
