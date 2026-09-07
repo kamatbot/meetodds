@@ -114,21 +114,9 @@ fn is_source_only_tauri_build() -> bool {
     let Ok(config) = std::env::var("TAURI_CONFIG") else {
         return false;
     };
+    let compact: String = config.chars().filter(|ch| !ch.is_whitespace()).collect();
 
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&config) else {
-        return false;
-    };
-
-    let external_bin_empty = value
-        .pointer("/bundle/externalBin")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(Vec::is_empty);
-    let resources_empty = value
-        .pointer("/bundle/resources")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(Vec::is_empty);
-
-    external_bin_empty && resources_empty
+    compact.contains("\"externalBin\":[]") && compact.contains("\"resources\":[]")
 }
 
 fn explicit_ffmpeg_binary() -> Option<std::path::PathBuf> {
