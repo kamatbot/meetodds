@@ -30,9 +30,26 @@ export interface Notebook {
   title: string;
   notes: MomentNote[];
 }
-export interface NotesWindowTarget { meetingId: string; noteId: string | null; version: number }
+export interface NotesWindowTarget {
+  meetingId: string;
+  noteId: string | null;
+  appendText?: string | null;
+  version: number;
+}
 export interface NoteValue { markdown: string; includeInSummary: boolean; revision: number }
 export interface StoredNoteDraft { version: 1; base: NoteValue; value: NoteValue }
+
+export function formatTimestampLabel(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '';
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
 
 export function momentLabel(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return 'No audio timestamp';

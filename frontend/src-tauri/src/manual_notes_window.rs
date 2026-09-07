@@ -12,7 +12,12 @@ static OPEN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NotesWindowTarget { meeting_id: String, note_id: Option<String>, version: u64 }
+pub struct NotesWindowTarget {
+    pub meeting_id: String,
+    pub note_id: Option<String>,
+    pub append_text: Option<String>,
+    pub version: u64,
+}
 
 fn is_safe_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 200 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -181,18 +186,37 @@ pub fn dock_notes_window_to_main<R: Runtime>(app: &AppHandle<R>, notes_window: &
 }
 
 #[tauri::command]
-pub async fn open_manual_notes_window<R: Runtime>(app: AppHandle<R>, meeting_id: String, note_id: Option<String>) -> Result<(), String> {
+pub async fn open_manual_notes_window<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    note_id: Option<String>,
+    append_text: Option<String>,
+) -> Result<(), String> {
     if !is_safe_id(&meeting_id) || note_id.as_deref().is_some_and(|id| !is_safe_id(id)) {
         return Err("Invalid meeting or note ID".into());
     }
     let _opening = OPEN_LOCK.lock().await;
-    let target = NotesWindowTarget { meeting_id: meeting_id.clone(), note_id: note_id.clone(), version: TARGET_VERSION.fetch_add(1, Ordering::SeqCst) + 1 };
+    let target = NotesWindowTarget {
+        meeting_id: meeting_id.clone(),
+        note_id: note_id.clone(),
+        append_text: append_text.clone(),
+        version: TARGET_VERSION.fetch_add(1, Ordering::SeqCst) + 1,
+    };
     *TARGET.lock().map_err(|_| "Notes window state is unavailable")? = Some(target);
     if let Some(window) = app.get_webview_window(MANUAL_NOTES_WINDOW) {
         dock_notes_window_to_main(&app, &window);
         // The page reads the latest target after subscribing, so a cold window
         // cannot lose an event and display the wrong note. It saves before switching.
         let _ = window.emit("manual-notes:target-changed", ());
+        if let Some(ref text) = append_text {
+            let _ = window.emit(
+                "manual-notes:append",
+                serde_json::json!({
+                    "meetingId": meeting_id,
+                    "text": text,
+                }),
+            );
+        }
         window.show().map_err(|e| e.to_string())?;
         window.unminimize().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;

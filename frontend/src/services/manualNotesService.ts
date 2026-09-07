@@ -17,8 +17,12 @@ export async function linkManualNotes(draftMeetingId: string, meetingId: string)
   await invoke<void>('api_link_manual_notes', { draftMeetingId, meetingId });
 }
 
-export async function openManualNotesWindow(meetingId: string, noteId: string | null = null): Promise<void> {
-  await invoke<void>('open_manual_notes_window', { meetingId, noteId });
+export async function openManualNotesWindow(
+  meetingId: string,
+  noteId: string | null = null,
+  appendText: string | null = null,
+): Promise<void> {
+  await invoke<void>('open_manual_notes_window', { meetingId, noteId, appendText });
 }
 
 export async function closeManualNotesWindow(): Promise<void> {

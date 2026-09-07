@@ -1,10 +1,14 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bold, Italic, Heading2, List, ListChecks, Quote, Code2 } from 'lucide-react';
+
+export interface MarkdownNoteEditorHandle {
+  focusAndScrollEnd: () => void;
+}
 
 export function NoteMarkdown({ content }: { content: string }) {
   return <div className="prose max-w-none break-words text-sm leading-relaxed text-text prose-headings:font-semibold prose-headings:text-text prose-p:my-2 prose-a:text-accent prose-blockquote:border-accent prose-blockquote:text-2 prose-code:text-text prose-pre:bg-bg prose-pre:text-text prose-th:text-text prose-td:text-text">
@@ -30,11 +34,26 @@ export function NoteMarkdown({ content }: { content: string }) {
   </div>;
 }
 
-export default function MarkdownNoteEditor({ value, onChange, readOnly, onSave }: {
+const MarkdownNoteEditor = forwardRef<MarkdownNoteEditorHandle, {
   value: string; onChange: (text: string) => void; readOnly: boolean; onSave: () => void;
-}) {
+}>(function MarkdownNoteEditor({ value, onChange, readOnly, onSave }, ref) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [mode, setMode] = useState<'write' | 'preview'>('write');
+
+  useImperativeHandle(ref, () => ({
+    focusAndScrollEnd: () => {
+      setMode('write');
+      requestAnimationFrame(() => {
+        const editor = input.current;
+        if (editor) {
+          editor.focus();
+          editor.selectionStart = editor.value.length;
+          editor.selectionEnd = editor.value.length;
+          editor.scrollTop = editor.scrollHeight;
+        }
+      });
+    },
+  }), []);
   const insert = (prefix: string, suffix = '', sample = 'text') => {
     const editor = input.current;
     if (!editor || readOnly) return;
@@ -87,4 +106,6 @@ export default function MarkdownNoteEditor({ value, onChange, readOnly, onSave }
       className="min-h-[45vh] w-full flex-1 resize-y border-0 bg-transparent pb-12 text-sm font-normal leading-relaxed text-text outline-none placeholder:text-3 read-only:opacity-60" />}
     <p className="pb-4 text-[11px] text-3">Markdown supported · Headings, lists, checkboxes, links and code · ⌘S to save</p>
   </div>;
-}
+});
+
+export default MarkdownNoteEditor;
