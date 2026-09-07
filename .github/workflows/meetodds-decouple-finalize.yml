@@ -46,8 +46,6 @@ jobs:
               if old in text:
                   write(path, text.replace(old, new))
 
-          # Remove the updater plugin from the active Tauri runtime. Package and
-          # Tauri configuration changes were already committed on the branch.
           replace_if_present(
               'frontend/src-tauri/src/lib.rs',
               '        .plugin(tauri_plugin_updater::Builder::new().build())\n',
@@ -72,6 +70,10 @@ jobs:
 
           # Runtime/development override for the local LLM helper binary.
           MEETODDS_LLAMA_HELPER=
+
+          # Build-time FFmpeg source. Point this at a trusted local executable when
+          # ffmpeg is not already installed on PATH.
+          MEETODDS_FFMPEG_BINARY=
           '''))
 
           write('README.md', textwrap.dedent('''\
@@ -85,6 +87,7 @@ jobs:
           - The React/Next.js UI lives in `frontend/src`.
           - Local speech-to-text uses Whisper/Parakeet paths; local summary generation uses the bundled local-LLM helper.
           - There is no supported Python/FastAPI backend.
+          - Release builds provision FFmpeg from `MEETODDS_FFMPEG_BINARY` or a trusted `ffmpeg` already on the build machine; MeetOdds does not download upstream executable binaries at build time.
 
           ## Existing meeting migration
 
@@ -119,7 +122,7 @@ jobs:
 
           ## Provenance and licenses
 
-          MeetOdds began from the MIT-licensed Meetily Community Edition and still contains derived code. Attribution is retained in `LICENSE.md` and `THIRD_PARTY_NOTICES.md`. MeetOdds-specific development does not depend on Meetily services, release infrastructure, updater keys, analytics projects, or the retired Python backend.
+          MeetOdds began from the MIT-licensed Meetily Community Edition and still contains derived code. Attribution is retained in `LICENSE.md` and `THIRD_PARTY_NOTICES.md`. MeetOdds-specific development does not depend on Meetily services, release infrastructure, updater keys, analytics projects, executable-binary hosting, or the retired Python backend.
           '''))
 
           write('PRIVACY_POLICY.md', textwrap.dedent('''\
@@ -162,12 +165,12 @@ jobs:
           - Treat meeting capture and persistence as higher priority than summary/background work.
           - Existing meeting `folder_path` values are absolute and must remain valid across migrations.
           - The legacy desktop identifier `com.meetily.ai` is migration input only. New code uses `com.meetodds.app`.
-          - Do not add updater endpoints, signing keys, analytics keys, or release URLs owned by another project.
+          - Do not add updater endpoints, signing keys, analytics keys, release URLs, or executable-binary downloads owned by another project.
           - `llama-helper` remains an active local-summary component and is intentionally retained in this phase.
 
           ## Checks
 
-          Run frontend regression checks and Rust tests before merging desktop changes. Changes to identity, database paths, recording paths, or local model storage require explicit migration tests.
+          Run frontend regression checks and Rust tests before merging desktop changes. Changes to identity, database paths, recording paths, migrations, or local model storage require explicit migration tests.
           '''))
 
           write('CONTRIBUTING.md', textwrap.dedent('''\
@@ -197,7 +200,7 @@ jobs:
           License: MIT  
           Original copyright: Copyright (c) 2024 Zackriya Solutions
 
-          The applicable MIT permission notice is retained in `LICENSE.md`. This notice records source provenance; MeetOdds does not rely on Meetily-hosted backend, updater, release, or analytics services.
+          The applicable MIT permission notice is retained in `LICENSE.md`. This notice records source provenance; MeetOdds does not rely on Meetily-hosted backend, updater, release, analytics, or executable-binary services.
           '''))
 
           write('docs/APP_IDENTITY_MIGRATION.md', textwrap.dedent('''\
@@ -218,8 +221,6 @@ jobs:
           Close older desktop builds before launching the identifier-migrating build so SQLite files are not changing during the copy.
           '''))
 
-          # Confirmed dead imported architecture/backup material. Active
-          # llama-helper, current Rust/Tauri modules and the native iOS app stay.
           for path in [
               'backend',
               'scripts',
@@ -265,6 +266,8 @@ jobs:
           git worktree remove --force /tmp/meetodds-baseline
 
       - name: Run identity migration tests
+        env:
+          TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":[]}}'
         run: cargo test --manifest-path frontend/src-tauri/Cargo.toml identity_migration_tests --lib --locked
 
       - name: Compile Rust/Tauri library
@@ -276,6 +279,7 @@ jobs:
         shell: bash
         run: |
           ! git grep -n 'Zackriya-Solutions/meeting-minutes/releases' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md'
+          ! git grep -n 'Zackriya-Solutions/ffmpeg-binaries' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md'
           ! git grep -n 'MEETILY_LLAMA_HELPER' -- .
           ! git grep -n 'localhost:5167\|localhost:8178' -- frontend/src-tauri/tauri.conf.json
           ! git grep -n 'tauri_plugin_updater\|plugin-updater' -- frontend/src-tauri frontend/package.json frontend/pnpm-lock.yaml
