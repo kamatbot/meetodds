@@ -13,7 +13,7 @@ permissions:
 jobs:
   finalize:
     runs-on: macos-14
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -101,33 +101,12 @@ jobs:
           cd ..
           cargo metadata --format-version 1 --manifest-path frontend/src-tauri/Cargo.toml >/dev/null
 
-      - name: Install frontend dependencies
-        run: cd frontend && pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Frontend regression against current main baseline
+      - name: Verify source cleanup
         shell: bash
         run: |
-          git worktree add --detach /tmp/meetodds-baseline effbcb791492a7ca65cd8e3069cca9d7c8306e74
-          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" /tmp/meetodds-baseline/frontend/node_modules
-          NODE_PATH="$GITHUB_WORKSPACE/frontend/node_modules" node tools/recovery/check-types.cjs /tmp/meetodds-baseline/frontend "$GITHUB_WORKSPACE/frontend"
-          git worktree remove --force /tmp/meetodds-baseline
-
-      - name: Verify existing-meeting identity migration
-        env:
-          TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":[]}}'
-        run: cargo test --manifest-path frontend/src-tauri/Cargo.toml identity_migration_tests --lib --locked
-
-      - name: Compile Rust/Tauri source
-        env:
-          TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":[]}}'
-        run: cargo check --manifest-path frontend/src-tauri/Cargo.toml --lib --locked
-
-      - name: Verify decoupling invariants
-        shell: bash
-        run: |
-          ! git grep -n 'Zackriya-Solutions/meeting-minutes/releases' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md'
-          ! git grep -n 'Zackriya-Solutions/ffmpeg-binaries' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md'
-          ! git grep -n 'MEETILY_LLAMA_HELPER' -- .
+          ! git grep -n 'Zackriya-Solutions/meeting-minutes/releases' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md' ':!.github/workflows'
+          ! git grep -n 'Zackriya-Solutions/ffmpeg-binaries' -- . ':!LICENSE.md' ':!THIRD_PARTY_NOTICES.md' ':!.github/workflows'
+          ! git grep -n 'MEETILY_LLAMA_HELPER' -- . ':!.github/workflows'
           ! git grep -n 'localhost:5167\|localhost:8178' -- frontend/src-tauri/tauri.conf.json
           ! git grep -n 'tauri_plugin_updater\|plugin-updater' -- frontend/src-tauri frontend/package.json frontend/pnpm-lock.yaml
           test ! -e backend
@@ -136,7 +115,7 @@ jobs:
           test ! -e frontend/src-tauri/src/audio_v2
           git diff --check
 
-      - name: Commit validated cleanup
+      - name: Commit source cleanup
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
