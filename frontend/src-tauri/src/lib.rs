@@ -533,14 +533,27 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    if let Err(e) = window.hide() {
-                        log::error!("Failed to hide main window on close request: {}", e);
-                    } else {
-                        log::info!("Main window hidden to tray on close request");
+            if window.label() == "main" {
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        if let Err(e) = window.hide() {
+                            log::error!("Failed to hide main window on close request: {}", e);
+                        } else {
+                            log::info!("Main window hidden to tray on close request");
+                        }
+                        if let Some(notes) = window.app_handle().get_webview_window(manual_notes_window::MANUAL_NOTES_WINDOW) {
+                            let _ = notes.hide();
+                            manual_notes_window::restore_main_window_if_needed(window.app_handle());
+                        }
                     }
+                    tauri::WindowEvent::Moved(pos) => {
+                        manual_notes_window::on_main_window_moved(window.app_handle(), *pos);
+                    }
+                    tauri::WindowEvent::Resized(size) => {
+                        manual_notes_window::on_main_window_resized(window.app_handle(), *size);
+                    }
+                    _ => {}
                 }
             }
         })
