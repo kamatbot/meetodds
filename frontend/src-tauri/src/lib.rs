@@ -400,6 +400,7 @@ pub fn run() {
     }
 
     builder
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -714,6 +715,8 @@ pub fn run() {
             api::api_export_meeting,
             api::api_export_meeting_audio,
             api::api_reveal_meeting_audio,
+            api::api_save_export_to_downloads,
+            api::api_reveal_file,
             api::api_search_transcripts,
             api::api_get_profile,
             api::api_save_profile,

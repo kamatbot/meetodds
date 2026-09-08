@@ -769,6 +769,127 @@ pub async fn api_reveal_meeting_audio(
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormattedExportSaveResult {
+    pub filename: String,
+    pub path: String,
+    pub bytes: usize,
+}
+
+#[tauri::command]
+pub async fn api_save_export_to_downloads(
+    filename: String,
+    data: Vec<u8>,
+) -> Result<FormattedExportSaveResult, String> {
+    let download_dir = dirs::download_dir()
+        .or_else(|| {
+            #[cfg(target_os = "macos")]
+            {
+                std::env::var("HOME").ok().map(|h| PathBuf::from(h).join("Downloads"))
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                None
+            }
+        })
+        .ok_or_else(|| "Could not locate Downloads directory".to_string())?;
+
+    if !download_dir.exists() {
+        std::fs::create_dir_all(&download_dir)
+            .map_err(|e| format!("Failed to create Downloads directory: {e}"))?;
+    }
+
+    let original_path = std::path::Path::new(&filename);
+    let ext = original_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let stem = original_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Meeting notes");
+
+    let mut candidate_filename = if ext.is_empty() {
+        stem.to_string()
+    } else {
+        format!("{stem}.{ext}")
+    };
+    let mut target_path = download_dir.join(&candidate_filename);
+    let mut counter = 1;
+
+    while target_path.exists() {
+        candidate_filename = if ext.is_empty() {
+            format!("{stem} ({counter})")
+        } else {
+            format!("{stem} ({counter}).{ext}")
+        };
+        target_path = download_dir.join(&candidate_filename);
+        counter += 1;
+    }
+
+    let parent = target_path
+        .parent()
+        .ok_or_else(|| "Invalid target directory".to_string())?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("Failed to create temporary file: {e}"))?;
+    use std::io::Write;
+    temp.write_all(&data)
+        .map_err(|e| format!("Failed to write export content: {e}"))?;
+    temp.as_file()
+        .sync_all()
+        .map_err(|e| format!("Failed to sync export file: {e}"))?;
+    temp.persist(&target_path)
+        .map_err(|e| format!("Failed to save export file to Downloads: {e}"))?;
+
+    let bytes = data.len();
+    let path_str = target_path.to_string_lossy().into_owned();
+
+    Ok(FormattedExportSaveResult {
+        filename: candidate_filename,
+        path: path_str,
+        bytes,
+    })
+}
+
+#[tauri::command]
+pub async fn api_reveal_file(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if !target.exists() {
+        return Err("File does not exist".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&target)
+            .spawn()
+            .map_err(|error| format!("Failed to reveal file: {error}"))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", target.to_string_lossy()))
+            .spawn()
+            .map_err(|error| format!("Failed to reveal file: {error}"))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let folder = target
+            .parent()
+            .ok_or_else(|| "File folder is not available".to_string())?;
+        std::process::Command::new("xdg-open")
+            .arg(folder)
+            .spawn()
+            .map_err(|error| format!("Failed to open folder: {error}"))?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -893,6 +1014,32 @@ mod tests {
         assert!(super::recording_audio_path(directory.path()).is_none());
         std::fs::write(&metadata, br#"{"audio_file":""}"#).unwrap();
         assert!(super::recording_audio_path(directory.path()).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_save_export_deduplication() {
+        let test_dir = tempfile::tempdir().unwrap();
+        let stem = "Test Meeting - 2026-09-08";
+        let ext = "pdf";
+        let filename = format!("{stem}.{ext}");
+
+        // First write
+        let path1 = test_dir.path().join(&filename);
+        std::fs::write(&path1, b"%PDF-test-1").unwrap();
+
+        // Simulate collision check
+        let mut candidate = filename.clone();
+        let mut target = test_dir.path().join(&candidate);
+        let mut counter = 1;
+        while target.exists() {
+            candidate = format!("{stem} ({counter}).{ext}");
+            target = test_dir.path().join(&candidate);
+            counter += 1;
+        }
+
+        assert_eq!(candidate, format!("{stem} (1).{ext}"));
+        std::fs::write(&target, b"%PDF-test-2").unwrap();
+        assert!(target.exists());
     }
 
 }

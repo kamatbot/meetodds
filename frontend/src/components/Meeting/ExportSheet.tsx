@@ -93,7 +93,14 @@ export default function ExportSheet({ meetingId, open, onOpenChange, initialForm
       if (outcome.failed) {
         setError(outcome.saved.length ? `Part of the export succeeded (${outcome.saved.join('; ')}). The remaining file could not be exported.` : 'Export failed. Check the destination and available disk space, then retry.');
       } else if (outcome.saved.length) {
-        toast.success(outcome.cancelled ? 'Partial export complete' : 'Export complete', { description: outcome.saved.join('\n') });
+        const firstSaved = outcome.saved[0];
+        toast.success(outcome.cancelled ? 'Partial export complete' : 'Export complete', {
+          description: outcome.saved.join('\n'),
+          action: firstSaved && (firstSaved.startsWith('/') || firstSaved.includes(':\\')) ? {
+            label: 'Show in Finder',
+            onClick: () => { void invoke('api_reveal_file', { path: firstSaved }); },
+          } : undefined,
+        });
         onOpenChange(false);
       }
     } catch { setError('The saved-content check failed. Nothing new was exported. Retry when the meeting is available.'); }

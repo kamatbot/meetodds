@@ -42,13 +42,19 @@
                     "permissions": [
                         "fs:default",
                         "fs:allow-read-file",
+                        "fs:allow-write-file",
+                        "fs:allow-write-text-file",
+                        "fs:allow-exists",
                         "fs:read-all",
                         "fs:write-all",
                         "fs:allow-app-read",
                         "fs:allow-app-write",
                         "fs:allow-download-write",
                         "fs:allow-download-read",
+                        "fs:allow-download-write-recursive",
+                        "fs:allow-download-read-recursive",
                         "fs:scope-download",
+                        "fs:scope-download-recursive",
                         "core:path:default",
                         "core:event:default",
                         "core:window:default",
@@ -66,7 +72,7 @@
                         "notification:default",
                         "notification:allow-is-permission-granted",
                         "process:default",
-                        {"identifier": "fs:scope", "allow": [{"path": "$APPDATA/*"}]}
+                        {"identifier": "fs:scope", "allow": [{"path": "$APPDATA/*"}, {"path": "$APPDATA/**"}, {"path": "$DOWNLOAD/*"}, {"path": "$DOWNLOAD/**"}]}
                     ]
                 }
             ]

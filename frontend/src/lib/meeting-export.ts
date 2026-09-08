@@ -1,5 +1,5 @@
 import { downloadDir, join } from '@tauri-apps/api/path';
-import { isTauri } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { exists, writeFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { buildDocx, buildPdf } from './meeting-export-formats';
 
@@ -140,6 +140,23 @@ export async function exportMeetingSummary(input: MeetingExportInput): Promise<M
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data).length : data.length;
 
   try {
+    if (isTauri()) {
+      const bytesArray = typeof data === 'string'
+        ? Array.from(new TextEncoder().encode(data))
+        : Array.from(data);
+      const saved = await invoke<{ filename: string; path: string; bytes: number }>(
+        'api_save_export_to_downloads',
+        { filename, data: bytesArray },
+      );
+      return {
+        format: input.format,
+        filename: saved.filename,
+        path: saved.path,
+        destination: 'Downloads',
+        bytes: saved.bytes,
+      };
+    }
+
     const directory = await downloadDir();
     const target = await nextAvailablePath(directory, filename);
     if (typeof data === 'string') {
