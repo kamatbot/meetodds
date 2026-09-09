@@ -1,7 +1,12 @@
-use sqlx::{migrate::MigrateDatabase, Result, Sqlite, SqlitePool, Transaction};
+use sqlx::{
+    migrate::MigrateDatabase,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+    Result, Sqlite, SqlitePool, Transaction,
+};
 use std::fs;
 use std::io::{self, Read};
 use std::path::Path;
+use std::str::FromStr;
 use tauri::Manager;
 
 const LEGACY_APP_IDENTIFIER: &str = "com.meetily.ai";
@@ -204,7 +209,18 @@ impl DatabaseManager {
             }
         }
 
-        let pool = SqlitePool::connect(tauri_db_path).await?;
+        let connection_options = SqliteConnectOptions::from_str(tauri_db_path)?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .foreign_keys(true);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(10))
+            .connect_with(connection_options)
+            .await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
         Ok(DatabaseManager { pool })
     }

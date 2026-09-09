@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -32,6 +32,28 @@ pub struct ProcessedAudioChunk {
     pub timestamp: f64,
     pub device_type: DeviceType,
 }
+
+/// Lightweight error for audio chunk dispatch without heap allocation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendAudioChunkError {
+    PipelineNotReady,
+    ChannelClosed,
+    BufferOverflow,
+    Other,
+}
+
+impl std::fmt::Display for SendAudioChunkError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SendAudioChunkError::PipelineNotReady => write!(f, "Audio pipeline not ready - no sender available"),
+            SendAudioChunkError::ChannelClosed => write!(f, "Failed to send audio chunk: channel closed"),
+            SendAudioChunkError::BufferOverflow => write!(f, "Failed to send audio chunk: buffer overflow"),
+            SendAudioChunkError::Other => write!(f, "Failed to send audio chunk"),
+        }
+    }
+}
+
+impl std::error::Error for SendAudioChunkError {}
 
 /// Comprehensive error types for audio system
 #[derive(Debug, Clone)]
@@ -117,6 +139,7 @@ pub struct RecordingState {
     error_callback: Mutex<Option<Box<dyn Fn(&AudioError) + Send + Sync>>>,
 
     // Statistics
+    chunks_processed: AtomicU64,
     stats: Mutex<RecordingStats>,
 
     // Recording start time for accurate timestamps
@@ -141,6 +164,7 @@ impl RecordingState {
             recoverable_error_count: AtomicU32::new(0),
             last_error: Mutex::new(None),
             error_callback: Mutex::new(None),
+            chunks_processed: AtomicU64::new(0),
             stats: Mutex::new(RecordingStats::default()),
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),
@@ -154,6 +178,7 @@ impl RecordingState {
         *self.recording_start.lock().unwrap() = Some(Instant::now());
         self.error_count.store(0, Ordering::SeqCst);
         self.recoverable_error_count.store(0, Ordering::SeqCst);
+        self.chunks_processed.store(0, Ordering::Relaxed);
         *self.last_error.lock().unwrap() = None;
         Ok(())
     }
@@ -262,24 +287,27 @@ impl RecordingState {
         *self.audio_sender.lock().unwrap() = Some(sender);
     }
 
-    pub fn send_audio_chunk(&self, chunk: AudioChunk) -> Result<()> {
+    /// Fast typed audio chunk dispatch without heap-allocated errors or lock contention
+    pub fn send_audio_chunk_typed(&self, chunk: AudioChunk) -> Result<(), SendAudioChunkError> {
         // Don't send audio chunks when paused
         if self.is_paused() {
             return Ok(()); // Silently discard chunks while paused
         }
 
-        if let Some(sender) = self.audio_sender.lock().unwrap().as_ref() {
-            sender.send(chunk).map_err(|_| anyhow::anyhow!("Failed to send audio chunk"))?;
-
-            // Update statistics
-            let mut stats = self.stats.lock().unwrap();
-            stats.chunks_processed += 1;
-            stats.last_activity = Some(Instant::now());
+        let sender_guard = self.audio_sender.lock().unwrap();
+        if let Some(sender) = sender_guard.as_ref() {
+            sender.send(chunk).map_err(|_| SendAudioChunkError::ChannelClosed)?;
+            self.chunks_processed.fetch_add(1, Ordering::Relaxed);
             Ok(())
         } else {
-            // Return an error when no sender is available (pipeline not ready)
-            Err(anyhow::anyhow!("Audio pipeline not ready - no sender available"))
+            // Return typed error when no sender is available (pipeline not ready)
+            Err(SendAudioChunkError::PipelineNotReady)
         }
+    }
+
+    pub fn send_audio_chunk(&self, chunk: AudioChunk) -> Result<()> {
+        self.send_audio_chunk_typed(chunk)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
     }
 
     // Error handling
@@ -345,7 +373,9 @@ impl RecordingState {
 
     // Statistics
     pub fn get_stats(&self) -> RecordingStats {
-        self.stats.lock().unwrap().clone()
+        let mut stats = self.stats.lock().unwrap().clone();
+        stats.chunks_processed = self.chunks_processed.load(Ordering::Relaxed);
+        stats
     }
 
     pub fn get_recording_duration(&self) -> Option<f64> {
@@ -403,6 +433,7 @@ impl RecordingState {
         *self.last_error.lock().unwrap() = None;
         *self.error_callback.lock().unwrap() = None;
         *self.stats.lock().unwrap() = RecordingStats::default();
+        self.chunks_processed.store(0, Ordering::Relaxed);
         *self.recording_start.lock().unwrap() = None;
         *self.pause_start.lock().unwrap() = None;
         *self.total_pause_duration.lock().unwrap() = std::time::Duration::ZERO;
@@ -429,6 +460,7 @@ impl Default for RecordingState {
             recoverable_error_count: AtomicU32::new(0),
             last_error: Mutex::new(None),
             error_callback: Mutex::new(None),
+            chunks_processed: AtomicU64::new(0),
             stats: Mutex::new(RecordingStats::default()),
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),

@@ -14,7 +14,9 @@ use super::audio_processing::{
     audio_to_mono, HighPassFilter, LoudnessNormalizer, NoiseSuppressionProcessor,
 };
 use super::devices::AudioDevice;
-use super::recording_state::{AudioChunk, AudioError, DeviceType, RecordingState};
+use super::recording_state::{
+    AudioChunk, AudioError, DeviceType, RecordingState, SendAudioChunkError,
+};
 use super::vad::{ContinuousVadProcessor, SpeechSegment};
 
 /// Ring buffer for synchronized audio mixing
@@ -679,24 +681,25 @@ impl AudioCapture {
         // Individual raw streams go only to the transcription pipeline below
 
         // Send to processing pipeline for transcription
-        if let Err(e) = self.state.send_audio_chunk(audio_chunk) {
-            // Check if this is the "pipeline not ready" error
-            if e.to_string().contains("Audio pipeline not ready") {
-                // This is expected during initialization, just log it as debug
-                debug!("Audio pipeline not ready yet, skipping chunk {}", chunk_id);
-                return;
+        if let Err(err) = self.state.send_audio_chunk_typed(audio_chunk) {
+            match err {
+                SendAudioChunkError::PipelineNotReady => {
+                    // This is expected during initialization, just log it as debug
+                    debug!("Audio pipeline not ready yet, skipping chunk {}", chunk_id);
+                }
+                SendAudioChunkError::ChannelClosed => {
+                    warn!("Failed to send audio chunk: channel closed");
+                    self.state.report_error(AudioError::ChannelClosed);
+                }
+                SendAudioChunkError::BufferOverflow => {
+                    warn!("Failed to send audio chunk: buffer overflow");
+                    self.state.report_error(AudioError::BufferOverflow);
+                }
+                SendAudioChunkError::Other => {
+                    warn!("Failed to send audio chunk: processing failed");
+                    self.state.report_error(AudioError::ProcessingFailed);
+                }
             }
-
-            warn!("Failed to send audio chunk: {}", e);
-            // More specific error handling based on failure reason
-            let error = if e.to_string().contains("channel closed") {
-                AudioError::ChannelClosed
-            } else if e.to_string().contains("full") {
-                AudioError::BufferOverflow
-            } else {
-                AudioError::ProcessingFailed
-            };
-            self.state.report_error(error);
         } else {
             debug!("Sent audio chunk {} ({} samples)", chunk_id, data.len());
         }
