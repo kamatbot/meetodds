@@ -29,9 +29,24 @@ cargo build --manifest-path "$workspace_root/llama-helper/Cargo.toml" --release 
 mkdir -p "$(dirname "$sidecar_path")"
 install -m 755 "$workspace_root/target/release/llama-helper" "$sidecar_path"
 
+# Auto-detect or allow override of macOS codesigning identity
+signing_identity="${APPLE_SIGNING_IDENTITY:-}"
+if [[ -z "$signing_identity" ]]; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID Application"; then
+    signing_identity="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+  elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development"; then
+    signing_identity="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/{print $2; exit}')"
+  else
+    signing_identity="-"
+  fi
+fi
+
+echo "Signing with identity: $signing_identity"
+
 if [[ "${APP_ONLY:-0}" == "1" ]]; then
   echo "Packaging a fast release app only (no DMG or updater artifact)"
-  pnpm exec tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' --bundles app -- --features metal,coreml
+  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app -- --features metal,coreml
 else
-  pnpm exec tauri build -- --features metal,coreml
+  echo "Packaging full distributable release: App bundle and signed DMG installer"
+  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app,dmg -- --features metal,coreml
 fi

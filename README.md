@@ -52,9 +52,15 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 <summary>Table of Contents</summary>
 
 - [Introduction](#introduction)
-- [Why Meetily?](#why-meetily)
+- [Why Meetily / MeetOdds?](#why-meetily)
 - [Features](#features)
+- [MeetOdds Core Capabilities](#-meetodds-core-capabilities)
+  - [Docked Notes Sidecar Column](#-docked-notes-sidecar-column)
+  - [Zero-Drop Continuous Transcription](#-zero-drop-continuous-transcription)
+  - [Local On-Device AI Summaries](#-local-on-device-ai-summaries)
+  - [Professional Document Export](#-professional-document-export)
 - [Installation](#installation)
+- [macOS Packaging & Xcode Code Signing](#-macos-packaging--xcode-code-signing)
 - [Key Features in Action](#key-features-in-action)
 - [System Architecture](#system-architecture)
 - [For Developers](#for-developers)
@@ -98,22 +104,46 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Real-time Transcription:** Get a live transcript of your meeting as it happens.
 - **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
-- **Open Source:** Meetily is open source and free to use.
-- **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
+- **Open Source:** Meetily / MeetOdds is open source and free to use.
+- **Flexible AI Provider Support:** Choose from local on-device models via `llama-helper` or Ollama, Claude, Groq, OpenRouter, or your own OpenAI-compatible endpoint.
+
+## 🚀 MeetOdds Core Capabilities
+
+### 📌 Docked Notes Sidecar Column
+- **Screen-Edge Docking**: Never covers or crowds your screen. Opens as a sleek, docked column pinned to the right edge of your display, optimized for seamless note-taking alongside Zoom, Google Meet, Microsoft Teams, Slack huddles, or IDEs.
+- **Meeting-Isolated Documents**: Each new recording automatically provisions a clean, independent notes document so notes never bleed into future meetings.
+- **Single-Document Continuous Flow**: Clicking `+` inserts an unobtrusive timestamped breakpoint into the active document, keeping all notes for a meeting consolidated in one chronological document rather than scattering across multiple files.
+- **Conflict-Safe Local Persistence**: Automatic transactional persistence into SQLite (WAL mode) with compare-and-swap synchronization to prevent edits from being overwritten.
+
+### 🎙️ Zero-Drop Continuous Transcription
+- **Dual Stream Audio Capture**: Simultaneously captures system audio (remote speakers via Apple Core Audio and ScreenCaptureKit) and physical microphone input.
+- **Keystroke Noise Immunity**: Silero Voice Activity Detection (VAD) calibrated with resilient 0.40 / 0.25 speech thresholds and 60ms minimum speech windows. Active keyboard typing clicks will never drop words, truncate sentences, or falsely suppress transcription.
+- **Local Engine Flexibility**: Integrated support for on-device **Parakeet ONNX** and **Whisper** engines with Apple Silicon Metal acceleration.
+- **Separated Live Preview Lane**: Speculative live subtitle previews operate on a non-blocking dedicated lane, guaranteeing that UI rendering cannot delay or drop persisted meeting transcripts.
+
+### 🤖 Local On-Device AI Summaries
+- **Hardware-Accelerated Sidecar**: Built with a dedicated native `llama-helper` sidecar powered by `llama.cpp` and Metal GPU acceleration.
+- **Local Intelligence**: Summarize meetings directly on your device using optimized models (Qwen 2.5/3.5, Gemma 3) with zero API costs, zero internet required, and 100% data privacy.
+- **Flexible Providers**: Support for local Ollama instances as well as custom private OpenAI-compatible cloud endpoints with your own API keys.
+
+### 📄 Professional Document Export
+- **Microsoft Word (.docx)**: Clean document layout with structured meeting metadata, key topics, action items, and attributed speaker dialogue.
+- **Print-Ready PDF**: Clean typography with headers, timestamps, and executive summary blocks.
+- **Markdown & JSON**: Unformatted plain-text, Obsidian-ready Markdown, and structured JSON for integration into personal knowledge graphs or internal wikis.
 
 ## Installation
 
+### 🍎 **macOS (Apple Silicon)**
+
+1. Download the latest `MeetOdds_0.4.19_aarch64.dmg` from Releases.
+2. Open the downloaded `.dmg` file.
+3. Drag **MeetOdds** to your Applications folder.
+4. Launch **MeetOdds** from Applications.
+
 ### 🪟 **Windows**
 
-1. Download the latest `x64-setup.exe` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
-2. Run the installer
-
-### 🍎 **macOS**
-
-1. Download `meetily_0.4.0_aarch64.dmg` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
-2. Open the downloaded `.dmg` file
-3. Drag **Meetily** to your Applications folder
-4. Open **Meetily** from Applications folder
+1. Download the latest `x64-setup.exe` from Releases.
+2. Run the installer.
 
 ### 🐧 **Linux**
 
@@ -121,6 +151,48 @@ Build from source following our detailed guides:
 
 - [Building on Linux](docs/building_in_linux.md)
 - [General Build Instructions](docs/BUILDING.md)
+
+---
+
+## 🍎 macOS Packaging & Xcode Code Signing
+
+MeetOdds is compiled with Apple Silicon Metal GPU acceleration and native sidecars. For distribution outside the Mac App Store, packages are signed with Apple Developer ID certificates to satisfy macOS Gatekeeper.
+
+### One-Step Release Build
+
+Run the distribution packaging script from the repository root:
+
+```bash
+# Automatically detects your Developer ID Application certificate in macOS Keychain:
+bash frontend/scripts/build-macos-m5.sh
+```
+
+### Specifying an Explicit Signing Identity
+
+If you have multiple Xcode code signing identities or want to sign with a specific certificate:
+
+```bash
+APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAM_ID)" bash frontend/scripts/build-macos-m5.sh
+```
+
+### Generated Artifacts
+
+The packaging script automatically produces:
+1. **Application Bundle**: `target/release/bundle/macos/MeetOdds.app`
+   - Hardened runtime enabled (`entitlements.plist` with microphone and audio capture permissions)
+   - Signed native binaries: `MeetOdds`, `llama-helper` sidecar, and production `ffmpeg` binary.
+2. **DMG Installer**: `target/release/bundle/dmg/MeetOdds_0.4.19_aarch64.dmg`
+   - Drag-and-drop installer with Applications shortcut, codesigned and ready for distribution.
+
+### Verifying Signatures
+
+```bash
+# Verify the .app bundle:
+codesign -dvvv target/release/bundle/macos/MeetOdds.app
+
+# Verify Gatekeeper assessment:
+spctl --assess --type exec -v target/release/bundle/macos/MeetOdds.app
+```
 
 **Quick start:**
 
