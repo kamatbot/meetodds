@@ -2,9 +2,8 @@
 export default Object.freeze({
   siteUrl: 'https://meetodds.kamatbot.com',
   repositoryUrl: 'https://github.com/kamatbot/meetodds',
-  // The public repository and installer are not published yet. Do not fake availability.
-  repositoryAvailable: false,
-  // Codex: set to the verified HTTPS URL of the signed Mac installer at release time.
-  // null intentionally renders a disabled download control, not a broken download.
-  macDownloadUrl: null,
+  // Public repository and installer are published.
+  repositoryAvailable: true,
+  // Verified HTTPS URL of the signed Mac installer.
+  macDownloadUrl: 'https://github.com/kamatbot/meetodds/releases/download/v0.4.19/MeetOdds_0.4.19_aarch64.dmg',
 });
