@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { LiveTranscriptPreview, Transcript } from '@/types';
+import { sameCaptionUtterance } from '@/lib/live-captions';
 import {
   DEFAULT_LIVE_TRANSLATION_SETTINGS,
   LiveTranslationEntry,
@@ -35,6 +36,7 @@ interface TranslationJob {
   glossary: string;
   contextHint: string;
   isLive: boolean;
+  preview?: LiveTranscriptPreview;
 }
 
 interface LiveTranslationState {
@@ -90,7 +92,8 @@ function contextForTurn(transcripts: Transcript[], index: number, turns: 0 | 2 |
 
 export function useLiveTranslation(
   transcripts: Transcript[],
-  livePreview: LiveTranscriptPreview | null = null
+  livePreview: LiveTranscriptPreview | null = null,
+  sessionId: string | null = null
 ): LiveTranslationState {
   const [settings, setSettings] = useState<LiveTranslationSettings>(DEFAULT_LIVE_TRANSLATION_SETTINGS);
   const [translations, setTranslations] = useState<Record<string, LiveTranslationEntry>>({});
@@ -118,6 +121,9 @@ const drainQueueRef = useRef<() => void>(() => undefined);
 const previewInFlightRef = useRef<TranslationJob | null>(null);
 const pendingPreviewRef = useRef<TranslationJob | null>(null);
 const runPreviewTranslationRef = useRef<() => void>(() => undefined);
+const currentPreviewRef = useRef(livePreview);
+currentPreviewRef.current = livePreview;
+const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
 
   const updateCounts = useCallback(() => {
     if (!mountedRef.current) return;
@@ -129,6 +135,7 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
     mountedRef.current
     && job.generation === generationRef.current
     && latestRevisionRef.current.get(job.segmentKey) === job.revision
+    && (!job.preview || sameCaptionUtterance(job.preview, currentPreviewRef.current))
   ), []);
 
   const cancelNativeRequest = useCallback((requestId: string | undefined) => {
@@ -203,11 +210,11 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
             glossary: job.glossary || null,
             contextHint: job.contextHint || null,
           });
+          if (!isCurrentJob(job)) return;
           if (!cached) {
             resultCacheRef.current.set(key, response);
             trimCache(resultCacheRef.current);
           }
-          if (!isCurrentJob(job)) return;
           const totalLatency = cached ? 0 : response.latencyMs;
           const firstWordLatency = cached ? 0 : response.firstWordLatencyMs;
           setTranslations((previous) => ({
@@ -300,6 +307,7 @@ const runPreviewTranslationRef = useRef<() => void>(() => undefined);
     generationRef.current += 1;
     queueRef.current = [];
     pendingPreviewRef.current = null;
+    previewInputsRef.current.clear();
     latestRevisionRef.current.clear();
     for (const requestId of activeRequestIdsRef.current.values()) {
       cancelNativeRequest(requestId);
@@ -339,15 +347,25 @@ const runPreviewTranslation = useCallback(() => {
   activeJobsRef.current.set(job.requestId, job);
   activeCountRef.current += 1;
   updateCounts();
-  setTranslations((previous) => ({
-    ...previous,
-    [job.segmentKey]: {
-      segmentKey: job.segmentKey,
-      sourceText: job.text,
-      targetLanguage: job.targetLanguage,
-      status: 'translating',
-    },
-  }));
+  const priorInput = previewInputsRef.current.get(job.segmentKey);
+  if (job.preview) previewInputsRef.current.set(job.segmentKey, job.preview);
+  setTranslations((previous) => {
+    const prior = previous[job.segmentKey];
+    // Keep the last translated phrase while its newer revision is decoding. This
+    // also lets response-only providers paint a result before the next job starts.
+    const retain = prior?.targetLanguage === job.targetLanguage
+      && sameCaptionUtterance(priorInput, job.preview);
+    return {
+      ...previous,
+      [job.segmentKey]: {
+        ...(retain ? prior : {}),
+        segmentKey: job.segmentKey,
+        sourceText: retain && prior.translatedText ? prior.sourceText : job.text,
+        targetLanguage: job.targetLanguage,
+        status: 'translating',
+      },
+    };
+  });
 
   void (async () => {
     try {
@@ -365,11 +383,11 @@ const runPreviewTranslation = useCallback(() => {
         glossary: job.glossary || null,
         contextHint: job.contextHint || null,
       });
+      if (!isCurrentJob(job)) return;
       if (!cached) {
         resultCacheRef.current.set(key, response);
         trimCache(resultCacheRef.current);
       }
-      if (!isCurrentJob(job)) return;
       setTranslations((previous) => ({
         ...previous,
         [job.segmentKey]: {
@@ -534,6 +552,9 @@ runPreviewTranslationRef.current = runPreviewTranslation;
   ]);
 
 
+  // Reset before admitting work for a different recording, without remounting notes or the workspace.
+  useEffect(() => { resultCacheRef.current.clear(); clearTranslations(); }, [sessionId, clearTranslations]);
+
         useEffect(() => {
           const previewKey = livePreview ? `live-preview-${livePreview.source}` : null;
           if (!settings.enabled || !livePreview || !livePreview.text.trim()) {
@@ -587,21 +608,17 @@ runPreviewTranslationRef.current = runPreviewTranslation;
             glossary: settings.glossary,
             contextHint: settings.contextHint,
             isLive: true,
+            preview: livePreview,
           };
-          // The caption can change while its previous translation is still in flight.
-          // Mark the newest revision immediately so an older result is never displayed
-          // beneath unrelated source text.
-          latestRevisionRef.current.set(segmentKey, previewJob.revision);
+          // Coalesce pending snapshots WITHOUT invalidating a still-useful active
+          // translation on every ASR revision. Otherwise a provider slower than the
+          // preview cadence can finish every request yet never display a word.
+          const inFlight = previewInFlightRef.current;
+          if (inFlight?.preview && !sameCaptionUtterance(inFlight.preview, livePreview)) {
+            cancelNativeRequest(inFlight.requestId);
+            latestRevisionRef.current.delete(inFlight.segmentKey);
+          }
           pendingPreviewRef.current = previewJob;
-          setTranslations((previous) => ({
-            ...previous,
-            [segmentKey]: {
-              segmentKey,
-              sourceText: previewJob.text,
-              targetLanguage: previewJob.targetLanguage,
-              status: 'translating',
-            },
-          }));
 
           // Do not cancel a translation every 450ms as the ASR preview revises. Finish
           // the current short request, then immediately jump to the newest caption.
@@ -610,6 +627,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
           }
         }, [
           livePreview,
+          sessionId,
           transcripts,
           settings.enabled,
           settings.targetLanguage,
@@ -667,7 +685,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
         isLive,
       });
     });
-  }, [transcripts, settings, cancelNativeRequest, enqueueJob]);
+  }, [sessionId, transcripts, settings, cancelNativeRequest, enqueueJob]);
 
 
 const translatedCount = useMemo(
@@ -676,8 +694,9 @@ const translatedCount = useMemo(
   ).length,
   [translations]
 );
-const previewTranslation = livePreview
-  ? translations[`live-preview-${livePreview.source}`]
+const previewKey = livePreview ? `live-preview-${livePreview.source}` : null;
+const previewTranslation = previewKey && sameCaptionUtterance(previewInputsRef.current.get(previewKey), livePreview)
+  ? translations[previewKey]
   : undefined;
 
   return {

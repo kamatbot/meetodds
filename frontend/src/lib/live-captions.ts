@@ -106,3 +106,27 @@ export function isCaptionFrame(value: unknown): value is CaptionFrame {
     && typeof v.translated === 'boolean'
     && ['listening', 'translating', 'live', 'paused', 'error'].includes(v.phase);
 }
+
+/** Revised overlapping windows belong to the same utterance; a new source/turn does not. */
+export function sameCaptionUtterance(a?: LiveTranscriptPreview | null, b?: LiveTranscriptPreview | null): boolean {
+  return Boolean(a && b && a.source === b.source
+    && a.audioStartTime < b.audioEndTime && b.audioStartTime < a.audioEndTime);
+}
+
+/** Orders IPC and latches a local dismissal until the owner acknowledges it. */
+export class CaptionFrameGate {
+  private last: CaptionFrame | null = null;
+  private retiredEpochs = new Set<string>();
+  private dismissed = false;
+
+  dismiss(): void { this.dismissed = true; }
+
+  accept(value: unknown): CaptionFrame | null {
+    if (!isCaptionFrame(value) || this.retiredEpochs.has(value.epoch)) return null;
+    if (this.last?.epoch === value.epoch && value.sequence <= this.last.sequence) return null;
+    if (this.last && this.last.epoch !== value.epoch) this.retiredEpochs.add(this.last.epoch);
+    this.last = value;
+    if (!value.enabled) this.dismissed = false;
+    return this.dismissed ? { ...value, enabled: false, text: '' } : value;
+  }
+}
