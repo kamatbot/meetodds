@@ -541,6 +541,36 @@ fn codex_delta(event: &Value) -> Result<Option<String>, String> {
     }
 }
 
+fn is_conversational_english(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric() && c != '\'')
+        .filter(|w| !w.is_empty())
+        .collect();
+    if words.is_empty() || words.len() > 14 {
+        return false;
+    }
+    const COMMON_WORDS: &[&str] = &[
+        "the", "be", "to", "of", "and", "a", "in", "that", "have", "i",
+        "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
+        "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
+        "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
+        "so", "up", "out", "if", "about", "who", "get", "which", "go", "me",
+        "when", "make", "can", "like", "time", "no", "just", "him", "know", "take",
+        "people", "into", "year", "your", "good", "some", "could", "them", "see", "other",
+        "than", "then", "now", "look", "only", "come", "its", "over", "think", "also",
+        "back", "after", "use", "two", "how", "our", "work", "first", "well", "way",
+        "even", "new", "want", "because", "any", "these", "give", "day", "most", "us",
+        "hello", "hi", "hey", "yes", "yeah", "ok", "okay", "sure", "thanks", "thank",
+        "morning", "afternoon", "evening", "meeting", "call", "test", "testing", "hear",
+        "right", "cool", "great", "nice", "fine", "sounds", "agenda", "update", "start",
+        "project", "team", "notes", "screen", "share", "today", "tomorrow", "yesterday",
+        "let's", "lets", "is", "are", "was", "were", "am", "been", "being",
+    ];
+    let matches = words.iter().filter(|w| COMMON_WORDS.contains(w)).count();
+    matches * 2 >= words.len()
+}
+
 fn uses_local_translation_worker(provider: &LLMProvider) -> bool {
     matches!(provider, LLMProvider::Ollama | LLMProvider::BuiltInAI)
 }
@@ -1321,25 +1351,45 @@ pub async fn api_translate_live_text<R: Runtime>(
     }
 
     if source.is_none() {
-        // If target is English and active STT engine is Parakeet, the text is already in English.
+        // If target is English and active STT engine is producing English:
         if target.code == "en" {
+            let mut is_english_stt = false;
+            let mut stt_model_name = "parakeet-english".to_string();
+
             if let Ok(Some(transcript_setting)) =
                 SettingsRepository::get_transcript_config(state.db_manager.pool()).await
             {
                 if transcript_setting.provider.eq_ignore_ascii_case("parakeet") {
-                    return Ok(LiveTranslationResponse {
-                        request_id,
-                        translated_text: text.to_string(),
-                        source_language: Some("en".to_string()),
-                        target_language: target.code.to_string(),
-                        provider: "passthrough".to_string(),
-                        model: "parakeet-english".to_string(),
-                        latency_ms: 0,
-                        first_word_latency_ms: 0,
-                        fallback_reason: None,
-                        cached: true,
-                    });
+                    is_english_stt = true;
+                    stt_model_name = "parakeet-english".to_string();
+                } else if transcript_setting.model.to_lowercase().ends_with(".en") {
+                    is_english_stt = true;
+                    stt_model_name = format!("{}-english", transcript_setting.provider);
                 }
+            }
+
+            if !is_english_stt {
+                if let Some(pref) = crate::get_language_preference_internal() {
+                    if pref.eq_ignore_ascii_case("en") || pref.to_lowercase().starts_with("en-") {
+                        is_english_stt = true;
+                        stt_model_name = "whisper-english".to_string();
+                    }
+                }
+            }
+
+            if is_english_stt {
+                return Ok(LiveTranslationResponse {
+                    request_id,
+                    translated_text: text.to_string(),
+                    source_language: Some("en".to_string()),
+                    target_language: target.code.to_string(),
+                    provider: "passthrough".to_string(),
+                    model: stt_model_name,
+                    latency_ms: 0,
+                    first_word_latency_ms: 0,
+                    fallback_reason: None,
+                    cached: true,
+                });
             }
         }
 
@@ -1350,7 +1400,7 @@ pub async fn api_translate_live_text<R: Runtime>(
                     is_detected_language_matching_target(detected_app_code, &target.code);
                 let high_confidence = info.is_reliable() && info.confidence() >= 0.70;
                 let english_match =
-                    target.code == "en" && detected_app_code == "en" && info.confidence() >= 0.50;
+                    target.code == "en" && detected_app_code == "en" && info.confidence() >= 0.40;
 
                 if matches_target && (high_confidence || english_match) {
                     return Ok(LiveTranslationResponse {
@@ -1359,7 +1409,7 @@ pub async fn api_translate_live_text<R: Runtime>(
                         source_language: Some(detected_app_code.to_string()),
                         target_language: target.code.to_string(),
                         provider: "passthrough".to_string(),
-                        model: "none".to_string(),
+                        model: "detected-language".to_string(),
                         latency_ms: 0,
                         first_word_latency_ms: 0,
                         fallback_reason: None,
@@ -1367,6 +1417,22 @@ pub async fn api_translate_live_text<R: Runtime>(
                     });
                 }
             }
+        }
+
+        // Conversational English check for short preview turns where statistical detection lacks sample length
+        if target.code == "en" && is_conversational_english(text) {
+            return Ok(LiveTranslationResponse {
+                request_id,
+                translated_text: text.to_string(),
+                source_language: Some("en".to_string()),
+                target_language: target.code.to_string(),
+                provider: "passthrough".to_string(),
+                model: "conversational-english".to_string(),
+                latency_ms: 0,
+                first_word_latency_ms: 0,
+                fallback_reason: None,
+                cached: true,
+            });
         }
     }
 
@@ -1701,4 +1767,16 @@ mod tests {
         clear_provider_health().await;
         assert!(!provider_is_cooling_down(&config).await);
     }
+
+    #[test]
+    fn conversational_english_detection() {
+        assert!(is_conversational_english("Good morning everyone"));
+        assert!(is_conversational_english("Yes, I agree with that"));
+        assert!(is_conversational_english("Can you hear me?"));
+        assert!(is_conversational_english("Sounds good, let's start"));
+        assert!(!is_conversational_english("Buenos días a todos"));
+        assert!(!is_conversational_english("Bonjour tout le monde"));
+        assert!(!is_conversational_english(""));
+    }
 }
+

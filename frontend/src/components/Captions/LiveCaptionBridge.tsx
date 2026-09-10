@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { toast } from 'sonner';
@@ -25,13 +25,20 @@ export default function LiveCaptionBridge() {
   const [recentFinal, setRecentFinal] = useState(false);
   const final = transcripts[transcripts.length - 1];
   const finalTranslation = final ? translations[liveTranslationSegmentKey(final)] : undefined;
+  const lastTranslatedTextRef = useRef<string>('');
+  const lastTargetLanguageRef = useRef<string>(settings.targetLanguage);
+
+  if (lastTargetLanguageRef.current !== settings.targetLanguage) {
+    lastTargetLanguageRef.current = settings.targetLanguage;
+    lastTranslatedTextRef.current = '';
+  }
 
   // A finalized turn remains readable briefly after VAD clears the speculative caption.
   useEffect(() => {
     setRecentFinal(Boolean(final));
     const timer = setTimeout(() => setRecentFinal(false), 6000);
     return () => clearTimeout(timer);
-  }, [final?.id, finalTranslation?.translatedText, currentMeetingId]);
+  }, [final, finalTranslation?.translatedText, currentMeetingId]);
 
   const content = useMemo(() => {
     const candidate: LiveTranscriptPreview | null = livePreview ?? (recentFinal && final ? {
@@ -40,11 +47,27 @@ export default function LiveCaptionBridge() {
       revision: final.sequence_id || 0, audioStartTime: final.audio_start_time || 0,
       audioEndTime: final.audio_end_time || 0, latencyMs: 0,
     } : null);
-    const activeTranslation = livePreview ? previewTranslation : finalTranslation;
+
+    // Seamless turn transition: when livePreview ends and becomes final, finalTranslation
+    // may still be queued or in-flight. Fall back to previewTranslation if it contains
+    // translated text so captions remain readable and do not blank out to "Translating…".
+    const activeTranslation = livePreview
+      ? previewTranslation
+      : (finalTranslation?.translatedText ? finalTranslation : (previewTranslation?.translatedText ? previewTranslation : finalTranslation));
+
     const resolved = resolveCaptionContent({
-      preview: candidate, translation: activeTranslation,
-      translationEnabled: settings.enabled, targetLanguage: settings.targetLanguage, isPaused,
+      preview: candidate,
+      translation: activeTranslation,
+      translationEnabled: settings.enabled,
+      targetLanguage: settings.targetLanguage,
+      isPaused,
+      lastTranslatedText: lastTranslatedTextRef.current,
     });
+
+    if (resolved.translated && resolved.text && resolved.phase !== 'error') {
+      lastTranslatedTextRef.current = resolved.text;
+    }
+
     if (resolved.phase === 'error' && !resolved.error && lastError) {
       return { ...resolved, error: lastError };
     }
@@ -60,7 +83,7 @@ export default function LiveCaptionBridge() {
   const disposed = useRef(false);
 
   const publish = useCallback(async () => {
-    if (disposed.current || !overlay.current) return;
+    if (disposed.current) return;
     if (!epoch.current) epoch.current = crypto.randomUUID();
     const frame: CaptionFrame = { ...latest.current, epoch: epoch.current, sequence: ++sequence.current };
     try { await emitTo(CAPTION_WINDOW_LABEL, CAPTION_FRAME_EVENT, frame); }
@@ -112,6 +135,6 @@ export default function LiveCaptionBridge() {
     return () => { cancelled = true; };
   }, [enabled, publish, setCaptionsVisible]);
 
-  useEffect(() => { void publish(); }, [content, currentMeetingId, enabled, publish]);
+  useLayoutEffect(() => { void publish(); }, [content, currentMeetingId, enabled, publish]);
   return null;
 }

@@ -113,3 +113,13 @@ test('canonical translation remains available when live preview clears', async (
   await h.finish(first, 'Stale preview');
   assert.equal(h.value.previewTranslation, undefined);
 });
+test('instant preview-to-final handoff seeds translation immediately without latency', async () => {
+  const h = harness(); await h.flush(); const first = h.jobs[0];
+  await h.finish(first, 'Good morning everyone');
+  assert.equal(h.value.previewTranslation.translatedText, 'Good morning everyone');
+  const turn = { id: 'turn1', sequence_id: 9, text: speech(1).text, speaker_source: 'microphone', speaker_label: 'Me' };
+  await h.input(null, 'meeting-a', [turn]);
+  assert.equal(h.value.translations['sequence-9']?.translatedText, 'Good morning everyone');
+  assert.equal(h.value.translations['sequence-9']?.status, 'translated');
+});
+

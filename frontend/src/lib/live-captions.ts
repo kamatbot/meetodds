@@ -29,13 +29,14 @@ export interface CaptionFrame extends CaptionContent {
 
 /** Captions intentionally ignore the document's bilingual preference. No original-language fallback. */
 export function resolveCaptionContent({
-  preview, translation, translationEnabled, targetLanguage = 'en', isPaused = false,
+  preview, translation, translationEnabled, targetLanguage = 'en', isPaused = false, lastTranslatedText,
 }: {
   preview: LiveTranscriptPreview | null;
   translation?: LiveTranslationEntry;
   translationEnabled: boolean;
   targetLanguage?: string;
   isPaused?: boolean;
+  lastTranslatedText?: string;
 }): CaptionContent {
   const base = {
     speaker: preview?.speakerLabel || 'Live',
@@ -57,7 +58,15 @@ export function resolveCaptionContent({
       error: entry.error,
     };
   }
-  if (entry?.status === 'error') return { ...base, text: '', phase: 'error', error: entry.error };
+  if (entry?.status === 'error') {
+    if (lastTranslatedText?.trim()) {
+      return { ...base, text: lastTranslatedText.trim(), phase: 'recovering', error: entry.error };
+    }
+    return { ...base, text: '', phase: 'error', error: entry.error };
+  }
+  if (lastTranslatedText?.trim()) {
+    return { ...base, text: lastTranslatedText.trim(), phase: 'translating' };
+  }
   return { ...base, text: '', phase: 'translating' };
 }
 

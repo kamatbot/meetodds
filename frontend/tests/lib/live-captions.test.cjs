@@ -41,3 +41,9 @@ test('a dismissed window stays hidden while old enabled frames arrive', () => { 
 test('owner acknowledgement allows an explicit reopening', () => { const g = new CaptionFrameGate(); g.accept(frame(1)); g.dismiss(); g.accept(frame(2, { enabled: false })); assert.equal(g.accept(frame(3)).enabled, true); });
 test('a reloaded main window retires its previous IPC epoch', () => { const g = new CaptionFrameGate(); g.accept(frame(8)); assert.ok(g.accept(frame(1, { epoch: 'e2' }))); assert.equal(g.accept(frame(9)), null); });
 test('mixed-DPI placement uses physical positions with logical sizes', () => { const r = fit(null, { x: 1920, y: 0, width: 2880, height: 1800, scaleFactor: 2 }); assert.equal(r.width, 720); assert.equal(r.x, 2640); assert.ok(r.x + r.width * 2 <= 4800); assert.ok(r.y + r.height * 2 <= 1800); });
+test('translating state retains prior translated text to prevent blank flicker', () => {
+  const r = resolve({ preview, translationEnabled: true, lastTranslatedText: 'Prior sentence translated' });
+  assert.equal(r.text, 'Prior sentence translated');
+  assert.equal(r.phase, 'translating');
+});
+

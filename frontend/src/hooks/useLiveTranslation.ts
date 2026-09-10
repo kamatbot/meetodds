@@ -559,13 +559,10 @@ export function useLiveTranslation(
         latestRevisionRef.current.delete(inFlight.segmentKey);
       }
       if (previewKey) latestRevisionRef.current.delete(previewKey);
-      setTranslations((previous) => {
-        const keys = Object.keys(previous).filter((key) => key.startsWith('live-preview-'));
-        if (keys.length === 0) return previous;
-        const next = { ...previous };
-        keys.forEach((key) => delete next[key]);
-        return next;
-      });
+      // Do not wipe live-preview-* translations from the state map immediately:
+      // the finalizing canonical turn needs to inspect it on the very next cycle
+      // for zero-latency handoff. previewTranslation itself already yields undefined
+      // because livePreview is null.
       return;
     }
 
@@ -629,6 +626,38 @@ export function useLiveTranslation(
       const index = start + offset;
       const isLive = index === lastIndex;
       const segmentKey = liveTranslationSegmentKey(transcript);
+
+      // Instant handoff: if the preview translation already produced target text for
+      // this utterance, seed it into the finalized segment immediately so neither
+      // the transcript panel nor the live captions suffer a multi-second delay.
+      const previewKey = `live-preview-${transcript.speaker_source === 'system' ? 'system' : 'microphone'}`;
+      const previewEntry = translations[previewKey];
+      if (
+        isLive &&
+        previewEntry &&
+        previewEntry.targetLanguage === settings.targetLanguage &&
+        previewEntry.translatedText?.trim()
+      ) {
+        setTranslations((previous) => {
+          if (previous[segmentKey]?.translatedText) return previous;
+          return {
+            ...previous,
+            [segmentKey]: {
+              segmentKey,
+              sourceText: text,
+              translatedText: previewEntry.translatedText,
+              targetLanguage: settings.targetLanguage,
+              status: previewEntry.sourceText?.trim() === text ? 'translated' : 'translating',
+              provider: previewEntry.provider,
+              model: previewEntry.model,
+              latencyMs: 0,
+              firstWordLatencyMs: 0,
+              cached: true,
+            },
+          };
+        });
+      }
+
       const contextText = contextForTurn(transcripts, index, settings.contextTurns);
       const revision = [
         generationRef.current, settings.targetLanguage, settings.engine, settings.speed,
@@ -656,7 +685,7 @@ export function useLiveTranslation(
         isLive,
       });
     });
-  }, [sessionId, transcripts, settings, cancelNativeRequest, enqueueJob]);
+  }, [sessionId, transcripts, settings, translations, cancelNativeRequest, enqueueJob]);
 
   const translatedCount = useMemo(
     () => Object.entries(translations).filter(
