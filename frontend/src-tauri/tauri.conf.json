@@ -32,13 +32,18 @@
             },
             "assetProtocol": {
                 "enable": true,
-                "scope": ["$APPDATA/**"]
+                "scope": [
+                    "$APPDATA/**"
+                ]
             },
             "capabilities": [
                 {
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
-                    "windows": ["main", "manual-notes"],
+                    "windows": [
+                        "main",
+                        "manual-notes"
+                    ],
                     "permissions": [
                         "fs:default",
                         "fs:allow-read-file",
@@ -72,7 +77,54 @@
                         "notification:default",
                         "notification:allow-is-permission-granted",
                         "process:default",
-                        {"identifier": "fs:scope", "allow": [{"path": "$APPDATA/*"}, {"path": "$APPDATA/**"}, {"path": "$DOWNLOAD/*"}, {"path": "$DOWNLOAD/**"}]}
+                        {
+                            "identifier": "fs:scope",
+                            "allow": [
+                                {
+                                    "path": "$APPDATA/*"
+                                },
+                                {
+                                    "path": "$APPDATA/**"
+                                },
+                                {
+                                    "path": "$DOWNLOAD/*"
+                                },
+                                {
+                                    "path": "$DOWNLOAD/**"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "identifier": "caption-window-owner",
+                    "description": "Only the main webview can lazily create the caption window",
+                    "windows": [
+                        "main"
+                    ],
+                    "permissions": [
+                        "core:webview:allow-create-webview-window",
+                        "core:webview:allow-get-all-webviews",
+                        "core:window:allow-set-position",
+                        "core:window:allow-set-size"
+                    ]
+                },
+                {
+                    "identifier": "caption-display",
+                    "description": "Display-only caption window: events and window geometry, no filesystem or process permissions",
+                    "windows": [
+                        "live-captions"
+                    ],
+                    "permissions": [
+                        "core:event:default",
+                        "core:window:default",
+                        "core:window:allow-start-dragging",
+                        "core:window:allow-start-resize-dragging",
+                        "core:window:allow-set-size",
+                        "core:window:allow-set-position",
+                        "core:window:allow-center",
+                        "core:window:allow-show",
+                        "core:window:allow-hide"
                     ]
                 }
             ]
@@ -80,11 +132,27 @@
     },
     "bundle": {
         "active": true,
-        "targets": ["deb", "appimage", "msi", "nsis", "app", "dmg"],
+        "targets": [
+            "deb",
+            "appimage",
+            "msi",
+            "nsis",
+            "app",
+            "dmg"
+        ],
         "createUpdaterArtifacts": false,
-        "icon": ["icons/icon.png", "icons/app_icon.icns", "icons/app_icon.ico"],
-        "resources": ["templates/*.json"],
-        "externalBin": ["binaries/llama-helper", "binaries/ffmpeg"],
+        "icon": [
+            "icons/icon.png",
+            "icons/app_icon.icns",
+            "icons/app_icon.ico"
+        ],
+        "resources": [
+            "templates/*.json"
+        ],
+        "externalBin": [
+            "binaries/llama-helper",
+            "binaries/ffmpeg"
+        ],
         "macOS": {
             "entitlements": "entitlements.plist",
             "signingIdentity": "-",

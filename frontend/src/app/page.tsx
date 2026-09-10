@@ -254,6 +254,9 @@ export default function Home() {
       )}
 
       <div className="relative flex min-h-0 flex-1">
+        {inAppRecording || isStopping || isProcessingStop ? (
+          <TranscriptDrawer presentation="workspace" isProcessingStop={isProcessingStop} isStopping={isStopping} showModal={showModal} />
+        ) : (
         <div className="min-w-0 flex-1">
           <HomeDashboard
             hasMicrophone={hasMicrophone}
@@ -272,13 +275,6 @@ export default function Home() {
             onOpenSettings={() => router.push('/settings')}
           />
         </div>
-
-        {(inAppRecording || isStopping || isProcessingStop) && (
-          <TranscriptDrawer
-            isProcessingStop={isProcessingStop}
-            isStopping={isStopping}
-            showModal={showModal}
-          />
         )}
       </div>
 

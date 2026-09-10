@@ -1,6 +1,10 @@
 'use client';
 
-import { Captions, CaptionsOff, NotebookPen, Pause, Play, Square } from 'lucide-react';
+import { Captions, NotebookPen, Pause, Play, Square } from 'lucide-react';
+import { useTranscriptSession } from '@/contexts/TranscriptContext';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
+import './live-meeting.css';
+
 interface LiveMeetingBarProps {
   isPaused: boolean;
   isBusy: boolean;
@@ -11,70 +15,30 @@ interface LiveMeetingBarProps {
   onToggleCaptions: () => void;
 }
 
-export default function LiveMeetingBar({
-  isPaused,
-  isBusy,
-  captionsVisible,
-  onPauseResume,
-  onStop,
-  onOpenNotes,
-  onToggleCaptions,
-}: LiveMeetingBarProps) {
-  const status = isPaused
-    ? 'Recording paused'
-    : 'Recording in progress';
+function ElapsedTime() {
+  const { activeDuration } = useRecordingState();
+  const seconds = Math.floor(Math.max(0, activeDuration || 0));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  return <span className="meeting-elapsed" aria-label="Recording duration">{hours > 0 ? `${hours}:` : ''}{String(minutes).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}</span>;
+}
 
+export default function LiveMeetingBar({ isPaused, isBusy, captionsVisible, onPauseResume, onStop, onOpenNotes, onToggleCaptions }: LiveMeetingBarProps) {
+  const { meetingTitle, currentMeetingId } = useTranscriptSession();
   return (
-    <div className="flex min-h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-slate-950 px-5 py-2 text-white shadow-sm">
-      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${isPaused ? 'bg-amber-400' : 'bg-record animate-pulse'}`} aria-hidden="true" />
-      <span className="shrink-0 text-ui font-semibold text-white">
-        {isPaused ? 'Paused' : 'Recording'}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-ui text-slate-100" aria-live="polite">
-        {status}
-      </span>
-      <button
-        type="button"
-        onClick={onToggleCaptions}
-        aria-pressed={captionsVisible}
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-white/20 bg-white/10 px-2.5 text-caption font-semibold text-white transition-colors hover:bg-white/20 disabled:opacity-40"
-        aria-label={captionsVisible ? 'Hide live captions' : 'Show live captions'}
-      >
-        {captionsVisible ? (
-          <Captions className="h-3.5 w-3.5" strokeWidth={1.75} />
-        ) : (
-          <CaptionsOff className="h-3.5 w-3.5" strokeWidth={1.75} />
-        )}
-        Captions
-      </button>
-      <button
-        type="button"
-        onClick={onOpenNotes}
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-white/20 bg-white/10 px-2.5 text-caption font-semibold text-white transition-colors hover:bg-white/20 disabled:opacity-40"
-        aria-label="Open meeting notes"
-      >
-        <NotebookPen className="h-3.5 w-3.5" strokeWidth={1.75} />
-        Notes
-      </button>
-      <button
-        type="button"
-        onClick={onPauseResume}
-        disabled={isBusy}
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-white/20 bg-white/10 px-2.5 text-caption font-semibold text-white transition-colors hover:bg-white/20 disabled:opacity-40"
-        aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
-      >
-        {isPaused ? <Play className="h-3.5 w-3.5" fill="currentColor" strokeWidth={1.75} /> : <Pause className="h-3.5 w-3.5" fill="currentColor" strokeWidth={1.75} />}
-        {isPaused ? 'Resume' : 'Pause'}
-      </button>
-      <button
-        type="button"
-        onClick={onStop}
-        disabled={isBusy}
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control bg-record px-2.5 text-caption font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-        aria-label="Stop recording"
-      >
-        <Square className="h-3 w-3" fill="currentColor" strokeWidth={1.75} /> Stop
-      </button>
-    </div>
+    <header className="meeting-live-bar">
+      <div className="meeting-live-identity">
+        <span className="meeting-recording-dot" data-paused={isPaused} aria-hidden="true" />
+        <div className="meeting-live-title"><strong>{meetingTitle === '+ New Call' ? 'Your meeting' : meetingTitle}</strong><span role="status">{isPaused ? 'Paused' : 'Recording locally'}</span></div>
+        <ElapsedTime />
+      </div>
+      <div className="meeting-live-actions">
+        <button type="button" className="meeting-control" data-selected={captionsVisible} onClick={onToggleCaptions} aria-pressed={captionsVisible} aria-label={captionsVisible ? 'Hide floating captions' : 'Show floating captions'}><Captions size={17} /><span>Captions</span></button>
+        <button type="button" className="meeting-control" onClick={onOpenNotes} disabled={!currentMeetingId} aria-label="Open linked meeting notes"><NotebookPen size={16} /><span>Notes</span></button>
+        <span className="meeting-control-divider" aria-hidden="true" />
+        <button type="button" className="meeting-control" onClick={onPauseResume} disabled={isBusy} aria-label={isPaused ? 'Resume recording' : 'Pause recording'}>{isPaused ? <Play size={15} /> : <Pause size={15} />}<span>{isPaused ? 'Resume' : 'Pause'}</span></button>
+        <button type="button" className="meeting-control meeting-stop-control" onClick={onStop} disabled={isBusy} aria-label="Stop recording"><Square size={12} fill="currentColor" /><span>{isBusy ? 'Working…' : 'Finish'}</span></button>
+      </div>
+    </header>
   );
 }

@@ -45,29 +45,31 @@ export function resolveCaptionContent({
   if (!translationEnabled) return { ...base, text: preview.text, phase: 'live' };
   // Target changes must never briefly display the prior language's cached result.
   const entry = translation?.targetLanguage === targetLanguage ? translation : undefined;
+  if (entry?.status === 'error') return { ...base, text: '', phase: 'error' };
   if (entry?.translatedText?.trim()) {
-    return { ...base, text: entry.translatedText.trim(), phase: entry.status === 'error' ? 'error' : 'live' };
+    return { ...base, text: entry.translatedText.trim(), phase: 'live' };
   }
-  return { ...base, text: '', phase: entry?.status === 'error' ? 'error' : 'translating' };
+  return { ...base, text: '', phase: 'translating' };
 }
 
 export interface CaptionGeometry { x: number; y: number; width: number; height: number }
-export interface CaptionScreen extends CaptionGeometry {}
+export interface CaptionScreen extends CaptionGeometry { scaleFactor?: number }
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
-/** All values are logical pixels. Supports displays left/above the primary display. */
+/** Positions/screens use physical pixels; window sizes use logical pixels. Handles mixed-DPI displays. */
 export function fitCaptionGeometry(saved: Partial<CaptionGeometry> | null, screen: CaptionScreen): CaptionGeometry {
+  const scale = screen.scaleFactor && Number.isFinite(screen.scaleFactor) && screen.scaleFactor > 0 ? screen.scaleFactor : 1;
   const margin = 16;
-  const availableWidth = Math.max(240, screen.width - margin * 2);
-  const availableHeight = Math.max(120, screen.height - margin * 2);
+  const availableWidth = Math.max(240, screen.width / scale - margin * 2);
+  const availableHeight = Math.max(120, screen.height / scale - margin * 2);
   const finite = (value: unknown, fallback: number): number =>
     typeof value === 'number' && Number.isFinite(value) ? value : fallback;
   const width = clamp(finite(saved?.width, 720), Math.min(340, availableWidth), Math.min(1400, availableWidth));
   const height = clamp(finite(saved?.height, 210), Math.min(140, availableHeight), Math.min(800, availableHeight));
   return {
     width, height,
-    x: clamp(finite(saved?.x, screen.x + (screen.width - width) / 2), screen.x + margin, screen.x + screen.width - width - margin),
-    y: clamp(finite(saved?.y, screen.y + screen.height - height - 72), screen.y + margin, screen.y + screen.height - height - margin),
+    x: clamp(finite(saved?.x, screen.x + (screen.width - width * scale) / 2), screen.x + margin * scale, screen.x + screen.width - (width + margin) * scale),
+    y: clamp(finite(saved?.y, screen.y + screen.height - (height + 72) * scale), screen.y + margin * scale, screen.y + screen.height - (height + margin) * scale),
   };
 }
 
@@ -107,7 +109,7 @@ export function isCaptionFrame(value: unknown): value is CaptionFrame {
     && ['listening', 'translating', 'live', 'paused', 'error'].includes(v.phase);
 }
 
-/** Revised overlapping windows belong to the same utterance; a new source/turn does not. */
+/** Rolling snapshots of one utterance overlap; a different source or later turn must not inherit text. */
 export function sameCaptionUtterance(a?: LiveTranscriptPreview | null, b?: LiveTranscriptPreview | null): boolean {
   return Boolean(a && b && a.source === b.source
     && a.audioStartTime < b.audioEndTime && b.audioStartTime < a.audioEndTime);

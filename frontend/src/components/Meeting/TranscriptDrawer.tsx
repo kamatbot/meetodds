@@ -1,249 +1,153 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { ChevronLeft, ChevronRight, Copy, Globe2 } from 'lucide-react';
-import { useTranscripts } from '@/contexts/TranscriptContext';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { emitTo } from '@tauri-apps/api/event';
+import { Captions, ChevronLeft, ChevronRight, Copy, Globe2, Maximize2, MessageSquareText, Rows3, ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
+import { useTranscriptHistory, useTranscriptSession } from '@/contexts/TranscriptContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
-import { useLiveTranslation } from '@/hooks/useLiveTranslation';
-import { liveTranslationSegmentKey } from '@/lib/live-translation';
+import { useLiveMeetingTranslation } from '@/contexts/LiveMeetingTranslationContext';
+import { getLiveTranslationLanguage, liveTranslationSegmentKey } from '@/lib/live-translation';
+import { CAPTION_WINDOW_LABEL, CAPTION_RESET_EVENT } from '@/lib/live-captions';
 import NotedTranscriptView from '@/components/Notes/NotedTranscriptView';
 import { LiveTranslationControl } from '@/components/LiveTranslationControl';
-import { LiveTranscriptSubtitle } from '@/components/LiveTranscriptSubtitle';
 import type { ModalType } from '@/hooks/useModalState';
+import './live-meeting.css';
 
 const DRAWER_VISIBLE_KEY = 'meetodds.meeting.transcriptDrawer.visible';
 const DRAWER_WIDTH_KEY = 'meetodds.meeting.transcriptDrawer.width';
-const DEFAULT_DRAWER_WIDTH = 360;
-const MIN_DRAWER_WIDTH = 280;
-const MAX_DRAWER_WIDTH = 520;
-
+const DENSITY_KEY = 'meetodds.meeting.transcriptDensity';
+const clampWidth = (value: number) => Math.max(280, Math.min(520, value));
 interface TranscriptDrawerProps {
   isProcessingStop: boolean;
   isStopping: boolean;
   showModal: (name: ModalType, message?: string) => void;
+  presentation?: 'drawer' | 'workspace';
 }
 
-function clampWidth(value: number): number {
-  return Math.max(MIN_DRAWER_WIDTH, Math.min(MAX_DRAWER_WIDTH, value));
-}
-
-export default function TranscriptDrawer({
-  isProcessingStop,
-  isStopping,
-  showModal,
-}: TranscriptDrawerProps) {
-  const { transcripts, currentMeetingId, livePreview, copyTranscript, captionsVisible, setCaptionsVisible, previewSettled } = useTranscripts();
+export default function TranscriptDrawer({ isProcessingStop, isStopping, showModal, presentation = 'drawer' }: TranscriptDrawerProps) {
+  const { transcripts, copyTranscript } = useTranscriptHistory();
+  const { currentMeetingId, captionsVisible } = useTranscriptSession();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
-  const liveTranslation = useLiveTranslation(transcripts, captionsVisible ? livePreview : null);
+  const liveTranslation = useLiveMeetingTranslation();
   const [visible, setVisible] = useState(true);
-  const [width, setWidth] = useState(DEFAULT_DRAWER_WIDTH);
+  const [width, setWidth] = useState(360);
+  const [compact, setCompact] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
+  const stopResizeRef = useRef<(() => void) | null>(null);
+  const isWorkspace = presentation === 'workspace';
 
   useEffect(() => {
     try {
-      const storedVisible = window.localStorage.getItem(DRAWER_VISIBLE_KEY);
-      const storedWidth = Number(window.localStorage.getItem(DRAWER_WIDTH_KEY));
+      const storedVisible = localStorage.getItem(DRAWER_VISIBLE_KEY);
+      const storedWidth = Number(localStorage.getItem(DRAWER_WIDTH_KEY));
       if (storedVisible !== null) setVisible(storedVisible !== 'false');
       if (Number.isFinite(storedWidth) && storedWidth > 0) setWidth(clampWidth(storedWidth));
-    } catch (error) {
-      console.warn('[TranscriptDrawer] Unable to restore drawer preferences:', error);
-    } finally {
-      setStorageReady(true);
-    }
+      setCompact(localStorage.getItem(DENSITY_KEY) === 'compact');
+    } catch { /* Preferences do not block a recording. */ }
+    setStorageReady(true);
+    return () => stopResizeRef.current?.();
   }, []);
 
   useEffect(() => {
     if (!storageReady) return;
-    try {
-      window.localStorage.setItem(DRAWER_VISIBLE_KEY, String(visible));
-    } catch (error) {
-      console.warn('[TranscriptDrawer] Unable to persist drawer visibility:', error);
-    }
-  }, [storageReady, visible]);
+    try { localStorage.setItem(DRAWER_VISIBLE_KEY, String(visible)); localStorage.setItem(DENSITY_KEY, compact ? 'compact' : 'comfortable'); }
+    catch { /* Preferences only. */ }
+  }, [visible, compact, storageReady]);
 
   useEffect(() => {
-    const toggleFromCommandPalette = () => setVisible((current) => !current);
-    window.addEventListener('meetodds:toggle-transcript-drawer', toggleFromCommandPalette);
-    return () => window.removeEventListener('meetodds:toggle-transcript-drawer', toggleFromCommandPalette);
+    const toggle = () => setVisible(value => !value);
+    window.addEventListener('meetodds:toggle-transcript-drawer', toggle);
+    return () => window.removeEventListener('meetodds:toggle-transcript-drawer', toggle);
   }, []);
 
-  const segments = useMemo(() => transcripts.map((transcript) => {
+  const segments = useMemo(() => transcripts.map(transcript => {
     const translation = liveTranslation.translations[liveTranslationSegmentKey(transcript)];
     return {
-      id: transcript.id,
-      timestamp: transcript.audio_start_time ?? 0,
-      endTime: transcript.audio_end_time,
-      text: transcript.text,
-      confidence: transcript.confidence,
-      speaker: transcript.speaker,
-      speaker_label: transcript.speaker_label,
-      speaker_source: transcript.speaker_source,
-      speaker_confidence: transcript.speaker_confidence,
-      translated_text: translation?.translatedText,
-      translation_status: translation?.status,
-      translation_error: translation?.error,
-      translation_latency_ms: translation?.latencyMs,
+      id: transcript.id, timestamp: transcript.audio_start_time ?? 0, endTime: transcript.audio_end_time,
+      text: transcript.text, confidence: transcript.confidence, speaker: transcript.speaker,
+      speaker_label: transcript.speaker_label, speaker_source: transcript.speaker_source, speaker_confidence: transcript.speaker_confidence,
+      translated_text: translation?.translatedText, translation_status: translation?.status,
+      translation_error: translation?.error, translation_latency_ms: translation?.latencyMs,
     };
-  }), [liveTranslation.translations, transcripts]);
+  }), [transcripts, liveTranslation.translations]);
 
   const beginResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    event.preventDefault();
+    event.preventDefault(); stopResizeRef.current?.();
     const startX = event.clientX;
     const startWidth = width;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    let rafId: number | null = null;
-    let latestWidth = startWidth;
-
-    const handleMove = (moveEvent: PointerEvent) => {
-      latestWidth = clampWidth(startWidth + startX - moveEvent.clientX);
-      if (rafId === null) {
-        rafId = requestAnimationFrame(() => {
-          setWidth(latestWidth);
-          rafId = null;
-        });
-      }
+    const previousCursor = document.body.style.cursor;
+    const previousSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+    let raf: number | null = null;
+    let latestWidth = width;
+    const move = (e: PointerEvent) => {
+      latestWidth = clampWidth(startWidth + startX - e.clientX);
+      if (raf === null) raf = requestAnimationFrame(() => { setWidth(latestWidth); raf = null; });
     };
-
     const stop = () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', stop);
-      window.removeEventListener('pointercancel', stop);
-
-      try {
-        window.localStorage.setItem(DRAWER_WIDTH_KEY, String(latestWidth));
-      } catch (error) {
-        console.warn('[TranscriptDrawer] Unable to persist drawer width:', error);
-      }
+      if (raf !== null) cancelAnimationFrame(raf);
+      setWidth(latestWidth);
+      document.body.style.cursor = previousCursor; document.body.style.userSelect = previousSelect;
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop);
+      try { localStorage.setItem(DRAWER_WIDTH_KEY, String(latestWidth)); } catch { /* Preferences only. */ }
+      stopResizeRef.current = null;
     };
-
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', stop);
-    window.addEventListener('pointercancel', stop);
+    stopResizeRef.current = stop;
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop); window.addEventListener('pointercancel', stop);
   }, [width]);
 
-  if (!visible) {
-    return (
-      <button
-        type="button"
-        onClick={() => setVisible(true)}
-        className="absolute right-3 top-3 z-20 inline-flex h-8 items-center gap-1.5 rounded-control border border-border bg-surface px-2.5 text-ui font-medium text-text shadow-popover hover:bg-bg"
-      >
-        <ChevronLeft className="h-4 w-4" strokeWidth={1.75} /> Transcript
-      </button>
-    );
-  }
+  if (!visible && !isWorkspace) return (
+    <button type="button" onClick={() => setVisible(true)} className="absolute right-3 top-3 z-20 inline-flex h-9 items-center gap-1.5 rounded-control border border-border bg-surface px-3 text-ui text-text shadow-popover">
+      <ChevronLeft className="h-4 w-4" /> Transcript
+    </button>
+  );
 
+  const language = getLiveTranslationLanguage(liveTranslation.settings.targetLanguage)?.name || liveTranslation.settings.targetLanguage;
   return (
-    <aside
-      className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-surface"
-      style={{ width }}
-      aria-label="Live transcript"
-    >
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize transcript drawer"
-        onPointerDown={beginResize}
-        className="absolute inset-y-0 left-[-2px] z-20 w-1 cursor-col-resize hover:bg-accent/30"
-      />
-
-      <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border px-3">
-        <span className="min-w-0 flex-1 truncate text-ui font-semibold text-text">Live transcript</span>
-        {transcripts.length > 0 && (
-          <button
-            type="button"
-            onClick={copyTranscript}
-            className="inline-grid h-7 w-7 place-items-center rounded-control text-2 hover:bg-bg hover:text-text"
-            aria-label="Copy transcript"
-          >
-            <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
-          </button>
-        )}
-        {transcriptModelConfig.provider === 'localWhisper' && (
-          <button
-            type="button"
-            onClick={() => showModal('languageSettings')}
-            className="inline-grid h-7 w-7 place-items-center rounded-control text-2 hover:bg-bg hover:text-text"
-            aria-label="Transcription language"
-          >
-            <Globe2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => setVisible(false)}
-          className="inline-grid h-7 w-7 place-items-center rounded-control text-2 hover:bg-bg hover:text-text"
-          aria-label="Hide transcript drawer"
-        >
-          <ChevronRight className="h-4 w-4" strokeWidth={1.75} />
-        </button>
+    <section className={`meetodds-live-workspace ${isWorkspace ? 'is-workspace' : 'is-drawer'}`} style={isWorkspace ? undefined : { width }} aria-label="Live meeting conversation">
+      {!isWorkspace && <div role="separator" tabIndex={0} aria-orientation="vertical" aria-label="Resize transcript drawer" aria-valuemin={280} aria-valuemax={520} aria-valuenow={width}
+        onPointerDown={beginResize} onKeyDown={e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); const next = clampWidth(width + (e.key === 'ArrowLeft' ? 20 : -20)); setWidth(next); try { localStorage.setItem(DRAWER_WIDTH_KEY, String(next)); } catch {} } }} className="meeting-drawer-resize" />}
+      <header className="meeting-document-header">
+        <div className="meeting-document-heading">
+          <span className="meeting-eyebrow">THE CONVERSATION</span>
+          <h1>{isPaused ? 'Room to think.' : isStopping || isProcessingStop ? 'Finishing the last words.' : 'Stay in the moment.'}</h1>
+          <p>{isPaused ? 'Recording is paused. Your conversation stays right here.' : 'Every thought, with room for yours.'}</p>
+        </div>
+        <div className="meeting-document-tools">
+          <button type="button" onClick={() => setCompact(v => !v)} className="meeting-icon-button" aria-label={compact ? 'Use comfortable transcript spacing' : 'Use compact transcript spacing'} aria-pressed={compact} title={compact ? 'Comfortable spacing' : 'Compact spacing'}><Rows3 size={17} /></button>
+          <button type="button" onClick={copyTranscript} disabled={!transcripts.length} className="meeting-icon-button" aria-label="Copy original transcript" title="Copy original transcript"><Copy size={16} /></button>
+          {transcriptModelConfig.provider === 'localWhisper' && <button type="button" className="meeting-icon-button" onClick={() => showModal('languageSettings')} aria-label="Spoken language" title="Spoken language"><Globe2 size={17} /></button>}
+          {!isWorkspace && <button type="button" className="meeting-icon-button" onClick={() => setVisible(false)} aria-label="Hide transcript drawer"><ChevronRight size={17} /></button>}
+        </div>
+      </header>
+      <div className="meeting-language-toolbar">
+        <span className="meeting-local-label"><ShieldCheck size={14} aria-hidden="true" /> On-device transcription</span>
+        <LiveTranslationControl {...liveTranslation} />
       </div>
-
-      <div className="shrink-0 border-b border-border px-3 py-2">
-        <LiveTranslationControl
-          settings={liveTranslation.settings}
-          updateSettings={liveTranslation.updateSettings}
-          clearTranslations={liveTranslation.clearTranslations}
-          queuedCount={liveTranslation.queuedCount}
-          activeCount={liveTranslation.activeCount}
-          translatedCount={liveTranslation.translatedCount}
-          lastError={liveTranslation.lastError}
-          lastProvider={liveTranslation.lastProvider}
-          lastModel={liveTranslation.lastModel}
-          lastLatencyMs={liveTranslation.lastLatencyMs}
-          lastFirstWordLatencyMs={liveTranslation.lastFirstWordLatencyMs}
-          lastFallbackReason={liveTranslation.lastFallbackReason}
-        />
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {segments.length === 0 ? (
-          <div className="flex h-full items-center justify-center px-6 text-center text-ui text-3">
-            Original transcript text will appear here as speech is recognised.
-          </div>
-        ) : (
-          <NotedTranscriptView
-            meetingId={currentMeetingId}
-            noteTranscripts={transcripts}
-            liveNotes
-            segments={segments}
-            isRecording={isRecording}
-            isPaused={isPaused}
-            isProcessing={isProcessingStop}
-            isStopping={isStopping}
-            enableStreaming={false}
-            showConfidence={false}
-            translationEnabled={liveTranslation.settings.enabled}
-            translationDisplayMode={liveTranslation.settings.displayMode}
-            translationTargetLanguage={liveTranslation.settings.targetLanguage}
-          />
-        )}
-      </div>
-
-      {isRecording && captionsVisible && (
-        <LiveTranscriptSubtitle
-          preview={livePreview}
-          translation={liveTranslation.previewTranslation}
+      {captionsVisible && isRecording && <div className="meeting-caption-notice">
+        <span><Captions size={14} aria-hidden="true" /> Floating captions · {liveTranslation.settings.enabled ? language : 'Original language'}</span>
+        <button type="button" onClick={() => { void emitTo(CAPTION_WINDOW_LABEL, CAPTION_RESET_EVENT).catch(() => toast.error('Turn captions off and on to reopen the window.')); }}><Maximize2 size={12} /> Reset position</button>
+      </div>}
+      <div className="meeting-document-card" data-density={compact ? 'compact' : 'comfortable'}>
+        {!segments.length ? <div className="meeting-listening-empty">
+          <div className="meeting-listening-mark" aria-hidden="true"><MessageSquareText size={27} strokeWidth={1.4} /></div>
+          <h2>{isPaused ? 'Take your time.' : 'Ready for the first words.'}</h2>
+          <p>{isPaused ? 'Resume when you are ready to continue.' : 'Speak naturally. Your transcript will appear here, and the + beside a turn opens a linked note.'}</p>
+          <span className="meeting-listening-status"><i aria-hidden="true" />{isPaused ? 'Recording paused' : 'Waiting for speech'}</span>
+        </div> : <NotedTranscriptView
+          meetingId={currentMeetingId} noteTranscripts={transcripts} liveNotes segments={segments}
+          isRecording={isRecording} isPaused={isPaused} isProcessing={isProcessingStop} isStopping={isStopping}
+          enableStreaming={false} showConfidence={false}
           translationEnabled={liveTranslation.settings.enabled}
           translationDisplayMode={liveTranslation.settings.displayMode}
           translationTargetLanguage={liveTranslation.settings.targetLanguage}
-          isPaused={isPaused}
-          settled={previewSettled}
-          onDismiss={() => setCaptionsVisible(false)}
-        />
-      )}
-
-    </aside>
+        />}
+      </div>
+      <footer className="meeting-document-footer"><span>Original transcript preserved</span><span>Notes stay linked to their moments</span></footer>
+    </section>
   );
 }

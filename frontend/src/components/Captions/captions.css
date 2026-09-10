@@ -1,0 +1,40 @@
+/* A display-only window: no document surfaces, background fills or application chrome. */
+html.caption-root, .caption-root body { background: transparent !important; margin: 0; width: 100%; height: 100%; overflow: hidden; color-scheme: dark; }
+.caption-window { box-sizing: border-box; height: 100dvh; padding: 6px; font-family: var(--font-source-sans-3), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.caption-glass { --caption-opacity: .78; --caption-font: 26px; position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; box-sizing: border-box; overflow: hidden; border-radius: 20px; border: 1px solid rgb(255 255 255 / .13); background: rgb(19 29 27 / var(--caption-opacity)); box-shadow: inset 0 1px 0 rgb(255 255 255 / .08), 0 2px 5px rgb(0 0 0 / .16); color: #f4f7f4; }
+/* Transparency works across the native window; this is an optional webview enhancement, not a promise of OS backdrop blur. */
+@supports (backdrop-filter: blur(12px)) { .caption-glass { backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); } }
+.caption-toolbar { display: flex; align-items: center; min-height: 40px; padding: 4px 10px 0 17px; gap: 9px; flex-shrink: 0; user-select: none; }
+.caption-drag { min-width: 0; display: flex; align-items: center; gap: 8px; flex: 1; align-self: stretch; cursor: grab; }
+.caption-drag:active { cursor: grabbing; }
+.caption-kicker { font-size: 11px; font-weight: 600; letter-spacing: .10em; text-transform: uppercase; color: #d4dfd9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.caption-language { font-size: 11px; color: #c3d1c9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caption-dot { width: 6px; height: 6px; background: #9ad3b1; border-radius: 50%; flex-shrink: 0; }
+.caption-dot[data-phase='paused'], .caption-dot[data-phase='error'] { background: #ebc389; }
+.caption-actions { display: flex; gap: 2px; opacity: .45; transition: opacity 160ms ease; }
+.caption-glass:hover .caption-actions, .caption-glass:focus-within .caption-actions { opacity: 1; }
+.caption-button { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: transparent; color: #e0eae3; border: 0; cursor: pointer; }
+.caption-button:hover { background: rgb(255 255 255 / .12); }
+.caption-button:disabled { opacity: .4; cursor: default; }
+.caption-button:focus-visible, .caption-settings input:focus-visible, .caption-drag:focus-visible { outline: 2px solid #b3e9c6; outline-offset: 2px; }
+.caption-copy { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / .18) transparent; padding: 5px 24px 16px; overflow-wrap: anywhere; }
+.caption-copy p { margin: 0; font-size: var(--caption-font); line-height: 1.38; font-weight: 500; letter-spacing: -.012em; white-space: pre-wrap; }
+.caption-copy p.caption-empty { color: #c6d3cd; font-size: min(var(--caption-font), 24px); font-weight: 400; }
+.caption-footer { min-height: 22px; display: flex; align-items: center; justify-content: space-between; padding: 0 23px 9px; font-size: 11px; color: #b8c9c0; user-select: none; }
+.caption-follow { background: none; color: #d7efe0; border: 0; cursor: pointer; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+.caption-settings { display: flex; align-items: center; gap: 16px; padding: 7px 24px 11px; flex-shrink: 0; border-top: 1px solid rgb(255 255 255 / .09); font-size: 11px; color: #d2ded7; }
+.caption-settings label { display: flex; align-items: center; gap: 9px; }
+.caption-settings input[type='range'] { width: 96px; accent-color: #b3e9c6; }
+.caption-resize { position: absolute; z-index: 10; touch-action: none; }
+.caption-resize-n { top: 0; left: 15px; right: 15px; height: 5px; cursor: n-resize; }
+.caption-resize-s { bottom: 0; left: 15px; right: 15px; height: 5px; cursor: s-resize; }
+.caption-resize-e { right: 0; top: 15px; bottom: 15px; width: 5px; cursor: e-resize; }
+.caption-resize-w { left: 0; top: 15px; bottom: 15px; width: 5px; cursor: w-resize; }
+.caption-resize-ne, .caption-resize-nw, .caption-resize-se, .caption-resize-sw { width: 14px; height: 14px; }
+.caption-resize-ne { right: 0; top: 0; cursor: ne-resize; }.caption-resize-nw { left: 0; top: 0; cursor: nw-resize; }
+.caption-resize-se { right: 0; bottom: 0; cursor: se-resize; }.caption-resize-sw { left: 0; bottom: 0; cursor: sw-resize; }
+.caption-resize-se::after { content: ''; position: absolute; width: 6px; height: 6px; right: 4px; bottom: 4px; border-right: 1px solid rgb(255 255 255 / .45); border-bottom: 1px solid rgb(255 255 255 / .45); }
+@media (max-width: 430px) { .caption-toolbar { padding-left: 13px; gap: 5px; } .caption-copy { padding-inline: 17px; } .caption-kicker { max-width: 115px; } .caption-language { max-width: 75px; } .caption-settings { gap: 9px; padding-inline: 16px; } .caption-settings input[type='range'] { width: 65px; } }
+@media (prefers-reduced-motion: reduce) { .caption-actions { transition: none; } }
+@media (prefers-reduced-transparency: reduce) { .caption-glass { --caption-opacity: .96 !important; backdrop-filter: none; } }
+@media (forced-colors: active) { .caption-glass { background: Canvas; color: CanvasText; border-color: CanvasText; } .caption-copy p, .caption-kicker, .caption-language, .caption-footer { color: CanvasText; } }

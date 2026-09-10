@@ -24,6 +24,8 @@ import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcess
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import { LiveMeetingTranslationProvider } from '@/contexts/LiveMeetingTranslationContext'
+import LiveCaptionBridge from '@/components/Captions/LiveCaptionBridge'
 
 const sourceSans3 = Source_Sans_3({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-source-sans-3' })
 
@@ -118,6 +120,8 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
           <RecordingStateProvider>
             <TranscriptProvider>
               <ConfigProvider>
+                <LiveMeetingTranslationProvider>
+                <LiveCaptionBridge />
                 <OllamaDownloadProvider>
                   <OnboardingProvider>
                     <SidebarProvider>
@@ -135,6 +139,7 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
                     </SidebarProvider>
                   </OnboardingProvider>
                 </OllamaDownloadProvider>
+                </LiveMeetingTranslationProvider>
               </ConfigProvider>
             </TranscriptProvider>
           </RecordingStateProvider>
@@ -147,6 +152,14 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  // This display-only route must not mount recorder, recovery, onboarding or AI providers.
+  if (pathname === '/live-captions' || pathname === '/live-captions/') {
+    return (
+      <html lang="en" className={`${sourceSans3.variable} caption-root`} style={{ background: 'transparent' }}>
+        <body style={{ margin: 0, background: 'transparent', overflow: 'hidden' }}>{children}</body>
+      </html>
+    )
+  }
   if (pathname === '/manual-notes') {
     return (
       <html lang="en" className={sourceSans3.variable}>
