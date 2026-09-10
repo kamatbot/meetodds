@@ -27,7 +27,8 @@ function harness() {
     react,
     '@tauri-apps/api/core': { invoke(command, args) {
       if (command === 'api_translate_live_text') return new Promise((resolve, reject) => jobs.push({ args, resolve, reject }));
-      if (command === 'api_cancel_live_translation') cancelled.push(args.requestId);
+      if (command === 'api_prepare_live_translation') return Promise.resolve({ provider: 'openai-codex', model: 'account-model', warmed: false });
+      if (command === 'api_cancel_live_translation') { cancelled.push(args.requestId); return Promise.resolve(true); }
       return Promise.resolve();
     } },
     '@tauri-apps/api/event': { listen: async (name, handler) => { listeners.set(name, handler); return () => listeners.delete(name); } },
@@ -43,9 +44,15 @@ function harness() {
     async input(preview, session = inputs[2], transcripts = inputs[0]) { inputs = [transcripts, preview, session]; dirty = true; await flush(); },
     async update(patch) { result.updateSettings(patch); await flush(); },
     async delta(job, text) { listeners.get('live-translation-delta')?.({ payload: { requestId: job.args.requestId, text, provider: 'mock' } }); await flush(); },
+    async status(job, payload) { listeners.get('live-translation-status')?.({ payload: { requestId: job.args.requestId, ...payload } }); await flush(); },
     async finish(job, text = 'Good morning') { job.resolve({ translatedText: text, targetLanguage: job.args.targetLanguage, provider: 'mock', model: 'mock', latencyMs: 800, firstWordLatencyMs: 600, cached: false }); await flush(); },
+    async fail(job, message = 'provider timeout') { job.reject(new Error(message)); await flush(); },
+    async retry() { result.retryPreviewTranslation(); await flush(); },
   };
 }
+test('auto mode allows a balanced timeout budget without delaying fast streamed output', async () => {
+  const h = harness(); await h.flush(); assert.equal(h.jobs[0].args.speedMode, 'balanced');
+});
 test('a slow in-flight translation survives successive ASR revisions', async () => {
   const h = harness(); await h.flush(); const first = h.jobs[0]; assert.ok(first);
   await h.input(speech(2)); await h.input(speech(3));
@@ -54,6 +61,22 @@ test('a slow in-flight translation survives successive ASR revisions', async () 
   await h.finish(first, 'Good morning');
   assert.equal(h.jobs.length, 2); assert.equal(h.jobs[1].args.text, speech(3).text);
   assert.equal(h.value.previewTranslation.translatedText, 'Good morning', 'keeps the last target-language phrase while newer words translate');
+});
+test('fallback status does not erase already translated target-language text', async () => {
+  const h = harness(); await h.flush(); const first = h.jobs[0];
+  await h.delta(first, 'Good morning');
+  await h.status(first, { event: 'fallback', reason: 'slow provider', nextProvider: 'backup', nextModel: 'fast' });
+  assert.equal(h.value.previewTranslation.translatedText, 'Good morning');
+  assert.equal(h.value.previewTranslation.status, 'translating');
+});
+test('a failed preview exposes retry and retry starts a fresh request', async () => {
+  const h = harness(); await h.flush(); const first = h.jobs[0];
+  await h.fail(first, 'subscription stream timed out');
+  assert.equal(h.value.previewTranslation.status, 'error');
+  assert.match(h.value.lastError, /timed out/);
+  await h.retry();
+  assert.equal(h.jobs.length, 2);
+  assert.notEqual(h.jobs[1].args.requestId, first.args.requestId);
 });
 test('source changes invalidate old translated words', async () => {
   const h = harness(); await h.flush(); const first = h.jobs[0];

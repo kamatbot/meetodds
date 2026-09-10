@@ -4,10 +4,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
 import { LogicalSize, PhysicalPosition } from '@tauri-apps/api/dpi';
-import { GripHorizontal, Maximize2, Minus, Plus, SlidersHorizontal, X } from 'lucide-react';
+import { GripHorizontal, Maximize2, Minus, Plus, RefreshCw, SlidersHorizontal, X } from 'lucide-react';
 import { getLiveTranslationLanguage } from '@/lib/live-translation';
 import {
-  CAPTION_FRAME_EVENT, CAPTION_READY_EVENT, CAPTION_DISMISS_EVENT, CAPTION_RESET_EVENT,
+  CAPTION_FRAME_EVENT, CAPTION_READY_EVENT, CAPTION_DISMISS_EVENT, CAPTION_RETRY_EVENT, CAPTION_RESET_EVENT,
   CAPTION_GEOMETRY_KEY, CAPTION_APPEARANCE_KEY, fitCaptionGeometry,
   normalizeCaptionAppearance, CaptionFrameGate, type CaptionFrame, type CaptionAppearance,
 } from '@/lib/live-captions';
@@ -32,6 +32,7 @@ export default function CaptionWindow() {
   const [following, setFollowing] = useState(true);
   const [connectionLost, setConnectionLost] = useState(false);
   const [windowError, setWindowError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const gate = useRef(new CaptionFrameGate());
   const lastReceived = useRef(Date.now());
   const scroller = useRef<HTMLDivElement>(null);
@@ -46,6 +47,15 @@ export default function CaptionWindow() {
     void emitTo('main', CAPTION_DISMISS_EVENT).catch(() => {});
     void getCurrentWindow().hide().catch(() => setWindowError('Could not hide captions. Use the Captions button in MeetOdds.'));
   }, []);
+
+  const retryTranslation = useCallback(() => {
+    if (!frame.translated) return;
+    setRetrying(true);
+    void emitTo('main', CAPTION_RETRY_EVENT).catch(() => {
+      setRetrying(false);
+      setWindowError('Could not ask MeetOdds to retry translation.');
+    });
+  }, [frame.translated]);
 
   const resetPosition = useCallback(async () => {
     try {
@@ -85,6 +95,7 @@ export default function CaptionWindow() {
         lastReceived.current = Date.now();
         enabledRef.current = next.enabled;
         setConnectionLost(false);
+        if (next.phase !== 'error' && next.phase !== 'recovering') setRetrying(false);
         // Heartbeats do not rerender text or restart motion.
         setFrame(old => old.text === next.text && old.phase === next.phase && old.enabled === next.enabled
           && old.sessionId === next.sessionId && old.language === next.language && old.translated === next.translated
@@ -164,11 +175,20 @@ export default function CaptionWindow() {
   };
 
   const language = frame.translated ? getLiveTranslationLanguage(frame.language)?.name || frame.language : 'Original';
+  const translationIssue = frame.translated && (frame.phase === 'error' || frame.phase === 'recovering');
   const message = connectionLost ? 'Waiting for MeetOdds…' : {
-    listening: 'Listening to the conversation…', translating: `Translating to ${language}…`,
-    paused: 'A moment of pause.', error: 'Translation unavailable. Check translation settings in MeetOdds.', live: 'Listening…',
+    listening: 'Listening to the conversation…',
+    translating: `Translating to ${language}…`,
+    paused: 'A moment of pause.',
+    recovering: `Keeping the last ${language} caption while translation reconnects…`,
+    error: `Waiting for ${language} translation…`,
+    live: 'Listening…',
   }[frame.phase];
   const text = !connectionLost && frame.enabled ? frame.text : '';
+  const footerText = windowError
+    || (translationIssue
+      ? 'Translation interrupted · original transcript is still recording safely'
+      : frame.translated ? 'Translated captions · original transcript unchanged' : 'Live captions · on-device speech recognition');
 
   return (
     <main className="caption-window" aria-label="Floating live captions" onKeyDown={event => { if (event.key === 'Escape') dismiss(); }}>
@@ -192,11 +212,14 @@ export default function CaptionWindow() {
         </header>
         <div className="caption-copy" ref={scroller} onWheel={stopFollowing} onTouchStart={stopFollowing}
           onScroll={() => { const node = scroller.current; if (node && node.scrollHeight - node.clientHeight - node.scrollTop < 8) { followingRef.current = true; setFollowing(true); } }}>
-          <p className={text ? '' : 'caption-empty'} lang={text ? frame.language : 'en'} dir="auto">{text || message}</p>
+          <p className={text ? '' : `caption-empty${translationIssue ? ' caption-empty-recovering' : ''}`} lang={text ? frame.language : 'en'} dir="auto">{text || message}</p>
         </div>
-        <footer className="caption-footer">
-          <span>{windowError || (frame.translated ? 'Translated captions · original transcript unchanged' : 'Live captions · on-device speech recognition')}</span>
-          {!following && <button className="caption-follow" type="button" onClick={follow}>Back to live</button>}
+        <footer className={`caption-footer${translationIssue ? ' is-warning' : ''}`}>
+          <span>{footerText}</span>
+          <div className="caption-footer-actions">
+            {translationIssue && <button className="caption-retry" type="button" onClick={retryTranslation} disabled={retrying}><RefreshCw size={12} className={retrying ? 'caption-spin' : ''} />{retrying ? 'Retrying' : 'Retry'}</button>}
+            {!following && <button className="caption-follow" type="button" onClick={follow}>Back to live</button>}
+          </div>
         </footer>
         {settingsOpen && <div className="caption-settings">
           <label>Opacity <input aria-label="Caption background opacity" type="range" min="35" max="96" value={Math.round(appearance.opacity * 100)} onChange={e => setAppearance(p => ({ ...p, opacity: Number(e.target.value) / 100 }))} /></label>

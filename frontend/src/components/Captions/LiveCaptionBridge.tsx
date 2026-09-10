@@ -10,7 +10,7 @@ import { useLiveMeetingTranslation } from '@/contexts/LiveMeetingTranslationCont
 import { ensureCaptionWindow } from '@/services/captionWindowService';
 import { liveTranslationSegmentKey } from '@/lib/live-translation';
 import {
-  CAPTION_WINDOW_LABEL, CAPTION_FRAME_EVENT, CAPTION_READY_EVENT, CAPTION_DISMISS_EVENT,
+  CAPTION_WINDOW_LABEL, CAPTION_FRAME_EVENT, CAPTION_READY_EVENT, CAPTION_DISMISS_EVENT, CAPTION_RETRY_EVENT,
   resolveCaptionContent, type CaptionFrame,
 } from '@/lib/live-captions';
 import type { LiveTranscriptPreview } from '@/types';
@@ -21,7 +21,7 @@ export default function LiveCaptionBridge() {
   const { transcripts } = useTranscriptHistory();
   const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscriptSession();
   const { isRecording, isPaused } = useRecordingState();
-  const { settings, translations, previewTranslation } = useLiveMeetingTranslation();
+  const { settings, translations, previewTranslation, retryPreviewTranslation } = useLiveMeetingTranslation();
   const [recentFinal, setRecentFinal] = useState(false);
   const final = transcripts[transcripts.length - 1];
   const finalTranslation = final ? translations[liveTranslationSegmentKey(final)] : undefined;
@@ -69,6 +69,7 @@ export default function LiveCaptionBridge() {
     const add = (fn: () => void) => gone ? fn() : unsubscribers.push(fn);
     void listen(CAPTION_READY_EVENT, () => { void publish(); }).then(add).catch(() => {});
     void listen(CAPTION_DISMISS_EVENT, () => setCaptionsVisible(false)).then(add).catch(() => {});
+    void listen(CAPTION_RETRY_EVENT, () => retryPreviewTranslation()).then(add).catch(() => {});
     // Handshake retry/heartbeat recovers a caption reload and a lost initial event.
     const interval = setInterval(() => { if (latest.current.enabled) void publish(); }, 2000);
     return () => {
@@ -78,7 +79,7 @@ export default function LiveCaptionBridge() {
       unsubscribers.forEach(fn => fn());
       void overlay.current?.hide().catch(() => {});
     };
-  }, [publish, setCaptionsVisible]);
+  }, [publish, retryPreviewTranslation, setCaptionsVisible]);
 
   useEffect(() => {
     let cancelled = false;

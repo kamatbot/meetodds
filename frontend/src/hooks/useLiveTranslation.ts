@@ -44,6 +44,7 @@ interface LiveTranslationState {
   translations: Record<string, LiveTranslationEntry>;
   updateSettings: (update: Partial<LiveTranslationSettings>) => void;
   clearTranslations: () => void;
+  retryPreviewTranslation: () => void;
   queuedCount: number;
   activeCount: number;
   translatedCount: number;
@@ -90,6 +91,14 @@ function contextForTurn(transcripts: Transcript[], index: number, turns: 0 | 2 |
     .join('\n');
 }
 
+/** Timeout budget only: fast providers still stream as soon as their first token arrives. */
+function effectiveRequestSpeed(settings: LiveTranslationSettings): LiveTranslationSettings['speed'] {
+  if (settings.speed === 'instant' && (settings.engine === 'auto' || settings.engine === 'summary')) {
+    return 'balanced';
+  }
+  return settings.speed;
+}
+
 export function useLiveTranslation(
   transcripts: Transcript[],
   livePreview: LiveTranscriptPreview | null = null,
@@ -105,6 +114,7 @@ export function useLiveTranslation(
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
   const [lastFirstWordLatencyMs, setLastFirstWordLatencyMs] = useState<number | null>(null);
   const [lastFallbackReason, setLastFallbackReason] = useState<string | null>(null);
+  const [previewRetryNonce, setPreviewRetryNonce] = useState(0);
 
   const mountedRef = useRef(true);
   const queueRef = useRef<TranslationJob[]>([]);
@@ -117,13 +127,13 @@ export function useLiveTranslation(
   const activeJobsRef = useRef(new Map<string, TranslationJob>());
   const resultCacheRef = useRef(new Map<string, LiveTranslationResponse>());
 
-const drainQueueRef = useRef<() => void>(() => undefined);
-const previewInFlightRef = useRef<TranslationJob | null>(null);
-const pendingPreviewRef = useRef<TranslationJob | null>(null);
-const runPreviewTranslationRef = useRef<() => void>(() => undefined);
-const currentPreviewRef = useRef(livePreview);
-currentPreviewRef.current = livePreview;
-const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
+  const drainQueueRef = useRef<() => void>(() => undefined);
+  const previewInFlightRef = useRef<TranslationJob | null>(null);
+  const pendingPreviewRef = useRef<TranslationJob | null>(null);
+  const runPreviewTranslationRef = useRef<() => void>(() => undefined);
+  const currentPreviewRef = useRef(livePreview);
+  currentPreviewRef.current = livePreview;
+  const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
 
   const updateCounts = useCallback(() => {
     if (!mountedRef.current) return;
@@ -145,7 +155,6 @@ const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
 
   const drainQueue = useCallback(() => {
     while (activeCountRef.current < MAX_CONCURRENT_TRANSLATIONS && queueRef.current.length > 0) {
-      // Prioritize live speech turns ahead of historical backfill turns
       const liveIndex = queueRef.current.findIndex((job) => job.isLive && isCurrentJob(job));
       let jobIndex = -1;
 
@@ -169,18 +178,12 @@ const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
         }
       }
 
-      if (jobIndex === -1) {
-        // No runnable job or remaining jobs are backfill while backfill worker is already busy
-        break;
-      }
-
+      if (jobIndex === -1) break;
       const [job] = queueRef.current.splice(jobIndex, 1);
       if (!isCurrentJob(job)) continue;
 
       activeCountRef.current += 1;
-      if (!job.isLive) {
-        activeBackfillCountRef.current += 1;
-      }
+      if (!job.isLive) activeBackfillCountRef.current += 1;
       activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
       activeJobsRef.current.set(job.requestId, job);
       updateCounts();
@@ -258,17 +261,11 @@ const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
           setLastError(message);
         } finally {
           activeJobsRef.current.delete(job.requestId);
-          if (activeRequestIdsRef.current.get(job.segmentKey) === job.requestId) {
-            activeRequestIdsRef.current.delete(job.segmentKey);
-          }
+          if (activeRequestIdsRef.current.get(job.segmentKey) === job.requestId) activeRequestIdsRef.current.delete(job.segmentKey);
           activeCountRef.current = Math.max(0, activeCountRef.current - 1);
-          if (!job.isLive) {
-            activeBackfillCountRef.current = Math.max(0, activeBackfillCountRef.current - 1);
-          }
+          if (!job.isLive) activeBackfillCountRef.current = Math.max(0, activeBackfillCountRef.current - 1);
           updateCounts();
-          if (pendingPreviewRef.current) {
-            queueMicrotask(() => runPreviewTranslationRef.current());
-          }
+          if (pendingPreviewRef.current) queueMicrotask(() => runPreviewTranslationRef.current());
           queueMicrotask(() => drainQueueRef.current());
         }
       })();
@@ -283,19 +280,13 @@ const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
     queueRef.current = queueRef.current.filter((queued) => queued.segmentKey !== job.segmentKey);
     if (queueRef.current.length >= MAX_QUEUED_TRANSLATIONS) {
       const dropIndex = queueRef.current.findIndex((queued) => !queued.isLive);
-      if (dropIndex !== -1) {
-        queueRef.current.splice(dropIndex, 1);
-      } else {
-        queueRef.current.shift();
-      }
+      if (dropIndex !== -1) queueRef.current.splice(dropIndex, 1);
+      else queueRef.current.shift();
     }
     if (job.isLive) {
       const lastLiveIndex = queueRef.current.map((j) => j.isLive).lastIndexOf(true);
-      if (lastLiveIndex === -1) {
-        queueRef.current.unshift(job);
-      } else {
-        queueRef.current.splice(lastLiveIndex + 1, 0, job);
-      }
+      if (lastLiveIndex === -1) queueRef.current.unshift(job);
+      else queueRef.current.splice(lastLiveIndex + 1, 0, job);
     } else {
       queueRef.current.push(job);
     }
@@ -309,9 +300,7 @@ const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
     pendingPreviewRef.current = null;
     previewInputsRef.current.clear();
     latestRevisionRef.current.clear();
-    for (const requestId of activeRequestIdsRef.current.values()) {
-      cancelNativeRequest(requestId);
-    }
+    for (const requestId of activeRequestIdsRef.current.values()) cancelNativeRequest(requestId);
     activeRequestIdsRef.current.clear();
     updateCounts();
   }, [cancelNativeRequest, updateCounts]);
@@ -325,6 +314,17 @@ const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
     setLastFallbackReason(null);
   }, [clearPendingWork]);
 
+  const retryPreviewTranslation = useCallback(() => {
+    const preview = currentPreviewRef.current;
+    if (!preview) return;
+    const segmentKey = `live-preview-${preview.source}`;
+    const activeRequestId = activeRequestIdsRef.current.get(segmentKey);
+    if (activeRequestId) cancelNativeRequest(activeRequestId);
+    latestRevisionRef.current.delete(segmentKey);
+    setLastError(null);
+    setPreviewRetryNonce(value => value + 1);
+  }, [cancelNativeRequest]);
+
   const updateSettings = useCallback((update: Partial<LiveTranslationSettings>) => {
     setSettings((previous) => {
       const next = { ...previous, ...update, sourceLanguage: 'auto' as const };
@@ -333,112 +333,110 @@ const previewInputsRef = useRef(new Map<string, LiveTranscriptPreview>());
     });
   }, []);
 
+  const runPreviewTranslation = useCallback(() => {
+    if (previewInFlightRef.current || !pendingPreviewRef.current) return;
+    if (activeCountRef.current >= MAX_CONCURRENT_TRANSLATIONS) return;
+    const job = pendingPreviewRef.current;
+    pendingPreviewRef.current = null;
+    if (!mountedRef.current || job.generation !== generationRef.current) return;
 
-const runPreviewTranslation = useCallback(() => {
-  if (previewInFlightRef.current || !pendingPreviewRef.current) return;
-  if (activeCountRef.current >= MAX_CONCURRENT_TRANSLATIONS) return;
-  const job = pendingPreviewRef.current;
-  pendingPreviewRef.current = null;
-  if (!mountedRef.current || job.generation !== generationRef.current) return;
-
-  latestRevisionRef.current.set(job.segmentKey, job.revision);
-  previewInFlightRef.current = job;
-  activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
-  activeJobsRef.current.set(job.requestId, job);
-  activeCountRef.current += 1;
-  updateCounts();
-  const priorInput = previewInputsRef.current.get(job.segmentKey);
-  if (job.preview) previewInputsRef.current.set(job.segmentKey, job.preview);
-  setTranslations((previous) => {
-    const prior = previous[job.segmentKey];
-    // Keep the last translated phrase while its newer revision is decoding. This
-    // also lets response-only providers paint a result before the next job starts.
-    const retain = prior?.targetLanguage === job.targetLanguage
-      && sameCaptionUtterance(priorInput, job.preview);
-    return {
-      ...previous,
-      [job.segmentKey]: {
-        ...(retain ? prior : {}),
-        segmentKey: job.segmentKey,
-        sourceText: retain && prior.translatedText ? prior.sourceText : job.text,
-        targetLanguage: job.targetLanguage,
-        status: 'translating',
-      },
-    };
-  });
-
-  void (async () => {
-    try {
-      const key = cacheKey(job);
-      const cached = resultCacheRef.current.get(key);
-      const response = cached ?? await invoke<LiveTranslationResponse>('api_translate_live_text', {
-        requestId: job.requestId,
-        text: job.text,
-        sourceLanguage: job.sourceLanguage,
-        targetLanguage: job.targetLanguage,
-        translationEngine: job.translationEngine,
-        speedMode: job.speedMode,
-        modelOverride: job.modelOverride || null,
-        contextText: job.contextText || null,
-        glossary: job.glossary || null,
-        contextHint: job.contextHint || null,
-      });
-      if (!isCurrentJob(job)) return;
-      if (!cached) {
-        resultCacheRef.current.set(key, response);
-        trimCache(resultCacheRef.current);
-      }
-      setTranslations((previous) => ({
+    latestRevisionRef.current.set(job.segmentKey, job.revision);
+    previewInFlightRef.current = job;
+    activeRequestIdsRef.current.set(job.segmentKey, job.requestId);
+    activeJobsRef.current.set(job.requestId, job);
+    activeCountRef.current += 1;
+    updateCounts();
+    const priorInput = previewInputsRef.current.get(job.segmentKey);
+    if (job.preview) previewInputsRef.current.set(job.segmentKey, job.preview);
+    setTranslations((previous) => {
+      const prior = previous[job.segmentKey];
+      const retain = prior?.targetLanguage === job.targetLanguage
+        && sameCaptionUtterance(priorInput, job.preview);
+      return {
         ...previous,
         [job.segmentKey]: {
+          ...(retain ? prior : {}),
           segmentKey: job.segmentKey,
-          sourceText: job.text,
-          translatedText: response.translatedText,
-          targetLanguage: response.targetLanguage,
-          status: 'translated',
-          provider: response.provider,
-          model: response.model,
-          latencyMs: cached ? 0 : response.latencyMs,
-          firstWordLatencyMs: cached ? 0 : response.firstWordLatencyMs,
-          fallbackReason: response.fallbackReason ?? undefined,
-          cached: response.cached || Boolean(cached),
+          sourceText: retain && prior.translatedText ? prior.sourceText : job.text,
+          targetLanguage: job.targetLanguage,
+          status: 'translating',
         },
-      }));
-    } catch (error) {
-      if (!isCurrentJob(job)) return;
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/cancelled/i.test(message)) {
+      };
+    });
+
+    void (async () => {
+      try {
+        const key = cacheKey(job);
+        const cached = resultCacheRef.current.get(key);
+        const response = cached ?? await invoke<LiveTranslationResponse>('api_translate_live_text', {
+          requestId: job.requestId,
+          text: job.text,
+          sourceLanguage: job.sourceLanguage,
+          targetLanguage: job.targetLanguage,
+          translationEngine: job.translationEngine,
+          speedMode: job.speedMode,
+          modelOverride: job.modelOverride || null,
+          contextText: job.contextText || null,
+          glossary: job.glossary || null,
+          contextHint: job.contextHint || null,
+        });
+        if (!isCurrentJob(job)) return;
+        if (!cached) {
+          resultCacheRef.current.set(key, response);
+          trimCache(resultCacheRef.current);
+        }
         setTranslations((previous) => ({
           ...previous,
           [job.segmentKey]: {
-            ...(previous[job.segmentKey] ?? {}),
             segmentKey: job.segmentKey,
             sourceText: job.text,
-            targetLanguage: job.targetLanguage,
-            status: 'error',
-            error: message,
+            translatedText: response.translatedText,
+            targetLanguage: response.targetLanguage,
+            status: 'translated',
+            provider: response.provider,
+            model: response.model,
+            latencyMs: cached ? 0 : response.latencyMs,
+            firstWordLatencyMs: cached ? 0 : response.firstWordLatencyMs,
+            fallbackReason: response.fallbackReason ?? undefined,
+            cached: response.cached || Boolean(cached),
           },
         }));
+        setLastError(null);
+        setLastProvider(response.provider);
+        setLastModel(response.model);
+        setLastLatencyMs(cached ? 0 : response.latencyMs);
+        setLastFirstWordLatencyMs(cached ? 0 : response.firstWordLatencyMs);
+        setLastFallbackReason(response.fallbackReason ?? null);
+      } catch (error) {
+        if (!isCurrentJob(job)) return;
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/cancelled/i.test(message)) {
+          setTranslations((previous) => ({
+            ...previous,
+            [job.segmentKey]: {
+              ...(previous[job.segmentKey] ?? {}),
+              segmentKey: job.segmentKey,
+              sourceText: job.text,
+              targetLanguage: job.targetLanguage,
+              status: 'error',
+              error: message,
+            },
+          }));
+          setLastError(message);
+        }
+      } finally {
+        activeJobsRef.current.delete(job.requestId);
+        if (activeRequestIdsRef.current.get(job.segmentKey) === job.requestId) activeRequestIdsRef.current.delete(job.segmentKey);
+        if (previewInFlightRef.current?.requestId === job.requestId) previewInFlightRef.current = null;
+        activeCountRef.current = Math.max(0, activeCountRef.current - 1);
+        updateCounts();
+        if (pendingPreviewRef.current) queueMicrotask(() => runPreviewTranslationRef.current());
+        queueMicrotask(() => drainQueueRef.current());
       }
-    } finally {
-      activeJobsRef.current.delete(job.requestId);
-      if (activeRequestIdsRef.current.get(job.segmentKey) === job.requestId) {
-        activeRequestIdsRef.current.delete(job.segmentKey);
-      }
-      if (previewInFlightRef.current?.requestId === job.requestId) {
-        previewInFlightRef.current = null;
-      }
-      activeCountRef.current = Math.max(0, activeCountRef.current - 1);
-      updateCounts();
-      if (pendingPreviewRef.current) {
-        queueMicrotask(() => runPreviewTranslationRef.current());
-      }
-      queueMicrotask(() => drainQueueRef.current());
-    }
-  })();
-}, [isCurrentJob, updateCounts]);
+    })();
+  }, [isCurrentJob, updateCounts]);
 
-runPreviewTranslationRef.current = runPreviewTranslation;
+  runPreviewTranslationRef.current = runPreviewTranslation;
 
   useEffect(() => {
     let disposed = false;
@@ -463,6 +461,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
             firstWordLatencyMs: event.payload.firstWordLatencyMs,
           },
         }));
+        setLastError(null);
         if (event.payload.provider) setLastProvider(event.payload.provider);
         if (event.payload.model) setLastModel(event.payload.model);
         if (event.payload.firstWordLatencyMs !== undefined) setLastFirstWordLatencyMs(event.payload.firstWordLatencyMs);
@@ -495,7 +494,6 @@ runPreviewTranslationRef.current = runPreviewTranslation;
           sourceText: job.text,
           targetLanguage: job.targetLanguage,
           status: 'translating',
-          translatedText: undefined,
           fallbackReason: reason,
           provider: event.payload.nextProvider,
           model: event.payload.nextModel,
@@ -519,126 +517,106 @@ runPreviewTranslationRef.current = runPreviewTranslation;
     };
   }, [clearPendingWork]);
 
-  // When target language changes, reset pending work and clear prior language translations
   useEffect(() => {
     clearPendingWork();
     setTranslations({});
     setLastError(null);
   }, [settings.targetLanguage, settings.sourceLanguage, clearPendingWork]);
 
-  // When engine, speed, or model changes, cancel in-flight work but preserve existing rendered text
   useEffect(() => {
     clearPendingWork();
     setLastError(null);
   }, [settings.engine, settings.speed, settings.modelOverride, clearPendingWork]);
 
-  // When live translation is enabled or engine settings change, prepare provider
   useEffect(() => {
     if (settings.enabled) {
-      void invoke('api_prepare_live_translation', {
+      const requestSpeed = effectiveRequestSpeed(settings);
+      void invoke<{ provider: string; model: string; warmed: boolean }>('api_prepare_live_translation', {
         translationEngine: settings.engine,
-        speedMode: settings.speed,
+        speedMode: requestSpeed,
         modelOverride: settings.modelOverride || null,
-      }).catch(() => undefined);
+      }).then(prepared => {
+        setLastProvider(prepared.provider);
+        setLastModel(prepared.model);
+        setLastError(null);
+      }).catch(error => {
+        setLastError(error instanceof Error ? error.message : String(error));
+      });
     } else {
       clearPendingWork();
     }
-  }, [
-    settings.enabled,
-    settings.engine,
-    settings.speed,
-    settings.modelOverride,
-    clearPendingWork,
-  ]);
+  }, [settings.enabled, settings.engine, settings.speed, settings.modelOverride, clearPendingWork]);
 
-
-  // Reset before admitting work for a different recording, without remounting notes or the workspace.
   useEffect(() => { resultCacheRef.current.clear(); clearTranslations(); }, [sessionId, clearTranslations]);
 
-        useEffect(() => {
-          const previewKey = livePreview ? `live-preview-${livePreview.source}` : null;
-          if (!settings.enabled || !livePreview || !livePreview.text.trim()) {
-            pendingPreviewRef.current = null;
-            const inFlight = previewInFlightRef.current;
-            if (inFlight) {
-              cancelNativeRequest(inFlight.requestId);
-              latestRevisionRef.current.delete(inFlight.segmentKey);
-            }
-            if (previewKey) latestRevisionRef.current.delete(previewKey);
-            setTranslations((previous) => {
-              const keys = Object.keys(previous).filter((key) => key.startsWith('live-preview-'));
-              if (keys.length === 0) return previous;
-              const next = { ...previous };
-              keys.forEach((key) => delete next[key]);
-              return next;
-            });
-            return;
-          }
+  useEffect(() => {
+    const previewKey = livePreview ? `live-preview-${livePreview.source}` : null;
+    if (!settings.enabled || !livePreview || !livePreview.text.trim()) {
+      pendingPreviewRef.current = null;
+      const inFlight = previewInFlightRef.current;
+      if (inFlight) {
+        cancelNativeRequest(inFlight.requestId);
+        latestRevisionRef.current.delete(inFlight.segmentKey);
+      }
+      if (previewKey) latestRevisionRef.current.delete(previewKey);
+      setTranslations((previous) => {
+        const keys = Object.keys(previous).filter((key) => key.startsWith('live-preview-'));
+        if (keys.length === 0) return previous;
+        const next = { ...previous };
+        keys.forEach((key) => delete next[key]);
+        return next;
+      });
+      return;
+    }
 
-          const contextText = settings.contextTurns === 0
-            ? ''
-            : transcripts
-                .slice(-settings.contextTurns)
-                .map((turn) => `${speakerLabel(turn)}: ${turn.text.trim()}`)
-                .filter((line) => line.trim().length > 0)
-                .join('\n');
-          const segmentKey = `live-preview-${livePreview.source}`;
-          const previewJob: TranslationJob = {
-            segmentKey,
-            text: livePreview.text.trim(),
-            revision: [
-              generationRef.current,
-              livePreview.revision,
-              settings.targetLanguage,
-              settings.engine,
-              settings.speed,
-              settings.modelOverride,
-              contextText,
-              settings.glossary,
-              settings.contextHint,
-            ].join('\u0001'),
-            requestId: `live-preview-translation-${Date.now()}-${requestCounterRef.current++}`,
-            sourceLanguage: 'auto',
-            targetLanguage: settings.targetLanguage,
-            generation: generationRef.current,
-            translationEngine: settings.engine,
-            speedMode: settings.speed,
-            modelOverride: settings.modelOverride,
-            contextText,
-            glossary: settings.glossary,
-            contextHint: settings.contextHint,
-            isLive: true,
-            preview: livePreview,
-          };
-          // Coalesce pending snapshots WITHOUT invalidating a still-useful active
-          // translation on every ASR revision. Otherwise a provider slower than the
-          // preview cadence can finish every request yet never display a word.
-          const inFlight = previewInFlightRef.current;
-          if (inFlight?.preview && !sameCaptionUtterance(inFlight.preview, livePreview)) {
-            cancelNativeRequest(inFlight.requestId);
-            latestRevisionRef.current.delete(inFlight.segmentKey);
-          }
-          pendingPreviewRef.current = previewJob;
-
-          // Do not cancel a translation every 450ms as the ASR preview revises. Finish
-          // the current short request, then immediately jump to the newest caption.
-          if (!previewInFlightRef.current) {
-            runPreviewTranslationRef.current();
-          }
-        }, [
-          livePreview,
-          sessionId,
-          transcripts,
-          settings.enabled,
-          settings.targetLanguage,
-          settings.engine,
-          settings.speed,
-          settings.modelOverride,
-          settings.contextTurns,
-          settings.glossary,
-          settings.contextHint,
-          cancelNativeRequest,
-        ]);
+    const contextText = settings.contextTurns === 0
+      ? ''
+      : transcripts
+          .slice(-settings.contextTurns)
+          .map((turn) => `${speakerLabel(turn)}: ${turn.text.trim()}`)
+          .filter((line) => line.trim().length > 0)
+          .join('\n');
+    const segmentKey = `live-preview-${livePreview.source}`;
+    const revision = [
+      generationRef.current,
+      livePreview.revision,
+      settings.targetLanguage,
+      settings.engine,
+      settings.speed,
+      settings.modelOverride,
+      contextText,
+      settings.glossary,
+      settings.contextHint,
+    ].join('\u0001');
+    const previewJob: TranslationJob = {
+      segmentKey,
+      text: livePreview.text.trim(),
+      revision,
+      requestId: `live-preview-translation-${Date.now()}-${requestCounterRef.current++}`,
+      sourceLanguage: 'auto',
+      targetLanguage: settings.targetLanguage,
+      generation: generationRef.current,
+      translationEngine: settings.engine,
+      speedMode: effectiveRequestSpeed(settings),
+      modelOverride: settings.modelOverride,
+      contextText,
+      glossary: settings.glossary,
+      contextHint: settings.contextHint,
+      isLive: true,
+      preview: livePreview,
+    };
+    const inFlight = previewInFlightRef.current;
+    if (inFlight?.preview && !sameCaptionUtterance(inFlight.preview, livePreview)) {
+      cancelNativeRequest(inFlight.requestId);
+      latestRevisionRef.current.delete(inFlight.segmentKey);
+    }
+    pendingPreviewRef.current = previewJob;
+    if (!previewInFlightRef.current) runPreviewTranslationRef.current();
+  }, [
+    livePreview, sessionId, transcripts, settings.enabled, settings.targetLanguage, settings.engine,
+    settings.speed, settings.modelOverride, settings.contextTurns, settings.glossary,
+    settings.contextHint, cancelNativeRequest, previewRetryNonce,
+  ]);
 
   useEffect(() => {
     if (!settings.enabled || transcripts.length === 0) return;
@@ -653,16 +631,9 @@ runPreviewTranslationRef.current = runPreviewTranslation;
       const segmentKey = liveTranslationSegmentKey(transcript);
       const contextText = contextForTurn(transcripts, index, settings.contextTurns);
       const revision = [
-        generationRef.current,
-        settings.targetLanguage,
-        settings.engine,
-        settings.speed,
-        settings.modelOverride,
-        settings.contextTurns,
-        settings.glossary,
-        settings.contextHint,
-        contextText,
-        text,
+        generationRef.current, settings.targetLanguage, settings.engine, settings.speed,
+        settings.modelOverride, settings.contextTurns, settings.glossary, settings.contextHint,
+        contextText, text,
       ].join('\u0001');
       if (latestRevisionRef.current.get(segmentKey) === revision) return;
       latestRevisionRef.current.set(segmentKey, revision);
@@ -677,7 +648,7 @@ runPreviewTranslationRef.current = runPreviewTranslation;
         targetLanguage: settings.targetLanguage,
         generation: generationRef.current,
         translationEngine: settings.engine,
-        speedMode: settings.speed,
+        speedMode: effectiveRequestSpeed(settings),
         modelOverride: settings.modelOverride,
         contextText,
         glossary: settings.glossary,
@@ -687,23 +658,23 @@ runPreviewTranslationRef.current = runPreviewTranslation;
     });
   }, [sessionId, transcripts, settings, cancelNativeRequest, enqueueJob]);
 
-
-const translatedCount = useMemo(
-  () => Object.entries(translations).filter(
-    ([key, entry]) => !key.startsWith('live-preview-') && entry.status === 'translated'
-  ).length,
-  [translations]
-);
-const previewKey = livePreview ? `live-preview-${livePreview.source}` : null;
-const previewTranslation = previewKey && sameCaptionUtterance(previewInputsRef.current.get(previewKey), livePreview)
-  ? translations[previewKey]
-  : undefined;
+  const translatedCount = useMemo(
+    () => Object.entries(translations).filter(
+      ([key, entry]) => !key.startsWith('live-preview-') && entry.status === 'translated'
+    ).length,
+    [translations]
+  );
+  const previewKey = livePreview ? `live-preview-${livePreview.source}` : null;
+  const previewTranslation = previewKey && sameCaptionUtterance(previewInputsRef.current.get(previewKey), livePreview)
+    ? translations[previewKey]
+    : undefined;
 
   return {
     settings,
     translations,
     updateSettings,
     clearTranslations,
+    retryPreviewTranslation,
     queuedCount,
     activeCount,
     translatedCount,

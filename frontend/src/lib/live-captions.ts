@@ -5,11 +5,12 @@ export const CAPTION_WINDOW_LABEL = 'live-captions';
 export const CAPTION_FRAME_EVENT = 'meetodds:caption-frame';
 export const CAPTION_READY_EVENT = 'meetodds:caption-ready';
 export const CAPTION_DISMISS_EVENT = 'meetodds:caption-dismiss';
+export const CAPTION_RETRY_EVENT = 'meetodds:caption-retry';
 export const CAPTION_GEOMETRY_KEY = 'meetodds.captions.geometry.v1';
 export const CAPTION_APPEARANCE_KEY = 'meetodds.captions.appearance.v1';
 export const CAPTION_RESET_EVENT = 'meetodds:caption-reset';
 
-export type CaptionPhase = 'listening' | 'translating' | 'live' | 'paused' | 'error';
+export type CaptionPhase = 'listening' | 'translating' | 'live' | 'paused' | 'recovering' | 'error';
 export interface CaptionContent {
   text: string;
   speaker: string;
@@ -45,10 +46,16 @@ export function resolveCaptionContent({
   if (!translationEnabled) return { ...base, text: preview.text, phase: 'live' };
   // Target changes must never briefly display the prior language's cached result.
   const entry = translation?.targetLanguage === targetLanguage ? translation : undefined;
-  if (entry?.status === 'error') return { ...base, text: '', phase: 'error' };
+  // A transient provider failure must not replace already-visible translated words
+  // with an error message. Keep the last target-language phrase while the app retries.
   if (entry?.translatedText?.trim()) {
-    return { ...base, text: entry.translatedText.trim(), phase: 'live' };
+    return {
+      ...base,
+      text: entry.translatedText.trim(),
+      phase: entry.status === 'error' ? 'recovering' : 'live',
+    };
   }
+  if (entry?.status === 'error') return { ...base, text: '', phase: 'error' };
   return { ...base, text: '', phase: 'translating' };
 }
 
@@ -106,7 +113,7 @@ export function isCaptionFrame(value: unknown): value is CaptionFrame {
     && typeof v.text === 'string' && v.text.length <= 10000
     && typeof v.speaker === 'string' && typeof v.language === 'string'
     && typeof v.translated === 'boolean'
-    && ['listening', 'translating', 'live', 'paused', 'error'].includes(v.phase);
+    && ['listening', 'translating', 'live', 'paused', 'recovering', 'error'].includes(v.phase);
 }
 
 /** Rolling snapshots of one utterance overlap; a different source or later turn must not inherit text. */
