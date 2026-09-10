@@ -1057,7 +1057,7 @@ async fn translate_with_candidate<R: Runtime>(
                 &config.model_name,
                 &system_prompt,
                 &user_prompt,
-                max_tokens,
+                None,
             ),
         )
         .await

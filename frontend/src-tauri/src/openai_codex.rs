@@ -573,9 +573,9 @@ fn build_codex_response_body(
     model_name: &str,
     system_prompt: &str,
     user_prompt: &str,
-    max_output_tokens: Option<u32>,
+    _max_output_tokens: Option<u32>,
 ) -> Value {
-    let mut body = serde_json::json!({
+    serde_json::json!({
         "model": model_name,
         "input": [{
             "role": "user",
@@ -584,11 +584,7 @@ fn build_codex_response_body(
         "instructions": system_prompt,
         "stream": true,
         "store": false,
-    });
-    if let Some(limit) = max_output_tokens {
-        body["max_output_tokens"] = serde_json::json!(limit);
-    }
-    body
+    })
 }
 
 async fn send_codex_response_request(
@@ -850,9 +846,9 @@ mod tests {
     }
 
     #[test]
-    fn codex_response_body_only_sets_an_explicit_output_limit() {
+    fn codex_response_body_does_not_send_unsupported_max_output_tokens() {
         let limited = build_codex_response_body("model", "system", "user", Some(512));
-        assert_eq!(limited["max_output_tokens"], 512);
+        assert!(limited.get("max_output_tokens").is_none());
 
         let unlimited = build_codex_response_body("model", "system", "user", None);
         assert!(unlimited.get("max_output_tokens").is_none());
