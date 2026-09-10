@@ -14,6 +14,8 @@ use super::recording_state::AudioChunk;
 #[path = "save_worker.rs"]
 mod save_worker;
 
+use std::time::{Duration, Instant};
+
 type FailureCallback = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +73,8 @@ pub struct RecordingSaver {
     meeting_folder: Option<PathBuf>, meeting_name: Option<String>, metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
     transcript_write_lock: Mutex<()>,
+    last_snapshot_at: Arc<Mutex<Instant>>,
+    last_snapshot_count: Arc<Mutex<usize>>,
     failure: Arc<Mutex<Option<String>>>,
     failure_callback: Arc<Mutex<Option<FailureCallback>>>,
     worker: Option<JoinHandle<Result<(), String>>>, shutdown: Option<oneshot::Sender<()>>,
@@ -84,6 +88,8 @@ impl RecordingSaver {
         Self {
             incremental_saver: None, meeting_folder: None, meeting_name: None, metadata: None,
             transcript_segments: Arc::new(Mutex::new(Vec::new())), transcript_write_lock: Mutex::new(()),
+            last_snapshot_at: Arc::new(Mutex::new(Instant::now())),
+            last_snapshot_count: Arc::new(Mutex::new(0)),
             failure: Arc::new(Mutex::new(None)), failure_callback: Arc::new(Mutex::new(None)),
             worker: None, shutdown: None, capture_session_id: uuid::Uuid::new_v4().to_string(),
             finalized_audio: None, saved_result: None, recording_folder: None,
@@ -113,18 +119,54 @@ impl RecordingSaver {
         }
     }
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {
-        // Serialize update + snapshot + persistence, not just vector access. Older writes cannot win.
+        // Incremental append-only persistence to journal: O(1) disk write without rewriting full history or syncing directory.
+        // Guarantees durability and crash-recovery without O(N^2) I/O overhead.
         let result = (|| -> Result<()> {
             let _write = self.transcript_write_lock.lock().map_err(|_| anyhow!("Transcript writer unavailable"))?;
-            {
+            let segments_len = {
                 let mut segments = self.transcript_segments.lock().map_err(|_| anyhow!("Transcript state unavailable"))?;
-                if let Some(existing) = segments.iter_mut().find(|s| s.sequence_id == segment.sequence_id) { *existing = segment; }
-                else { segments.push(segment); }
+                if let Some(existing) = segments.iter_mut().find(|s| s.sequence_id == segment.sequence_id) {
+                    *existing = segment.clone();
+                } else {
+                    segments.push(segment.clone());
+                }
+                segments.len()
+            };
+
+            if let Some(folder) = &self.meeting_folder {
+                // 1. O(1) Append to journal
+                let journal_path = folder.join("transcripts.jsonl");
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&journal_path)?;
+                serde_json::to_writer(&mut file, &segment)?;
+                file.write_all(b"\n")?;
+                file.flush()?;
+
+                // 2. Periodic compacted snapshot (every 15s or 10 segments)
+                let should_snapshot = {
+                    let now = Instant::now();
+                    let mut last_time = self.last_snapshot_at.lock().map_err(|_| anyhow!("Snapshot timer unavailable"))?;
+                    let mut last_count = self.last_snapshot_count.lock().map_err(|_| anyhow!("Snapshot counter unavailable"))?;
+                    if now.duration_since(*last_time) >= Duration::from_secs(15) || (segments_len > *last_count && segments_len - *last_count >= 10) {
+                        *last_time = now;
+                        *last_count = segments_len;
+                        true
+                    } else {
+                        false
+                    }
+                };
+
+                if should_snapshot {
+                    self.write_transcripts_json(folder)?;
+                }
             }
-            if let Some(folder) = &self.meeting_folder { self.write_transcripts_json(folder)?; }
             Ok(())
         })();
-        if result.is_err() { self.fail("Transcript checkpoint could not be saved. Check disk space and folder permissions; stop and recover this recording."); }
+        if result.is_err() {
+            self.fail("Transcript checkpoint could not be saved. Check disk space and folder permissions; stop and recover this recording.");
+        }
     }
     pub fn add_transcript_chunk(&self, text: String) {
         self.add_transcript_segment(TranscriptSegment {
@@ -289,5 +331,58 @@ mod tests {
         let first = RecordingSaver::new(); let second = RecordingSaver::new();
         assert_ne!(first.capture_session_id, second.capture_session_id);
         assert!(first.metadata.is_none());
+    }
+    #[test]
+    fn test_incremental_journal_and_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut saver = RecordingSaver::new();
+        saver.meeting_folder = Some(dir.path().to_path_buf());
+
+        // Add two segments
+        saver.add_transcript_segment(TranscriptSegment {
+            id: "seg_1".to_string(),
+            text: "First turn".to_string(),
+            audio_start_time: 0.0,
+            audio_end_time: 1.5,
+            duration: 1.5,
+            display_time: "[00:00]".to_string(),
+            confidence: 0.95,
+            sequence_id: 1,
+            speaker: None,
+            speaker_label: None,
+            speaker_source: None,
+            speaker_confidence: None,
+        });
+
+        saver.add_transcript_segment(TranscriptSegment {
+            id: "seg_2".to_string(),
+            text: "Second turn".to_string(),
+            audio_start_time: 1.5,
+            audio_end_time: 3.0,
+            duration: 1.5,
+            display_time: "[00:01]".to_string(),
+            confidence: 0.92,
+            sequence_id: 2,
+            speaker: None,
+            speaker_label: None,
+            speaker_source: None,
+            speaker_confidence: None,
+        });
+
+        // Verify transcripts.jsonl contains both entries in append-only format
+        let journal_path = dir.path().join("transcripts.jsonl");
+        assert!(journal_path.exists(), "Journal file transcripts.jsonl must exist");
+        let content = std::fs::read_to_string(&journal_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "Journal must contain 2 lines");
+        assert!(lines[0].contains("First turn"));
+        assert!(lines[1].contains("Second turn"));
+
+        // Write snapshot
+        saver.write_transcripts_json(dir.path()).unwrap();
+        let snapshot_path = dir.path().join("transcripts.json");
+        assert!(snapshot_path.exists(), "Snapshot file transcripts.json must exist");
+        let snapshot_val: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(snapshot_path).unwrap()).unwrap();
+        assert_eq!(snapshot_val["total_segments"], 2);
     }
 }

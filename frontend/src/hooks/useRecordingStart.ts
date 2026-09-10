@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useTranscripts } from '@/contexts/TranscriptContext';
+import { useTranscriptSession } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
@@ -24,7 +24,7 @@ export function useRecordingStart(
   const [isAutoStarting, setIsAutoStarting] = useState(false);
   const activeStart = useRef<AbortController | null>(null);
   useEffect(() => () => activeStart.current?.abort(), []);
-  const { clearTranscripts, setMeetingTitle } = useTranscripts();
+  const { clearTranscripts, setMeetingTitle } = useTranscriptSession();
   const { setIsMeetingActive } = useSidebar();
   const { selectedDevices } = useConfig();
   const { setStatus } = useRecordingState();

@@ -45,6 +45,7 @@ pub struct WhisperEngine {
     // caches and GPU buffers, which is pure latency when called per segment.
     // Cleared whenever the context changes because a state pins its own model.
     live_state: Arc<std::sync::Mutex<Option<whisper_rs::WhisperState>>>,
+    preview_state: Arc<std::sync::Mutex<Option<whisper_rs::WhisperState>>>,
     current_model: Arc<RwLock<Option<String>>>,
     available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     // State tracking for smart logging
@@ -174,6 +175,7 @@ impl WhisperEngine {
             models_dir,
             current_context: Arc::new(RwLock::new(None)),
             live_state: Arc::new(std::sync::Mutex::new(None)),
+            preview_state: Arc::new(std::sync::Mutex::new(None)),
             current_model: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
             // Initialize state tracking
@@ -376,6 +378,9 @@ impl WhisperEngine {
 
     fn clear_live_state(&self) {
         if let Ok(mut slot) = self.live_state.lock() {
+            slot.take();
+        }
+        if let Ok(mut slot) = self.preview_state.lock() {
             slot.take();
         }
     }
@@ -601,7 +606,17 @@ impl WhisperEngine {
         params.set_single_segment(true);
         params.set_n_threads(adaptive_config.max_threads.unwrap_or(2).clamp(1, 2) as i32);
 
-        let mut state = ctx.create_state()?;
+        let mut cached_slot = self.preview_state.try_lock().ok();
+        let mut fresh_state = None;
+        let state: &mut whisper_rs::WhisperState = match cached_slot.as_deref_mut() {
+            Some(slot) => {
+                if slot.is_none() {
+                    *slot = Some(ctx.create_state()?);
+                }
+                slot.as_mut().expect("state inserted above")
+            }
+            None => fresh_state.insert(ctx.create_state()?),
+        };
         state.full(params, &audio_data)?;
         let num_segments = state.full_n_segments()?;
         let mut result = String::new();

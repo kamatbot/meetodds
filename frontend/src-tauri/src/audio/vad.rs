@@ -30,6 +30,9 @@ pub struct ContinuousVadProcessor {
     has_split: bool,
     // State tracking for smart logging
     last_logged_state: bool,
+    // Stateful resampler tracking to prevent sample loss across non-multiple packet sizes
+    resample_input_buffer: Vec<f32>,
+    resample_phase: f64,
 }
 
 // ponytail: fixed caps. Long monologues are cut into <= ~6 s pieces at the first
@@ -90,6 +93,8 @@ impl ContinuousVadProcessor {
             has_split: false,
             // Initialize state tracking
             last_logged_state: false,
+            resample_input_buffer: Vec::new(),
+            resample_phase: 0.0,
         })
     }
 
@@ -120,57 +125,62 @@ impl ContinuousVadProcessor {
         Ok(completed_segments)
     }
 
-    /// Improved resampling from input sample rate to 16kHz with anti-aliasing
-    /// Uses linear interpolation and basic low-pass filtering for better quality
-    fn resample_to_16k(&self, samples: &[f32]) -> Result<Vec<f32>> {
+    /// Sample-accurate, stateful resampling to 16kHz.
+    /// Preserves fractional phase and boundary samples across non-multiple packet sizes (e.g. 512, 1024 frames),
+    /// eliminating duration deficit and timestamp drift over long recording sessions.
+    fn resample_to_16k(&mut self, samples: &[f32]) -> Result<Vec<f32>> {
         if self.sample_rate == 16000 {
             return Ok(samples.to_vec());
         }
 
-        // Calculate downsampling ratio
-        let ratio = self.sample_rate as f64 / 16000.0;
-        let output_len = (samples.len() as f64 / ratio) as usize;
-        let mut resampled = Vec::with_capacity(output_len);
+        // Fast, exact path for 48kHz -> 16kHz (exact 3:1 integer downsampling)
+        if self.sample_rate == 48000 {
+            let mut input = std::mem::take(&mut self.resample_input_buffer);
+            input.extend_from_slice(samples);
 
-        // Apply simple low-pass filter before downsampling to reduce aliasing
-        let cutoff_freq = 0.4; // Normalized frequency (0.4 * Nyquist)
-        let mut filtered_samples = Vec::with_capacity(samples.len());
+            let total_len = input.len();
+            let complete_triplets = total_len / 3;
+            let mut resampled = Vec::with_capacity(complete_triplets);
 
-        // Simple moving average filter (basic low-pass)
-        let filter_size =
-            (self.sample_rate as f64 / (cutoff_freq * self.sample_rate as f64)) as usize;
-        let filter_size = std::cmp::max(1, std::cmp::min(filter_size, 5)); // Limit filter size
-
-        for i in 0..samples.len() {
-            let start = if i >= filter_size { i - filter_size } else { 0 };
-            let end = std::cmp::min(i + filter_size + 1, samples.len());
-            let sum: f32 = samples[start..end].iter().sum();
-            filtered_samples.push(sum / (end - start) as f32);
-        }
-
-        // Linear interpolation downsampling
-        for i in 0..output_len {
-            let source_pos = i as f64 * ratio;
-            let source_index = source_pos as usize;
-            let fraction = source_pos - source_index as f64;
-
-            if source_index + 1 < filtered_samples.len() {
-                // Linear interpolation
-                let sample1 = filtered_samples[source_index];
-                let sample2 = filtered_samples[source_index + 1];
-                let interpolated = sample1 + (sample2 - sample1) * fraction as f32;
-                resampled.push(interpolated);
-            } else if source_index < filtered_samples.len() {
-                resampled.push(filtered_samples[source_index]);
+            // 3-point moving average anti-aliasing filter + 3x decimation
+            for i in 0..complete_triplets {
+                let idx = i * 3;
+                let avg = (input[idx] + input[idx + 1] + input[idx + 2]) / 3.0;
+                resampled.push(avg);
             }
+
+            let remainder_start = complete_triplets * 3;
+            if remainder_start < total_len {
+                self.resample_input_buffer.extend_from_slice(&input[remainder_start..]);
+            }
+
+            return Ok(resampled);
         }
 
-        debug!(
-            "Resampled from {} samples ({}Hz) to {} samples (16kHz) with anti-aliasing",
-            samples.len(),
-            self.sample_rate,
-            resampled.len()
-        );
+        // General fractional resampling path for arbitrary sample rates (e.g. 44.1kHz, 32kHz)
+        let ratio = self.sample_rate as f64 / 16000.0;
+        let mut input = std::mem::take(&mut self.resample_input_buffer);
+        input.extend_from_slice(samples);
+
+        let mut resampled = Vec::new();
+        let mut pos = self.resample_phase;
+
+        while pos + 1.0 < input.len() as f64 {
+            let idx = pos as usize;
+            let frac = (pos - idx as f64) as f32;
+            let s1 = input[idx];
+            let s2 = input[idx + 1];
+            resampled.push(s1 + (s2 - s1) * frac);
+            pos += ratio;
+        }
+
+        let consumed = pos.floor() as usize;
+        if consumed < input.len() {
+            self.resample_phase = pos - consumed as f64;
+            self.resample_input_buffer.extend_from_slice(&input[consumed..]);
+        } else {
+            self.resample_phase = pos - input.len() as f64;
+        }
 
         Ok(resampled)
     }
@@ -217,6 +227,18 @@ impl ContinuousVadProcessor {
               self.in_speech, self.current_speech.len(), self.buffer.len(), self.speech_segments.len());
 
         let mut completed_segments = Vec::new();
+
+        // Drain any remaining fractional resampler audio into the buffer
+        if self.sample_rate == 48000 && !self.resample_input_buffer.is_empty() {
+            let remainder = std::mem::take(&mut self.resample_input_buffer);
+            let avg: f32 = remainder.iter().sum::<f32>() / remainder.len() as f32;
+            self.buffer.push(avg);
+        } else if !self.resample_input_buffer.is_empty() {
+            let remainder = std::mem::take(&mut self.resample_input_buffer);
+            if let Some(&last) = remainder.last() {
+                self.buffer.push(last);
+            }
+        }
 
         // Process any remaining buffered audio
         if !self.buffer.is_empty() {
@@ -983,5 +1005,32 @@ mod tests {
                 duration_ms
             );
         }
+    }
+
+    #[test]
+    fn test_vad_resampler_sample_accuracy_non_multiple_packets() {
+        // Reproduces the exact Astra audit scenario:
+        // 1,000 packets of 512 samples at 48kHz (total 512,000 samples).
+        // 512,000 / 3 = 170,666.67 expected 16kHz samples.
+        // The old stateless resampler truncated to 170 samples per packet, losing 666 samples (14s/hr drift).
+        // The stateful resampler must preserve exact fractional decimation.
+        let mut processor = ContinuousVadProcessor::new(48000, 400).expect("processor creation");
+        let packet = vec![0.05f32; 512];
+        let mut total_output = 0;
+
+        for _ in 0..1000 {
+            let resampled = processor.resample_to_16k(&packet).expect("resample");
+            total_output += resampled.len();
+        }
+
+        // 512,000 / 3 = 170666 complete triplets, with 2 remainder samples in buffer.
+        assert_eq!(
+            total_output, 170666,
+            "Stateful resampler must produce exactly 170666 samples without dropping fractional frames"
+        );
+        assert_eq!(
+            processor.resample_input_buffer.len(), 2,
+            "Remaining 2 samples must be preserved in resample_input_buffer"
+        );
     }
 }

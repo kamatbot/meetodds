@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, MutableRefObject } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, ReactNode, MutableRefObject } from 'react';
 import { LiveTranscriptPreview, Transcript, TranscriptUpdate } from '@/types';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
@@ -11,24 +11,37 @@ import { withSpeakerPrefix } from '@/lib/speaker-labels';
 import { indexedDBService } from '@/services/indexedDBService';
 import { openManualNotesWindow, closeManualNotesWindow } from '@/services/manualNotesService';
 
-interface TranscriptContextType {
+export interface TranscriptSessionContextType {
+  currentMeetingId: string | null;
+  meetingTitle: string;
+  setMeetingTitle: (title: string) => void;
+  clearTranscripts: () => void;
+  markMeetingAsSaved: () => Promise<void>;
+  captionsVisible: boolean;
+  setCaptionsVisible: (value: boolean) => void;
+}
+
+export interface TranscriptHistoryContextType {
   transcripts: Transcript[];
-  livePreview: LiveTranscriptPreview | null;
-  transcriptsRef: MutableRefObject<Transcript[]>
+  transcriptsRef: MutableRefObject<Transcript[]>;
   addTranscript: (update: TranscriptUpdate) => void;
   copyTranscript: () => void;
   flushBuffer: () => void;
   transcriptContainerRef: React.RefObject<HTMLDivElement>;
-  meetingTitle: string;
-  setMeetingTitle: (title: string) => void;
-  clearTranscripts: () => void;
-  currentMeetingId: string | null;
-  markMeetingAsSaved: () => Promise<void>;
-  captionsVisible: boolean;
-  setCaptionsVisible: (value: boolean) => void;
+}
+
+export interface TranscriptPreviewContextType {
+  livePreview: LiveTranscriptPreview | null;
   previewSettled: boolean;
 }
 
+export type TranscriptContextType = TranscriptSessionContextType &
+  TranscriptHistoryContextType &
+  TranscriptPreviewContextType;
+
+const TranscriptSessionContext = createContext<TranscriptSessionContextType | undefined>(undefined);
+const TranscriptHistoryContext = createContext<TranscriptHistoryContextType | undefined>(undefined);
+const TranscriptPreviewContext = createContext<TranscriptPreviewContextType | undefined>(undefined);
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
@@ -73,45 +86,53 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   }, [transcripts]);
 
 
-// Ephemeral subtitle stream. A caption belongs to the sentence in progress: it is
-// replaced by newer previews, cleared when the canonical sentence for its source
-// lands (`live-transcript-preview-clear` from the worker), and dropped if nothing
-// arrives for a while so a stale caption can never sit under fresh transcript rows.
-useEffect(() => {
-  let unlistenPreview: (() => void) | undefined;
-  let unlistenClear: (() => void) | undefined;
-  let disposed = false;
+  const latestPreviewRevisionRef = useRef<number>(0);
 
-  void listen<LiveTranscriptPreview>('live-transcript-preview', (event) => {
-    setPreviewSettled(false);
-    setLivePreview(event.payload);
-  }).then((dispose) => {
-    if (disposed) dispose();
-    else unlistenPreview = dispose;
-  });
+  // Ephemeral subtitle stream. A caption belongs to the sentence in progress: it is
+  // replaced by newer previews, cleared when the canonical sentence for its source
+  // lands (`live-transcript-preview-clear` from the worker), and dropped if nothing
+  // arrives for a while so a stale caption can never sit under fresh transcript rows.
+  useEffect(() => {
+    let unlistenPreview: (() => void) | undefined;
+    let unlistenClear: (() => void) | undefined;
+    let disposed = false;
 
-  void listen<{ source: LiveTranscriptPreview['source'] | null }>(
-    'live-transcript-preview-clear',
-    (event) => {
-      const source = event.payload?.source ?? null;
-      setLivePreview((prev) => {
-        if (prev && (source === null || prev.source === source)) {
-          setPreviewSettled(true);
-        }
-        return prev;
-      });
-    }
-  ).then((dispose) => {
-    if (disposed) dispose();
-    else unlistenClear = dispose;
-  });
+    void listen<LiveTranscriptPreview>('live-transcript-preview', (event) => {
+      if (event.payload.revision < latestPreviewRevisionRef.current) {
+        return; // Drop out-of-order stale preview
+      }
+      latestPreviewRevisionRef.current = event.payload.revision;
+      setPreviewSettled(false);
+      setLivePreview(event.payload);
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlistenPreview = dispose;
+    });
 
-  return () => {
-    disposed = true;
-    unlistenPreview?.();
-    unlistenClear?.();
-  };
-}, []);
+    void listen<{ source: LiveTranscriptPreview['source'] | null }>(
+      'live-transcript-preview-clear',
+      (event) => {
+        const source = event.payload?.source ?? null;
+        setLivePreview((prev) => {
+          if (prev && (source === null || prev.source === source)) {
+            // Canonical segment landed: clear preview so it does not linger beside final text
+            return null;
+          }
+          return prev;
+        });
+        setPreviewSettled(false);
+      }
+    ).then((dispose) => {
+      if (disposed) dispose();
+      else unlistenClear = dispose;
+    });
+
+    return () => {
+      disposed = true;
+      unlistenPreview?.();
+      unlistenClear?.();
+    };
+  }, []);
 
 // Stale guard: no preview for 8 s means the lane is idle or the sentence closed
 // without a clear event; hide rather than show outdated words.
@@ -580,32 +601,90 @@ useEffect(() => {
     }
   }, [currentMeetingId]);
 
-  const value: TranscriptContextType = {
+  const sessionValue = useMemo<TranscriptSessionContextType>(() => ({
+    currentMeetingId,
+    meetingTitle,
+    setMeetingTitle,
+    clearTranscripts,
+    markMeetingAsSaved,
+    captionsVisible,
+    setCaptionsVisible,
+  }), [
+    currentMeetingId,
+    meetingTitle,
+    setMeetingTitle,
+    clearTranscripts,
+    markMeetingAsSaved,
+    captionsVisible,
+    setCaptionsVisible,
+  ]);
+
+  const historyValue = useMemo<TranscriptHistoryContextType>(() => ({
     transcripts,
-    livePreview,
     transcriptsRef,
     addTranscript,
     copyTranscript,
     flushBuffer,
     transcriptContainerRef,
-    meetingTitle,
-    setMeetingTitle,
-    clearTranscripts,
-    currentMeetingId,
-    markMeetingAsSaved,
-    captionsVisible,
-    setCaptionsVisible,
+  }), [
+    transcripts,
+    addTranscript,
+    copyTranscript,
+    flushBuffer,
+  ]);
+
+  const previewValue = useMemo<TranscriptPreviewContextType>(() => ({
+    livePreview,
     previewSettled,
-  };
+  }), [
+    livePreview,
+    previewSettled,
+  ]);
+
+  const combinedValue = useMemo<TranscriptContextType>(() => ({
+    ...sessionValue,
+    ...historyValue,
+    ...previewValue,
+  }), [sessionValue, historyValue, previewValue]);
 
   return (
-    <TranscriptContext.Provider value={value}>
-      {children}
-    </TranscriptContext.Provider>
+    <TranscriptSessionContext.Provider value={sessionValue}>
+      <TranscriptHistoryContext.Provider value={historyValue}>
+        <TranscriptPreviewContext.Provider value={previewValue}>
+          <TranscriptContext.Provider value={combinedValue}>
+            {children}
+          </TranscriptContext.Provider>
+        </TranscriptPreviewContext.Provider>
+      </TranscriptHistoryContext.Provider>
+    </TranscriptSessionContext.Provider>
   );
 }
 
-export function useTranscripts() {
+export function useTranscriptSession(): TranscriptSessionContextType {
+  const context = useContext(TranscriptSessionContext);
+  if (context === undefined) {
+    throw new Error('useTranscriptSession must be used within a TranscriptProvider');
+  }
+  return context;
+}
+
+export function useTranscriptHistory(): TranscriptHistoryContextType {
+  const context = useContext(TranscriptHistoryContext);
+  if (context === undefined) {
+    throw new Error('useTranscriptHistory must be used within a TranscriptProvider');
+  }
+  return context;
+}
+
+export function useTranscriptPreview(): TranscriptPreviewContextType {
+  const context = useContext(TranscriptPreviewContext);
+  if (context === undefined) {
+    throw new Error('useTranscriptPreview must be used within a TranscriptProvider');
+  }
+  return context;
+}
+
+export function useTranscripts(): TranscriptContextType {
   const context = useContext(TranscriptContext);
   if (context === undefined) {
     throw new Error('useTranscripts must be used within a TranscriptProvider');

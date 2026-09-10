@@ -118,9 +118,14 @@ pub fn start_live_preview_task<R: Runtime>(
                 }
             }
 
-            // ponytail: duty-cycle cap. Rest after every decode, including empty,
-            // stale, or failed output. The watch channel drops snapshots meanwhile.
-            tokio::time::sleep(decode_time * 2).await;
+            // Adaptive pacing: scale rest time based on measured decode duration.
+            // When decode is fast and headroom exists, rest briefly (min 100ms) to deliver fluid 300-400ms updates;
+            // cap rest to 350ms to prevent multi-second caption stalls while still yielding CPU/GPU.
+            let rest_duration = (decode_time / 2).clamp(
+                std::time::Duration::from_millis(100),
+                std::time::Duration::from_millis(350),
+            );
+            tokio::time::sleep(rest_duration).await;
         }
     })
 }

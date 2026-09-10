@@ -30,6 +30,7 @@ export function useNoteDraft(
   const session = useRef<Session>({ base: null, value: null, inFlight: null, blocked: false });
   const alive = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const journalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [value, setValue] = useState(empty);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +43,12 @@ export function useNoteDraft(
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
   }, []);
-  const journal = useCallback(() => {
+  const cancelJournalTimer = useCallback(() => {
+    if (journalTimer.current) clearTimeout(journalTimer.current);
+    journalTimer.current = null;
+  }, []);
+  const journalNow = useCallback(() => {
+    cancelJournalTimer();
     const { base, value: next } = session.current;
     if (!base || !next) return;
     try {
@@ -50,10 +56,19 @@ export function useNoteDraft(
       else localStorage.setItem(storageKey, JSON.stringify({ version: 1, base, value: next } satisfies StoredNoteDraft));
       if (alive.current) setStorageWarning(false);
     } catch { if (alive.current) setStorageWarning(true); }
-  }, [storageKey]);
+  }, [storageKey, cancelJournalTimer]);
+
+  const scheduleJournal = useCallback(() => {
+    if (journalTimer.current) clearTimeout(journalTimer.current);
+    journalTimer.current = setTimeout(() => {
+      journalTimer.current = null;
+      journalNow();
+    }, 200);
+  }, [journalNow]);
 
   const flush = useCallback((): Promise<void> => {
     cancelTimer();
+    journalNow();
     const s = session.current;
     if (!s.base || !s.value) return Promise.reject(new Error('Notes are still loading. Retry after they appear.'));
     if (s.inFlight) return s.inFlight;
@@ -67,7 +82,7 @@ export function useNoteDraft(
           s.base = saved;
           // Do not overwrite text typed while the previous write was pending.
           s.value = { ...s.value, revision: saved.revision };
-          journal();
+          journalNow();
         }
         if (alive.current) { setStatus('saved'); setRecovered(false); }
       } catch (failure) {
@@ -78,7 +93,7 @@ export function useNoteDraft(
     };
     s.inFlight = work();
     return s.inFlight;
-  }, [cancelTimer, journal, write]);
+  }, [cancelTimer, journalNow, write]);
 
   useEffect(() => {
     alive.current = true;
@@ -110,28 +125,28 @@ export function useNoteDraft(
     }).catch(() => {
       if (!disposed) { setStatus('error'); setError('Notes could not be loaded. Retry; the existing note has not been replaced.'); }
     });
-    const checkpoint = () => { journal(); void flush().catch(() => undefined); };
+    const checkpoint = () => { journalNow(); void flush().catch(() => undefined); };
     const visibility = () => { if (document.hidden) checkpoint(); };
     window.addEventListener('blur', checkpoint);
     window.addEventListener('pagehide', checkpoint);
     document.addEventListener('visibilitychange', visibility);
     return () => {
       disposed = true;
-      checkpoint(); alive.current = false; cancelTimer();
+      checkpoint(); alive.current = false; cancelTimer(); cancelJournalTimer();
       window.removeEventListener('blur', checkpoint);
       window.removeEventListener('pagehide', checkpoint);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [storageKey, load, flush, journal, cancelTimer, reloadVersion]);
+  }, [storageKey, load, flush, journalNow, cancelTimer, cancelJournalTimer, reloadVersion]);
 
   const change = useCallback((next: Partial<Pick<NoteValue, 'markdown' | 'includeInSummary'>>) => {
     const s = session.current;
     if (!s.value || s.blocked) return;
     s.value = { ...s.value, ...next };
     setValue(s.value); setStatus('dirty'); setRecovered(false);
-    journal(); cancelTimer();
+    scheduleJournal(); cancelTimer();
     timer.current = setTimeout(() => { void flush().catch(() => undefined); }, 650);
-  }, [cancelTimer, flush, journal]);
+  }, [cancelTimer, flush, scheduleJournal]);
 
   const resolveConflict = useCallback((keepDraft: boolean) => {
     if (!conflict) return;
@@ -140,10 +155,10 @@ export function useNoteDraft(
     s.value = keepDraft && s.value ? { ...s.value, revision: conflict.revision } : conflict;
     s.blocked = false;
     setValue(s.value); setConflict(null); setError(null);
-    journal();
+    journalNow();
     if (keepDraft) void flush().catch(() => undefined);
     else { setStatus('saved'); setRecovered(false); }
-  }, [conflict, flush, journal]);
+  }, [conflict, flush, journalNow]);
 
   return { value, status, error, conflict, recovered, storageWarning, change, flush, resolveConflict,
     ready: session.current.base !== null,

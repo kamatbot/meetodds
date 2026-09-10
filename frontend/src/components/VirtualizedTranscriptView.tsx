@@ -79,8 +79,8 @@ function cleanStopWords(text: string): string {
     return cleanedText.replace(/\s+/g, ' ').trim();
 }
 
-// Memoized transcript segment component
 const TranscriptSegment = memo(function TranscriptSegment({
+    segment,
     id,
     timestamp,
     text,
@@ -99,7 +99,9 @@ const TranscriptSegment = memo(function TranscriptSegment({
     showConfidence,
     isFocused,
     action,
+    renderAction,
 }: {
+    segment?: TranscriptSegmentData;
     id: string;
     timestamp: number;
     text: string;
@@ -118,7 +120,9 @@ const TranscriptSegment = memo(function TranscriptSegment({
     showConfidence: boolean;
     isFocused: boolean;
     action?: ReactNode;
+    renderAction?: (segment: TranscriptSegmentData) => ReactNode;
 }) {
+    const actionContent = action ?? (renderAction && segment ? renderAction(segment) : null);
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
     const showOriginal = !translationEnabled || translationDisplayMode === 'bilingual' || !translatedText;
     const isTranslationPending = translationEnabled && !translatedText &&
@@ -211,7 +215,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         </p>
                     )}
                 </div>
-                {action && <div className="shrink-0 pt-0.5">{action}</div>}
+                {actionContent && <div className="shrink-0 pt-0.5">{actionContent}</div>}
             </div>
         </div>
     );
@@ -251,6 +255,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         getScrollElement: () => scrollRef.current,
         estimateSize: () => translationEnabled ? 136 : 88, // Translation adds a second text row
         overscan: 10, // Render extra items above/below viewport
+        getItemKey: (index: number) => segments[index]?.id ?? index,
         onChange: () => {
             startTransition(() => {
                 rerender();
@@ -436,7 +441,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         isFocused={segment.id === focusSegmentId}
-                                        action={renderSegmentAction?.(segment)}
+                                        segment={segment}
+                                        renderAction={renderSegmentAction}
                                     />
                                 </div>
                             );
@@ -504,7 +510,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         isFocused={segment.id === focusSegmentId}
-                                        action={renderSegmentAction?.(segment)}
+                                        segment={segment}
+                                        renderAction={renderSegmentAction}
                                     />
                                 </motion.div>
                             );

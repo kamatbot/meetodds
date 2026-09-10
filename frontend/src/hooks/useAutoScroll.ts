@@ -55,8 +55,18 @@ export function useAutoScroll({
     const userScrolledRef = useRef(false);
     // Track if we're doing a programmatic scroll
     const isProgrammaticScrollRef = useRef(false);
+    // Track any pending programmatic scroll timeouts so they can be cancelled on user interaction
+    const programmaticScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Track previous segment count to detect new segments
     const prevSegmentCountRef = useRef(segments.length);
+
+    const cancelProgrammaticScroll = useCallback(() => {
+        if (programmaticScrollTimeoutRef.current) {
+            clearTimeout(programmaticScrollTimeoutRef.current);
+            programmaticScrollTimeoutRef.current = null;
+        }
+        isProgrammaticScrollRef.current = false;
+    }, []);
 
     /**
      * Check if the user is scrolled near the bottom
@@ -72,17 +82,58 @@ export function useAutoScroll({
      */
     const scrollToBottom = useCallback(() => {
         if (scrollRef.current) {
+            cancelProgrammaticScroll();
             isProgrammaticScrollRef.current = true;
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
             userScrolledRef.current = false;
             setAutoScroll(true);
 
-            // Reset the flag after a small delay to account for scroll event propagation
-            setTimeout(() => {
+            programmaticScrollTimeoutRef.current = setTimeout(() => {
                 isProgrammaticScrollRef.current = false;
+                programmaticScrollTimeoutRef.current = null;
             }, 50);
         }
-    }, [scrollRef]);
+    }, [scrollRef, cancelProgrammaticScroll]);
+
+    // Handle user gestures (wheel, touch, pointer, keys) to immediately cancel programmatic scroll lock
+    useEffect(() => {
+        const container = scrollRef.current;
+        if (!container) return;
+
+        const handleUserGesture = () => {
+            cancelProgrammaticScroll();
+            requestAnimationFrame(() => {
+                if (!isNearBottom()) {
+                    userScrolledRef.current = true;
+                    setAutoScroll(false);
+                }
+            });
+        };
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) {
+                cancelProgrammaticScroll();
+                requestAnimationFrame(() => {
+                    if (!isNearBottom()) {
+                        userScrolledRef.current = true;
+                        setAutoScroll(false);
+                    }
+                });
+            }
+        };
+
+        container.addEventListener('wheel', handleUserGesture, { passive: true });
+        container.addEventListener('touchmove', handleUserGesture, { passive: true });
+        container.addEventListener('pointerdown', handleUserGesture, { passive: true });
+        container.addEventListener('keydown', handleKeyDown, { passive: true });
+
+        return () => {
+            container.removeEventListener('wheel', handleUserGesture);
+            container.removeEventListener('touchmove', handleUserGesture);
+            container.removeEventListener('pointerdown', handleUserGesture);
+            container.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [scrollRef, cancelProgrammaticScroll, isNearBottom]);
 
     // Handle scroll events to detect manual scrolling
     useEffect(() => {
@@ -115,7 +166,7 @@ export function useAutoScroll({
                     userScrolledRef.current = true;
                     setAutoScroll(false);
                 }
-            }, 100);
+            }, 60);
         };
 
         container.addEventListener("scroll", handleScroll, { passive: true });
@@ -146,6 +197,7 @@ export function useAutoScroll({
         // current geometry here would falsely classify an untouched view as scrolled up.
         // `autoScrollRef` is updated only from deliberate user scrolling.
         if (hasNewSegments && autoScrollRef.current && isRecording && !isPaused && segmentCount > 0) {
+            cancelProgrammaticScroll();
             isProgrammaticScrollRef.current = true;
 
             if (useVirtualization && virtualizer) {
@@ -154,21 +206,22 @@ export function useAutoScroll({
                 virtualizer.scrollToOffset(totalSize + 1000, { align: "end" });
 
                 // Also set scrollTop directly as backup after virtualizer updates
-                setTimeout(() => {
+                programmaticScrollTimeoutRef.current = setTimeout(() => {
                     if (scrollRef.current) {
                         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
                     }
+                    isProgrammaticScrollRef.current = false;
+                    programmaticScrollTimeoutRef.current = null;
                 }, 50);
             } else if (scrollRef.current) {
                 scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                programmaticScrollTimeoutRef.current = setTimeout(() => {
+                    isProgrammaticScrollRef.current = false;
+                    programmaticScrollTimeoutRef.current = null;
+                }, 50);
             }
-
-            // Reset the flag after a longer delay for virtualization
-            setTimeout(() => {
-                isProgrammaticScrollRef.current = false;
-            }, 150);
         }
-    }, [segments.length, isRecording, isPaused, useVirtualization, virtualizer, scrollRef, isNearBottom, disableAutoScroll]);
+    }, [segments.length, isRecording, isPaused, useVirtualization, virtualizer, scrollRef, cancelProgrammaticScroll, disableAutoScroll]);
 
     // Auto-scroll to active segment (when clicking on search results, etc.)
     useEffect(() => {
@@ -193,6 +246,11 @@ export function useAutoScroll({
             }, 500);
         }
     }, [activeSegmentId, useVirtualization, virtualizer, segments]);
+
+    // Clean up any pending programmatic scroll on unmount
+    useEffect(() => {
+        return () => cancelProgrammaticScroll();
+    }, [cancelProgrammaticScroll]);
 
     return {
         autoScroll,

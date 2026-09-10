@@ -36,7 +36,7 @@ export default function TranscriptDrawer({
   const { transcripts, currentMeetingId, livePreview, copyTranscript, captionsVisible, setCaptionsVisible, previewSettled } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
-  const liveTranslation = useLiveTranslation(transcripts);
+  const liveTranslation = useLiveTranslation(transcripts, captionsVisible ? livePreview : null);
   const [visible, setVisible] = useState(true);
   const [width, setWidth] = useState(DEFAULT_DRAWER_WIDTH);
   const [storageReady, setStorageReady] = useState(false);
@@ -58,11 +58,10 @@ export default function TranscriptDrawer({
     if (!storageReady) return;
     try {
       window.localStorage.setItem(DRAWER_VISIBLE_KEY, String(visible));
-      window.localStorage.setItem(DRAWER_WIDTH_KEY, String(width));
     } catch (error) {
-      console.warn('[TranscriptDrawer] Unable to persist drawer preferences:', error);
+      console.warn('[TranscriptDrawer] Unable to persist drawer visibility:', error);
     }
-  }, [storageReady, visible, width]);
+  }, [storageReady, visible]);
 
   useEffect(() => {
     const toggleFromCommandPalette = () => setVisible((current) => !current);
@@ -97,16 +96,35 @@ export default function TranscriptDrawer({
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
+    let rafId: number | null = null;
+    let latestWidth = startWidth;
+
     const handleMove = (moveEvent: PointerEvent) => {
-      setWidth(clampWidth(startWidth + startX - moveEvent.clientX));
+      latestWidth = clampWidth(startWidth + startX - moveEvent.clientX);
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          setWidth(latestWidth);
+          rafId = null;
+        });
+      }
     };
 
     const stop = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('pointercancel', stop);
+
+      try {
+        window.localStorage.setItem(DRAWER_WIDTH_KEY, String(latestWidth));
+      } catch (error) {
+        console.warn('[TranscriptDrawer] Unable to persist drawer width:', error);
+      }
     };
 
     window.addEventListener('pointermove', handleMove);
@@ -205,7 +223,7 @@ export default function TranscriptDrawer({
             isProcessing={isProcessingStop}
             isStopping={isStopping}
             enableStreaming={false}
-            showConfidence={true}
+            showConfidence={false}
             translationEnabled={liveTranslation.settings.enabled}
             translationDisplayMode={liveTranslation.settings.displayMode}
             translationTargetLanguage={liveTranslation.settings.targetLanguage}

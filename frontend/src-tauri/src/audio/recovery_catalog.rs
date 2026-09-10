@@ -32,10 +32,34 @@ fn valid_folder(folder: &Path, roots: &[PathBuf]) -> Result<PathBuf> {
     Ok(folder)
 }
 fn read_turns(folder: &Path) -> Result<Vec<Value>> {
+    let mut turns = Vec::new();
     let path = folder.join("transcripts.json");
-    if !path.exists() { return Ok(Vec::new()); }
-    let data = json(&path, 64 * 1024 * 1024)?;
-    Ok(data.get("segments").and_then(Value::as_array).cloned().unwrap_or_default())
+    if path.exists() {
+        if let Ok(data) = json(&path, 64 * 1024 * 1024) {
+            if let Some(segments) = data.get("segments").and_then(Value::as_array) {
+                turns = segments.clone();
+            }
+        }
+    }
+    // Check if append-only journal contains any additional turns from an interrupted session
+    let journal_path = folder.join("transcripts.jsonl");
+    if journal_path.is_file() {
+        if let Ok(content) = std::fs::read_to_string(&journal_path) {
+            let mut seen_ids: HashSet<String> = turns.iter()
+                .filter_map(|s| s.get("sequence_id").and_then(|id| id.as_u64().map(|n| n.to_string())))
+                .collect();
+            for line in content.lines() {
+                if let Ok(seg) = serde_json::from_str::<Value>(line) {
+                    let seq_id = seg.get("sequence_id").and_then(|id| id.as_u64().map(|n| n.to_string())).unwrap_or_default();
+                    if !seq_id.is_empty() && !seen_ids.contains(&seq_id) {
+                        seen_ids.insert(seq_id);
+                        turns.push(seg);
+                    }
+                }
+            }
+        }
+    }
+    Ok(turns)
 }
 fn publish_metadata(folder: &Path, metadata: &Value) -> Result<()> {
     let mut temp = tempfile::NamedTempFile::new_in(folder)?;

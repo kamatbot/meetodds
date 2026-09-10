@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { Plus, LoaderCircle, NotebookPen } from 'lucide-react';
 import { VirtualizedTranscriptView, type VirtualizedTranscriptViewProps } from '@/components/VirtualizedTranscriptView';
@@ -58,7 +58,7 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
     return set;
   }, [notesContent]);
 
-  const open = async (segment: TranscriptSegmentData) => {
+  const open = useCallback(async (segment: TranscriptSegmentData) => {
     if (!meetingId || pending.current) return;
     const original = originals.get(segment.id);
     if (liveNotes && !original) return;
@@ -87,9 +87,9 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
       pending.current = false;
       setOpening(null);
     }
-  };
+  }, [meetingId, originals, liveNotes, notedTimestamps]);
 
-  const renderAction = (segment: TranscriptSegmentData) => {
+  const renderAction = useCallback((segment: TranscriptSegmentData) => {
     if (!meetingId || (liveNotes && !originals.has(segment.id))) return null;
     const rawTime = realTime(originals.get(segment.id)?.audio_start_time ?? segment.timestamp);
     const label = formatTimestampLabel(rawTime);
@@ -120,7 +120,7 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
         )}
       </button>
     );
-  };
+  }, [meetingId, liveNotes, originals, notedTimestamps, opening, open]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

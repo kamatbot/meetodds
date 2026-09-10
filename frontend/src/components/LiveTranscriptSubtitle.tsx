@@ -66,7 +66,7 @@ export function LiveTranscriptSubtitle({
         ) : (
           <>
             {showOriginal && (
-              <p className={`line-clamp-2 text-lg font-medium leading-snug md:text-xl ${settled ? 'text-white/60' : ''}`}>
+              <p className={`line-clamp-3 text-base font-medium leading-relaxed md:text-lg ${settled ? 'text-white/60' : ''}`}>
                 {preview.text}
                 {!settled && <span className="ml-0.5 animate-pulse text-white/45">▍</span>}
               </p>
@@ -76,7 +76,7 @@ export function LiveTranscriptSubtitle({
               <p
                 lang={translationTargetLanguage}
                 dir="auto"
-                className={`${showOriginal ? 'mt-2 border-t border-white/10 pt-2' : ''} line-clamp-2 text-lg font-semibold leading-snug md:text-xl`}
+                className={`${showOriginal ? 'mt-2 border-t border-white/10 pt-2' : ''} line-clamp-3 text-base font-semibold leading-relaxed md:text-lg`}
               >
                 {translated}
                 {translation?.status === 'translating' && (
@@ -85,8 +85,11 @@ export function LiveTranscriptSubtitle({
               </p>
             )}
 
-            {translationEnabled && !translated && (
-              <div className="mt-1 text-xs text-white/40">Translating live caption…</div>
+            {translationEnabled && !translated && translation?.status === 'translating' && (
+              <div className="mt-1 flex items-center gap-1.5 text-xs text-white/50">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                Translating…
+              </div>
             )}
           </>
         )}

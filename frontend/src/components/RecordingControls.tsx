@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import RecorderBar from '@/components/Meeting/RecorderBar';
 import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
-import { useTranscripts } from '@/contexts/TranscriptContext';
+import { useTranscriptSession } from '@/contexts/TranscriptContext';
 import { openManualNotesWindow } from '@/services/manualNotesService';
 
 interface RecordingControlsProps {
@@ -53,7 +53,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   // remain synchronized.
   const recordingState = useRecordingState();
   const isPaused = recordingState.isPaused;
-  const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscripts();
+  const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscriptSession();
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);

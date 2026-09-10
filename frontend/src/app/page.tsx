@@ -10,7 +10,7 @@ import StopProgressStrip from '@/components/Meeting/StopProgressStrip';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
-import { useTranscripts } from '@/contexts/TranscriptContext';
+import { useTranscriptSession } from '@/contexts/TranscriptContext';
 import { openManualNotesWindow } from '@/services/manualNotesService';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
@@ -34,7 +34,7 @@ export default function Home() {
 
   const { transcriptModelConfig } = useConfig();
   const { openImportDialog } = useImportDialog();
-  const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscripts();
+  const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscriptSession();
   const recordingState = useRecordingState();
   const { status, isStopping, isProcessing } = recordingState;
   // A native `recording-started` event can arrive before its frontend listener is
