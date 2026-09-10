@@ -82,12 +82,26 @@ pub struct CodexModel {
     pub id: String,
 }
 
+fn resolve_auth_file_path(base_dir: &Path) -> PathBuf {
+    let direct = base_dir.join(AUTH_FILE_NAME);
+    if direct.exists() {
+        return direct;
+    }
+    if let Some(parent) = base_dir.parent() {
+        let legacy = parent.join("com.meetily.ai").join(AUTH_FILE_NAME);
+        if legacy.exists() {
+            return legacy;
+        }
+    }
+    direct
+}
+
 fn auth_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Unable to resolve MeetOdds app data directory: {e}"))?;
-    Ok(dir.join(AUTH_FILE_NAME))
+    Ok(resolve_auth_file_path(&dir))
 }
 
 fn read_auth(path: &Path) -> Result<Option<CodexAuthState>, String> {
@@ -476,7 +490,7 @@ async fn load_valid_auth_from_dir(
     client: &Client,
 ) -> Result<CodexAuthState, String> {
     let _guard = AUTH_LOCK.lock().await;
-    let path = app_data_dir.join(AUTH_FILE_NAME);
+    let path = resolve_auth_file_path(app_data_dir);
     let auth = read_auth(&path)?.ok_or_else(|| {
         "OpenAI Codex is not connected. Sign in with your ChatGPT subscription in MeetOdds settings."
             .to_string()
@@ -493,7 +507,7 @@ async fn force_refresh_from_dir(
     client: &Client,
 ) -> Result<CodexAuthState, String> {
     let _guard = AUTH_LOCK.lock().await;
-    let path = app_data_dir.join(AUTH_FILE_NAME);
+    let path = resolve_auth_file_path(app_data_dir);
     let auth = read_auth(&path)?.ok_or_else(|| {
         "OpenAI Codex is not connected. Sign in again in MeetOdds settings.".to_string()
     })?;

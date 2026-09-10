@@ -545,6 +545,13 @@ fn uses_local_translation_worker(provider: &LLMProvider) -> bool {
     matches!(provider, LLMProvider::Ollama | LLMProvider::BuiltInAI)
 }
 
+fn uses_extended_translation_budget(provider: &LLMProvider) -> bool {
+    matches!(
+        provider,
+        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::OpenAICodex
+    )
+}
+
 fn cache_key(
     provider: &str,
     model: &str,
@@ -690,6 +697,40 @@ async fn resolve_fast_cloud_candidate(
     }))
 }
 
+async fn resolve_openai_subscription_candidate(
+    pool: &SqlitePool,
+    model_override: Option<&str>,
+) -> Result<TranslationProviderConfig, String> {
+    let summary_setting = SettingsRepository::get_model_config(pool).await.ok().flatten();
+    let model = model_override
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            summary_setting
+                .as_ref()
+                .filter(|s| {
+                    let p = s.provider.to_ascii_lowercase();
+                    p == "openai-codex" || p == "chatgpt" || p == "codex" || p == "openai"
+                })
+                .map(|s| s.model.trim().to_string())
+                .filter(|m| !m.is_empty())
+        })
+        .unwrap_or_else(|| "gpt-5.6-sol".to_string());
+
+    Ok(TranslationProviderConfig {
+        provider: LLMProvider::OpenAICodex,
+        provider_name: "openai-codex".to_string(),
+        model_name: model,
+        api_key: String::new(),
+        ollama_endpoint: None,
+        custom_openai_endpoint: None,
+        max_tokens: None,
+        temperature: None,
+        top_p: None,
+    })
+}
+
 fn push_unique_candidate(
     candidates: &mut Vec<TranslationProviderConfig>,
     candidate: TranslationProviderConfig,
@@ -770,9 +811,16 @@ async fn resolve_provider_candidates(
     let mut last_summary_err = None;
 
     if engine == "auto" {
-        for provider in ["groq", "openai", "claude"] {
+        for provider in ["groq", "claude"] {
             if let Some(candidate) = resolve_fast_cloud_candidate(pool, provider, None).await? {
                 push_unique_candidate(&mut candidates, candidate);
+            }
+        }
+        if let Ok(codex_candidate) = resolve_openai_subscription_candidate(pool, None).await {
+            if validate_candidate_readiness(&codex_candidate, app_data_dir).is_ok() {
+                push_unique_candidate(&mut candidates, codex_candidate);
+            } else if let Ok(Some(cloud_candidate)) = resolve_fast_cloud_candidate(pool, "openai", None).await {
+                push_unique_candidate(&mut candidates, cloud_candidate);
             }
         }
         match resolve_provider_config(pool).await {
@@ -847,7 +895,24 @@ async fn resolve_provider_candidates(
             top_p: None,
         };
         push_unique_candidate(&mut candidates, candidate);
-    } else if ["groq", "openai", "claude"].contains(&engine.as_str()) {
+    } else if ["openai", "openai-codex", "chatgpt"].contains(&engine.as_str()) {
+        let codex_candidate = resolve_openai_subscription_candidate(pool, model_override).await?;
+        if validate_candidate_readiness(&codex_candidate, app_data_dir).is_ok() {
+            push_unique_candidate(&mut candidates, codex_candidate);
+        } else if let Ok(Some(cloud_candidate)) =
+            resolve_fast_cloud_candidate(pool, "openai", model_override).await
+        {
+            push_unique_candidate(&mut candidates, cloud_candidate);
+        } else {
+            // Neither OAuth subscription nor API key is available; validate readiness to return clear prompt to sign in
+            validate_candidate_readiness(&codex_candidate, app_data_dir)?;
+        }
+        if let Ok(current) = resolve_provider_config(pool).await {
+            if validate_candidate_readiness(&current, app_data_dir).is_ok() {
+                push_unique_candidate(&mut candidates, current);
+            }
+        }
+    } else if ["groq", "claude"].contains(&engine.as_str()) {
         let requested = resolve_fast_cloud_candidate(pool, &engine, model_override)
             .await?
             .ok_or_else(|| {
@@ -1339,7 +1404,7 @@ pub async fn api_translate_live_text<R: Runtime>(
 
     for (index, config) in candidates.iter().enumerate() {
         let effective_config_budgets =
-            effective_budgets(budgets, uses_local_translation_worker(&config.provider));
+            effective_budgets(budgets, uses_extended_translation_budget(&config.provider));
         if total_started.elapsed() >= effective_config_budgets.total {
             last_error = Some(format!(
                 "live translation exceeded total {}ms latency budget",
@@ -1535,6 +1600,15 @@ mod tests {
         assert!(uses_local_translation_worker(&LLMProvider::BuiltInAI));
         assert!(!uses_local_translation_worker(&LLMProvider::OpenAICodex));
         assert!(!uses_local_translation_worker(&LLMProvider::OpenAI));
+    }
+
+    #[test]
+    fn local_and_codex_providers_receive_extended_budget() {
+        assert!(uses_extended_translation_budget(&LLMProvider::OpenAICodex));
+        assert!(uses_extended_translation_budget(&LLMProvider::BuiltInAI));
+        assert!(uses_extended_translation_budget(&LLMProvider::Ollama));
+        assert!(!uses_extended_translation_budget(&LLMProvider::Groq));
+        assert!(!uses_extended_translation_budget(&LLMProvider::Claude));
     }
 
     #[test]

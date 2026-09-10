@@ -94,7 +94,7 @@ export function LiveTranslationControl({
                   <SelectItem value="builtin-ai">Local AI · On-device GGUF</SelectItem>
                   <SelectItem value="ollama">Ollama · Local server</SelectItem>
                   <SelectItem value="groq">Groq · instant</SelectItem>
-                  <SelectItem value="openai">OpenAI · fast</SelectItem>
+                  <SelectItem value="openai">OpenAI · ChatGPT subscription</SelectItem>
                   <SelectItem value="claude">Claude · Haiku</SelectItem>
                   <SelectItem value="summary">Summary provider</SelectItem>
                 </SelectContent>

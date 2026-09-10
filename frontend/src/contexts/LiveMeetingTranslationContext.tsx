@@ -33,7 +33,7 @@ export function LiveMeetingTranslationProvider({ children }: { children: ReactNo
   useEffect(() => {
     if (
       translation.settings.enabled
-      && translation.lastProvider === 'openai-codex'
+      && (translation.lastProvider === 'openai-codex' || translation.settings.engine === 'openai' || translation.settings.engine === 'openai-codex')
       && translation.settings.speed !== 'accurate'
     ) {
       translation.updateSettings({ speed: 'accurate' });
@@ -41,6 +41,7 @@ export function LiveMeetingTranslationProvider({ children }: { children: ReactNo
   }, [
     translation.lastProvider,
     translation.settings.enabled,
+    translation.settings.engine,
     translation.settings.speed,
     translation.updateSettings,
   ]);

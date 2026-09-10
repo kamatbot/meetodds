@@ -1,7 +1,7 @@
 export type TranslationDisplayMode = 'bilingual' | 'translated';
 export type LiveTranslationStatus = 'queued' | 'translating' | 'translated' | 'error';
 export type LiveTranslationSpeed = 'instant' | 'balanced' | 'accurate';
-export type LiveTranslationEngine = 'auto' | 'builtin-ai' | 'ollama' | 'summary' | 'groq' | 'openai' | 'claude';
+export type LiveTranslationEngine = 'auto' | 'builtin-ai' | 'ollama' | 'summary' | 'groq' | 'openai' | 'openai-codex' | 'claude';
 
 export interface LiveTranslationLanguage {
   code: string;
@@ -117,7 +117,7 @@ export function loadLiveTranslationSettings(): LiveTranslationSettings {
     const speed: LiveTranslationSpeed = ['instant', 'balanced', 'accurate'].includes(parsed.speed ?? '')
       ? parsed.speed as LiveTranslationSpeed
       : 'instant';
-    const engine: LiveTranslationEngine = ['auto', 'builtin-ai', 'ollama', 'summary', 'groq', 'openai', 'claude'].includes(parsed.engine ?? '')
+    const engine: LiveTranslationEngine = ['auto', 'builtin-ai', 'ollama', 'summary', 'groq', 'openai', 'openai-codex', 'claude'].includes(parsed.engine ?? '')
       ? parsed.engine as LiveTranslationEngine
       : 'auto';
     const contextTurns: 0 | 2 | 4 = parsed.contextTurns === 0 || parsed.contextTurns === 4 ? parsed.contextTurns : 2;
