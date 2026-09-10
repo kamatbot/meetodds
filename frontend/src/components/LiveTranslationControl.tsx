@@ -44,7 +44,7 @@ export function LiveTranslationControl({
 }: LiveTranslationControlProps) {
   const target = getLiveTranslationLanguage(settings.targetLanguage);
   const isWorking = activeCount > 0 || queuedCount > 0;
-  const slowerCompatibilityPath = ['openai-codex', 'ollama', 'builtin-ai'].includes(lastProvider ?? '');
+  const subscriptionOrLocalPath = ['openai-codex', 'ollama', 'builtin-ai'].includes(lastProvider ?? '');
 
   return (
     <Popover>
@@ -64,9 +64,9 @@ export function LiveTranslationControl({
         <div className="space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h4 className="font-semibold">Live translation · V2</h4>
+              <h4 className="font-semibold">Live translation</h4>
               <p className="mt-1 text-xs text-muted-foreground">
-                Streams translated words immediately and fails over when a provider misses its first-word latency budget.
+                Shows the selected language in floating captions as words arrive. If a provider is slow, the last good translation stays visible while MeetOdds recovers.
               </p>
             </div>
             <Switch checked={settings.enabled} onCheckedChange={(enabled) => updateSettings({ enabled })} />
@@ -89,7 +89,7 @@ export function LiveTranslationControl({
               <Select value={settings.engine} onValueChange={(engine: 'auto' | 'summary' | 'groq' | 'openai' | 'claude') => updateSettings({ engine })} disabled={!settings.enabled}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto">Auto · fastest configured</SelectItem>
+                  <SelectItem value="auto">Auto · best available</SelectItem>
                   <SelectItem value="groq">Groq · instant</SelectItem>
                   <SelectItem value="openai">OpenAI · fast</SelectItem>
                   <SelectItem value="claude">Claude · Haiku</SelectItem>
@@ -126,7 +126,7 @@ export function LiveTranslationControl({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Display</Label>
+              <Label>Transcript display</Label>
               <Select value={settings.displayMode} onValueChange={(displayMode: 'bilingual' | 'translated') => updateSettings({ displayMode })} disabled={!settings.enabled}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -150,7 +150,7 @@ export function LiveTranslationControl({
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Model override</Label>
-                <Input value={settings.modelOverride} onChange={(event) => updateSettings({ modelOverride: event.target.value })} placeholder="Leave blank for translation-optimized default" disabled={!settings.enabled || settings.engine === 'auto'} />
+                <Input value={settings.modelOverride} onChange={(event) => updateSettings({ modelOverride: event.target.value })} placeholder="Leave blank for provider default" disabled={!settings.enabled || settings.engine === 'auto'} />
               </div>
             </div>
           </details>
@@ -167,15 +167,15 @@ export function LiveTranslationControl({
                 </div>
               </div>
               {lastProvider && <p className="mt-1 truncate text-muted-foreground">{lastProvider}{lastModel ? ` / ${lastModel}` : ''}</p>}
-              {lastFallbackReason && <p className="mt-2 line-clamp-2 text-amber-700">Fallback: {lastFallbackReason}</p>}
-              {slowerCompatibilityPath && <p className="mt-2 text-amber-700">This is a compatibility path. Auto with Groq/OpenAI/Claude is usually faster for live captions.</p>}
+              {lastFallbackReason && <p className="mt-2 line-clamp-2 text-amber-700">Trying another provider: {lastFallbackReason}</p>}
+              {subscriptionOrLocalPath && <p className="mt-2 text-muted-foreground">Connected ChatGPT and local models can take a little longer to start than dedicated translation APIs. MeetOdds keeps the last translated phrase visible while they catch up.</p>}
               {lastError && <p className="mt-2 line-clamp-3 text-destructive">{lastError}</p>}
             </div>
           )}
 
           <div className="flex items-center justify-between gap-3 border-t pt-3">
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Auto uses a dedicated fast translation model instead of the larger meeting-summary model. Cloud providers receive only transcript text and the small context window above.
+              Auto tries configured fast translation APIs first, then your current summary provider—including connected ChatGPT or a local model. Floating captions always show only the selected target language; the saved original transcript is unchanged.
             </p>
             <Button type="button" variant="ghost" size="icon" onClick={clearTranslations} disabled={translatedCount === 0 && !isWorking} title="Clear live translations">
               <Trash2 className="h-4 w-4" />
