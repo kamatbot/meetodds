@@ -79,18 +79,20 @@ export default function LiveTranslationSettingsSection() {
 
       <SettingRow
         label="Translation engine"
-        description="Auto reuses the best configured provider and can fall back without blocking transcription."
+        description="Choose local on-device AI, Ollama, cloud API, or auto-detection."
         control={(
           <select
             value={settings.engine}
             onChange={(event) => update({ engine: event.target.value as LiveTranslationEngine })}
             className={selectClass}
           >
-            <option value="auto">Auto</option>
+            <option value="auto">Auto · best available</option>
+            <option value="builtin-ai">Local AI (On-device Built-in)</option>
+            <option value="ollama">Ollama (Local)</option>
             <option value="summary">Summary model</option>
-            <option value="groq">Groq</option>
-            <option value="openai">OpenAI</option>
-            <option value="claude">Claude</option>
+            <option value="groq">Groq (Fast Cloud)</option>
+            <option value="openai">OpenAI (Cloud)</option>
+            <option value="claude">Claude (Cloud)</option>
           </select>
         )}
       />

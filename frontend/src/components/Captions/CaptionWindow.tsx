@@ -176,18 +176,21 @@ export default function CaptionWindow() {
 
   const language = frame.translated ? getLiveTranslationLanguage(frame.language)?.name || frame.language : 'Original';
   const translationIssue = frame.translated && (frame.phase === 'error' || frame.phase === 'recovering');
+  const errorExplanation = frame.error
+    ? (frame.error.length > 96 ? `${frame.error.slice(0, 93)}…` : frame.error)
+    : `Translation unavailable to ${language} · Check Settings`;
   const message = connectionLost ? 'Waiting for MeetOdds…' : {
     listening: 'Listening to the conversation…',
     translating: `Translating to ${language}…`,
     paused: 'A moment of pause.',
     recovering: `Keeping the last ${language} caption while translation reconnects…`,
-    error: `Waiting for ${language} translation…`,
+    error: errorExplanation,
     live: 'Listening…',
   }[frame.phase];
   const text = !connectionLost && frame.enabled ? frame.text : '';
   const footerText = windowError
     || (translationIssue
-      ? 'Translation interrupted · original transcript is still recording safely'
+      ? (frame.error ? `${errorExplanation} · original transcript is recording safely` : 'Translation interrupted · original transcript is still recording safely')
       : frame.translated ? 'Translated captions · original transcript unchanged' : 'Live captions · on-device speech recognition');
 
   return (

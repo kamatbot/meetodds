@@ -21,7 +21,7 @@ export default function LiveCaptionBridge() {
   const { transcripts } = useTranscriptHistory();
   const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscriptSession();
   const { isRecording, isPaused } = useRecordingState();
-  const { settings, translations, previewTranslation, retryPreviewTranslation } = useLiveMeetingTranslation();
+  const { settings, translations, previewTranslation, retryPreviewTranslation, lastError } = useLiveMeetingTranslation();
   const [recentFinal, setRecentFinal] = useState(false);
   const final = transcripts[transcripts.length - 1];
   const finalTranslation = final ? translations[liveTranslationSegmentKey(final)] : undefined;
@@ -40,11 +40,16 @@ export default function LiveCaptionBridge() {
       revision: final.sequence_id || 0, audioStartTime: final.audio_start_time || 0,
       audioEndTime: final.audio_end_time || 0, latencyMs: 0,
     } : null);
-    return resolveCaptionContent({
-      preview: candidate, translation: livePreview ? previewTranslation : finalTranslation,
+    const activeTranslation = livePreview ? previewTranslation : finalTranslation;
+    const resolved = resolveCaptionContent({
+      preview: candidate, translation: activeTranslation,
       translationEnabled: settings.enabled, targetLanguage: settings.targetLanguage, isPaused,
     });
-  }, [livePreview, recentFinal, final, previewTranslation, finalTranslation, settings.enabled, settings.targetLanguage, isPaused]);
+    if (resolved.phase === 'error' && !resolved.error && lastError) {
+      return { ...resolved, error: lastError };
+    }
+    return resolved;
+  }, [livePreview, recentFinal, final, previewTranslation, finalTranslation, settings.enabled, settings.targetLanguage, isPaused, lastError]);
 
   const enabled = isRecording && captionsVisible;
   const latest = useRef({ ...content, enabled, sessionId: currentMeetingId || '' });

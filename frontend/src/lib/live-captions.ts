@@ -17,6 +17,7 @@ export interface CaptionContent {
   language: string;
   translated: boolean;
   phase: CaptionPhase;
+  error?: string;
 }
 /** Display-only IPC. Never place transcript history, audio, or provider credentials here. */
 export interface CaptionFrame extends CaptionContent {
@@ -53,9 +54,10 @@ export function resolveCaptionContent({
       ...base,
       text: entry.translatedText.trim(),
       phase: entry.status === 'error' ? 'recovering' : 'live',
+      error: entry.error,
     };
   }
-  if (entry?.status === 'error') return { ...base, text: '', phase: 'error' };
+  if (entry?.status === 'error') return { ...base, text: '', phase: 'error', error: entry.error };
   return { ...base, text: '', phase: 'translating' };
 }
 
@@ -113,6 +115,7 @@ export function isCaptionFrame(value: unknown): value is CaptionFrame {
     && typeof v.text === 'string' && v.text.length <= 10000
     && typeof v.speaker === 'string' && typeof v.language === 'string'
     && typeof v.translated === 'boolean'
+    && (v.error === undefined || typeof v.error === 'string')
     && ['listening', 'translating', 'live', 'paused', 'recovering', 'error'].includes(v.phase);
 }
 

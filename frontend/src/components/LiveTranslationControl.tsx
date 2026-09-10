@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import {
   getLiveTranslationLanguage,
   LIVE_TRANSLATION_LANGUAGES,
+  LiveTranslationEngine,
   LiveTranslationSettings,
 } from '@/lib/live-translation';
 
@@ -86,14 +87,16 @@ export function LiveTranslationControl({
             </div>
             <div className="space-y-2">
               <Label>Translation engine</Label>
-              <Select value={settings.engine} onValueChange={(engine: 'auto' | 'summary' | 'groq' | 'openai' | 'claude') => updateSettings({ engine })} disabled={!settings.enabled}>
+              <Select value={settings.engine} onValueChange={(engine: LiveTranslationEngine) => updateSettings({ engine })} disabled={!settings.enabled}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">Auto · best available</SelectItem>
+                  <SelectItem value="builtin-ai">Local AI · On-device GGUF</SelectItem>
+                  <SelectItem value="ollama">Ollama · Local server</SelectItem>
                   <SelectItem value="groq">Groq · instant</SelectItem>
                   <SelectItem value="openai">OpenAI · fast</SelectItem>
                   <SelectItem value="claude">Claude · Haiku</SelectItem>
-                  <SelectItem value="summary">Current summary provider</SelectItem>
+                  <SelectItem value="summary">Summary provider</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -8,6 +8,7 @@ use serde_json::Value;
 use sqlx::SqlitePool;
 use std::collections::{hash_map::DefaultHasher, HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -702,8 +703,61 @@ fn push_unique_candidate(
     candidates.push(candidate);
 }
 
+fn validate_candidate_readiness(
+    config: &TranslationProviderConfig,
+    app_data_dir: Option<&Path>,
+) -> Result<(), String> {
+    match &config.provider {
+        LLMProvider::BuiltInAI => {
+            if let Some(dir) = app_data_dir {
+                let dir_buf = dir.to_path_buf();
+                let path_result =
+                    crate::summary::summary_engine::models::get_model_path(&dir_buf, &config.model_name);
+                let exists = match path_result {
+                    Ok(ref p) => {
+                        p.exists()
+                            || dir.parent().map_or(false, |parent| {
+                                parent
+                                    .join("com.meetily.ai")
+                                    .join("models")
+                                    .join("summary")
+                                    .join(p.file_name().unwrap_or_default())
+                                    .exists()
+                            })
+                    }
+                    Err(_) => false,
+                };
+                if !exists {
+                    return Err(format!(
+                        "Built-in AI model '{}' is not downloaded. Download it in Settings → AI Models.",
+                        config.model_name
+                    ));
+                }
+            }
+            Ok(())
+        }
+        LLMProvider::OpenAICodex => {
+            if let Some(dir) = app_data_dir {
+                let auth_file = dir.join("openai-codex-auth.json");
+                let legacy_auth = dir.parent().map_or(false, |parent| {
+                    parent.join("com.meetily.ai").join("openai-codex-auth.json").exists()
+                });
+                if !auth_file.exists() && !legacy_auth {
+                    return Err(
+                        "ChatGPT / OpenAI Codex is not signed in. Sign in under Settings → Summary."
+                            .to_string(),
+                    );
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 async fn resolve_provider_candidates(
     pool: &SqlitePool,
+    app_data_dir: Option<&Path>,
     translation_engine: Option<&str>,
     model_override: Option<&str>,
 ) -> Result<Vec<TranslationProviderConfig>, String> {
@@ -713,6 +767,7 @@ async fn resolve_provider_candidates(
         .unwrap_or("auto")
         .to_ascii_lowercase();
     let mut candidates = Vec::new();
+    let mut last_summary_err = None;
 
     if engine == "auto" {
         for provider in ["groq", "openai", "claude"] {
@@ -720,8 +775,17 @@ async fn resolve_provider_candidates(
                 push_unique_candidate(&mut candidates, candidate);
             }
         }
-        if let Ok(current) = resolve_provider_config(pool).await {
-            push_unique_candidate(&mut candidates, current);
+        match resolve_provider_config(pool).await {
+            Ok(current) => {
+                if let Err(e) = validate_candidate_readiness(&current, app_data_dir) {
+                    last_summary_err = Some(e);
+                } else {
+                    push_unique_candidate(&mut candidates, current);
+                }
+            }
+            Err(e) => {
+                last_summary_err = Some(e);
+            }
         }
     } else if engine == "summary" {
         let mut current = resolve_provider_config(pool).await?;
@@ -731,7 +795,58 @@ async fn resolve_provider_candidates(
         {
             current.model_name = model.to_string();
         }
+        validate_candidate_readiness(&current, app_data_dir)?;
         push_unique_candidate(&mut candidates, current);
+    } else if engine == "builtin-ai" || engine == "local" {
+        let model = model_override
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                crate::summary::summary_engine::commands::recommend_summary_model(
+                    cfg!(target_os = "macos"),
+                    16,
+                )
+                .to_string()
+            });
+        let candidate = TranslationProviderConfig {
+            provider: LLMProvider::BuiltInAI,
+            provider_name: "builtin-ai".to_string(),
+            model_name: model,
+            api_key: String::new(),
+            ollama_endpoint: None,
+            custom_openai_endpoint: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        };
+        validate_candidate_readiness(&candidate, app_data_dir)?;
+        push_unique_candidate(&mut candidates, candidate);
+    } else if engine == "ollama" {
+        let setting = SettingsRepository::get_model_config(pool).await.ok().flatten();
+        let model = model_override
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                setting
+                    .as_ref()
+                    .map(|s| s.model.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or_else(|| "llama3.2".to_string());
+        let candidate = TranslationProviderConfig {
+            provider: LLMProvider::Ollama,
+            provider_name: "ollama".to_string(),
+            model_name: model,
+            api_key: String::new(),
+            ollama_endpoint: setting.and_then(|s| s.ollama_endpoint),
+            custom_openai_endpoint: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        };
+        push_unique_candidate(&mut candidates, candidate);
     } else if ["groq", "openai", "claude"].contains(&engine.as_str()) {
         let requested = resolve_fast_cloud_candidate(pool, &engine, model_override)
             .await?
@@ -740,14 +855,19 @@ async fn resolve_provider_candidates(
             })?;
         push_unique_candidate(&mut candidates, requested);
         if let Ok(current) = resolve_provider_config(pool).await {
-            push_unique_candidate(&mut candidates, current);
+            if validate_candidate_readiness(&current, app_data_dir).is_ok() {
+                push_unique_candidate(&mut candidates, current);
+            }
         }
     } else {
         return Err(format!("Unsupported live translation engine: {engine}"));
     }
 
     if candidates.is_empty() {
-        return Err("No live translation provider is configured. Add Groq/OpenAI/Claude credentials or configure a summary provider.".to_string());
+        if let Some(err) = last_summary_err {
+            return Err(format!("No live translation provider is ready: {err}"));
+        }
+        return Err("No live translation provider is configured. Add Groq/OpenAI/Claude credentials, sign in with ChatGPT, or download a local model in Settings.".to_string());
     }
     Ok(candidates)
 }
@@ -1052,7 +1172,8 @@ pub struct LiveTranslationPreparation {
 }
 
 #[tauri::command]
-pub async fn api_prepare_live_translation(
+pub async fn api_prepare_live_translation<R: Runtime>(
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     translation_engine: Option<String>,
     speed_mode: Option<String>,
@@ -1060,8 +1181,10 @@ pub async fn api_prepare_live_translation(
 ) -> Result<LiveTranslationPreparation, String> {
     clear_provider_health().await;
     let _ = translation_budgets(speed_mode.as_deref());
+    let app_data_dir = app.path().app_data_dir().ok();
     let candidates = resolve_provider_candidates(
         state.db_manager.pool(),
+        app_data_dir.as_deref(),
         translation_engine.as_deref(),
         model_override.as_deref(),
     )
@@ -1081,9 +1204,12 @@ pub async fn api_prepare_live_translation(
 }
 
 #[tauri::command]
-pub async fn api_warm_live_translation(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+pub async fn api_warm_live_translation<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
     let prepared =
-        api_prepare_live_translation(state, Some("summary".to_string()), None, None).await?;
+        api_prepare_live_translation(app, state, Some("summary".to_string()), None, None).await?;
     Ok(prepared.warmed)
 }
 
@@ -1129,32 +1255,61 @@ pub async fn api_translate_live_text<R: Runtime>(
         });
     }
 
-    if source.is_none() && text.chars().count() >= 12 {
+    if source.is_none() {
+        // If target is English and active STT engine is Parakeet, the text is already in English.
+        if target.code == "en" {
+            if let Ok(Some(transcript_setting)) =
+                SettingsRepository::get_transcript_config(state.db_manager.pool()).await
+            {
+                if transcript_setting.provider.eq_ignore_ascii_case("parakeet") {
+                    return Ok(LiveTranslationResponse {
+                        request_id,
+                        translated_text: text.to_string(),
+                        source_language: Some("en".to_string()),
+                        target_language: target.code.to_string(),
+                        provider: "passthrough".to_string(),
+                        model: "parakeet-english".to_string(),
+                        latency_ms: 0,
+                        first_word_latency_ms: 0,
+                        fallback_reason: None,
+                        cached: true,
+                    });
+                }
+            }
+        }
+
+        // Language detection check
         if let Some(info) = whatlang::detect(text) {
-            if info.is_reliable() && info.confidence() >= 0.75 {
-                if let Some(detected_app_code) = whatlang_to_app_language_code(info.lang()) {
-                    if is_detected_language_matching_target(detected_app_code, &target.code) {
-                        return Ok(LiveTranslationResponse {
-                            request_id,
-                            translated_text: text.to_string(),
-                            source_language: Some(detected_app_code.to_string()),
-                            target_language: target.code.to_string(),
-                            provider: "passthrough".to_string(),
-                            model: "none".to_string(),
-                            latency_ms: 0,
-                            first_word_latency_ms: 0,
-                            fallback_reason: None,
-                            cached: true,
-                        });
-                    }
+            if let Some(detected_app_code) = whatlang_to_app_language_code(info.lang()) {
+                let matches_target =
+                    is_detected_language_matching_target(detected_app_code, &target.code);
+                let high_confidence = info.is_reliable() && info.confidence() >= 0.70;
+                let english_match =
+                    target.code == "en" && detected_app_code == "en" && info.confidence() >= 0.50;
+
+                if matches_target && (high_confidence || english_match) {
+                    return Ok(LiveTranslationResponse {
+                        request_id,
+                        translated_text: text.to_string(),
+                        source_language: Some(detected_app_code.to_string()),
+                        target_language: target.code.to_string(),
+                        provider: "passthrough".to_string(),
+                        model: "none".to_string(),
+                        latency_ms: 0,
+                        first_word_latency_ms: 0,
+                        fallback_reason: None,
+                        cached: true,
+                    });
                 }
             }
         }
     }
 
+    let app_data_dir = app.path().app_data_dir().ok();
     let budgets = translation_budgets(speed_mode.as_deref());
     let mut candidates = resolve_provider_candidates(
         state.db_manager.pool(),
+        app_data_dir.as_deref(),
         translation_engine.as_deref(),
         model_override.as_deref(),
     )
