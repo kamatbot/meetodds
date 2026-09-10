@@ -8,6 +8,7 @@ import { Input } from './ui/input';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 import SettingRow from '@/components/Settings/SettingRow';
+import { DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL } from '@/constants/modelDefaults';
 
 export interface TranscriptModelProps {
   provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
@@ -58,6 +59,16 @@ export function TranscriptSettings({
     if (provider !== 'localWhisper' && provider !== 'parakeet') {
       void fetchApiKey(provider);
     }
+    const defaultModel = provider === 'localWhisper'
+      ? DEFAULT_WHISPER_MODEL
+      : provider === 'parakeet'
+        ? DEFAULT_PARAKEET_MODEL
+        : '';
+    setTranscriptModelConfig({
+      ...transcriptModelConfig,
+      provider,
+      model: defaultModel,
+    });
   };
 
   const handleWhisperModelSelect = (modelName: string) => {
@@ -84,15 +95,15 @@ export function TranscriptSettings({
     <div>
       <SettingRow
         label="Engine"
-        description="Parakeet is optimized for real-time on-device transcription; Whisper prioritizes broader model choice and accuracy."
+        description="Whisper prioritizes broader model choice and accuracy; Parakeet is optimized for real-time on-device transcription."
         control={(
           <select
             value={uiProvider}
             onChange={(event) => handleProviderChange(event.target.value as TranscriptModelProps['provider'])}
             className={selectClass}
           >
-            <option value="parakeet">Parakeet · recommended</option>
-            <option value="localWhisper">Whisper · on-device</option>
+            <option value="localWhisper">Whisper · recommended (on-device)</option>
+            <option value="parakeet">Parakeet · fast (on-device)</option>
           </select>
         )}
       />

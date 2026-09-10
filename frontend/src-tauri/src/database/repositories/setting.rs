@@ -195,12 +195,12 @@ impl SettingsRepository {
         let query = format!(
             r#"
             INSERT INTO transcript_settings (id, provider, model, "{}")
-            VALUES ('1', 'parakeet', '{}', $1)
+            VALUES ('1', 'localWhisper', '{}', $1)
             ON CONFLICT(id) DO UPDATE SET
                 "{}" = $1
             "#,
             api_key_column,
-            crate::config::DEFAULT_PARAKEET_MODEL,
+            crate::config::DEFAULT_WHISPER_MODEL,
             api_key_column
         );
         sqlx::query(&query).bind(api_key).execute(pool).await?;

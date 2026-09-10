@@ -375,16 +375,21 @@ export function ModelManager({
 
   const getDisplayName = (modelName: string): string => {
     const modelNameMapping: { [key: string]: string } = {
+      "small-q5_1": "Small (Q5)",
       "small": "Small",
-      "medium-q5_0": "Medium",
-      "large-v3-q5_0": "Large V3 Compressed",
+      "medium-q5_0": "Medium (Q5)",
       "large-v3-turbo": "Large V3 Turbo",
-      "large-v3": "Large V3"
+      "large-v3-q5_0": "Large V3 Compressed",
+      "large-v3": "Large V3",
+      "base-q5_1": "Base (Q5)",
+      "base": "Base",
+      "tiny-q5_1": "Tiny (Q5)",
+      "tiny": "Tiny",
+      "medium": "Medium (f16)"
     };
 
-    const basicModelNames = ["small", "medium-q5_0", "large-v3-q5_0", "large-v3-turbo", "large-v3"];
-    if (basicModelNames.includes(modelName)) {
-      return modelNameMapping[modelName] || modelName;
+    if (modelNameMapping[modelName]) {
+      return modelNameMapping[modelName];
     }
     return `Whisper ${modelName}`;
   };
@@ -410,7 +415,14 @@ export function ModelManager({
     );
   }
 
-  const basicModelNames = ["small", "medium-q5_0", "large-v3-q5_0", "large-v3-turbo", "large-v3"];
+  const basicModelNames = [
+    "small-q5_1",
+    "small",
+    "medium-q5_0",
+    "large-v3-turbo",
+    "large-v3-q5_0",
+    "large-v3"
+  ];
   const basicModels = models.filter(m => basicModelNames.includes(m.name))
     .sort((a, b) => basicModelNames.indexOf(a.name) - basicModelNames.indexOf(b.name));
   const advancedModels = models.filter(m => !basicModelNames.includes(m.name));
@@ -420,7 +432,7 @@ export function ModelManager({
       {/* Basic Models */}
       <div className="space-y-3">
         {basicModels.map((model) => {
-          const isRecommended = model.name === 'base';
+          const isRecommended = model.name === 'small-q5_1';
           return (
             <ModelCard
               key={model.name}
