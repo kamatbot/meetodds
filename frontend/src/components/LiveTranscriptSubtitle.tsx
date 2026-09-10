@@ -1,13 +1,16 @@
 'use client';
 
 import { X } from 'lucide-react';
-import { LiveTranscriptPreview } from '@/types';
-import { LiveTranslationEntry, TranslationDisplayMode } from '@/lib/live-translation';
+import type { LiveTranscriptPreview } from '@/types';
+import type { LiveTranslationEntry, TranslationDisplayMode } from '@/lib/live-translation';
+import { getLiveTranslationLanguage } from '@/lib/live-translation';
+import { resolveCaptionContent } from '@/lib/live-captions';
 
 interface LiveTranscriptSubtitleProps {
   preview: LiveTranscriptPreview | null;
   translation?: LiveTranslationEntry;
   translationEnabled: boolean;
+  /** Document preference only. Captions show the target language whenever translation is enabled. */
   translationDisplayMode: TranslationDisplayMode;
   translationTargetLanguage?: string;
   isPaused?: boolean;
@@ -15,85 +18,22 @@ interface LiveTranscriptSubtitleProps {
   onDismiss: () => void;
 }
 
-export function LiveTranscriptSubtitle({
-  preview,
-  translation,
-  translationEnabled,
-  translationDisplayMode,
-  translationTargetLanguage,
-  isPaused = false,
-  settled = false,
-  onDismiss,
-}: LiveTranscriptSubtitleProps) {
-  const translated = translation?.translatedText?.trim();
-  const showOriginal = !translationEnabled
-    || translationDisplayMode === 'bilingual'
-    || !translated;
-
+/** Retained for secondary/legacy transcript surfaces. The live workspace uses the native caption window. */
+export function LiveTranscriptSubtitle(props: LiveTranscriptSubtitleProps) {
+  const caption = resolveCaptionContent({ ...props, targetLanguage: props.translationTargetLanguage });
+  const language = getLiveTranslationLanguage(caption.language)?.name || caption.language;
+  const placeholder = caption.phase === 'paused' ? 'Paused'
+    : caption.phase === 'error' ? 'Translation unavailable. Check translation settings.'
+    : caption.phase === 'translating' ? `Translating to ${language}…` : 'Listening…';
   return (
-    <div className="pointer-events-none sticky bottom-4 z-30 flex justify-center px-4 pb-4">
-      <div
-        className="pointer-events-auto w-fit max-w-[860px] rounded-2xl border border-white/10 bg-black/85 px-5 py-3 text-white shadow-2xl backdrop-blur-md"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-white/55">
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${isPaused ? 'bg-amber-400' : 'bg-red-400 animate-pulse'}`}
-          />
-          <span>{preview?.speakerLabel ?? 'Live'}</span>
-          <span>Live</span>
-          {preview && !settled && (
-            <span className="normal-case tracking-normal text-white/35">
-              {preview.latencyMs < 1000 ? `${preview.latencyMs} ms` : `${(preview.latencyMs / 1000).toFixed(1)} s`}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={onDismiss}
-            aria-label="Hide live captions"
-            className="ml-auto inline-grid h-6 w-6 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white"
-          >
-            <X className="h-3.5 w-3.5" strokeWidth={1.75} />
-          </button>
-        </div>
-
-        {isPaused ? (
-          <p className="text-lg font-medium leading-snug text-white/50 md:text-xl">Paused</p>
-        ) : !preview ? (
-          <p className="text-lg font-medium leading-snug text-white/50 md:text-xl">Listening…</p>
-        ) : (
-          <>
-            {showOriginal && (
-              <p className={`line-clamp-3 text-base font-medium leading-relaxed md:text-lg ${settled ? 'text-white/60' : ''}`}>
-                {preview.text}
-                {!settled && <span className="ml-0.5 animate-pulse text-white/45">▍</span>}
-              </p>
-            )}
-
-            {translationEnabled && translated && (
-              <p
-                lang={translationTargetLanguage}
-                dir="auto"
-                className={`${showOriginal ? 'mt-2 border-t border-white/10 pt-2' : ''} line-clamp-3 text-base font-semibold leading-relaxed md:text-lg`}
-              >
-                {translated}
-                {translation?.status === 'translating' && (
-                  <span className="ml-0.5 animate-pulse text-white/45">▍</span>
-                )}
-              </p>
-            )}
-
-            {translationEnabled && !translated && translation?.status === 'translating' && (
-              <div className="mt-1 flex items-center gap-1.5 text-xs text-white/50">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-                Translating…
-              </div>
-            )}
-          </>
-        )}
+    <section className="mx-4 mb-4 shrink-0 rounded-2xl border border-white/10 bg-slate-950/85 px-5 py-3 text-white" aria-label="Live captions">
+      <header className="mb-2 flex items-center justify-between gap-2 text-xs text-white/75">
+        <span>{caption.speaker} · {caption.translated ? language : 'Original'}</span>
+        <button type="button" onClick={props.onDismiss} aria-label="Hide live captions" className="rounded-md p-1 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"><X className="h-4 w-4" /></button>
+      </header>
+      <div className="max-h-40 overflow-y-auto">
+        <p lang={caption.text ? caption.language : 'en'} dir="auto" className="whitespace-pre-wrap break-words text-lg font-medium leading-relaxed">{caption.text || placeholder}</p>
       </div>
-    </div>
+    </section>
   );
 }
