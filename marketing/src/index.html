@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8faff">
+  <title>MeetOdds — Local meeting notes. Your choice of intelligence.</title>
+  <meta name="description" content="Be present in your meetings. MeetOdds records, transcribes, and summarizes locally on your Mac, with optional ChatGPT-account intelligence. Free and open source.">
+  <link rel="canonical" href="{{SITE_URL}}/">
+  <link rel="icon" href="{{FAVICON}}" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="MeetOdds">
+  <meta property="og:title" content="Turn conversations into progress.">
+  <meta property="og:description" content="Fully local meeting notes. Optional ChatGPT intelligence. Free and open source.">
+  <meta property="og:url" content="{{SITE_URL}}/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="MeetOdds — Turn conversations into progress.">
+  <meta name="twitter:description" content="Fully local meeting notes. Optional ChatGPT intelligence. Free and open source.">
+  <link rel="stylesheet" href="{{STYLES}}">
+  <script type="module" src="{{SCRIPT}}"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M4 10v4m4-8v12m4-15v18m4-14v10m4-7v4"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m10 3 2.5 6.5L19 12l-6.5 2.5L10 21l-2.5-6.5L1 12l6.5-2.5L10 3Zm9-2 1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3Z"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-4 0h8"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8m-8 4h6"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m7 6-6 6 6 6m10-12 6 6-6 6m-3-15-4 18"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="13" rx="2"/><path d="M4 16 1 21h22l-3-5M9 19h6"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 19a5 5 0 1 1 0-10 7 7 0 0 1 13-1 5.5 5.5 0 0 1-1 11H7Z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v11H3V6Zm0 0V4h7l2 3h9v2"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7M5 9v12h14V9m-10 12v-8h6v8"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 .9A11.1 11.1 0 0 0 8.5 22.5c.55.1.76-.24.76-.53v-2.06c-3.1.67-3.76-1.31-3.76-1.31-.5-1.28-1.24-1.63-1.24-1.63-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15.99 1.7 2.6 1.21 3.23.93.1-.72.39-1.21.7-1.49-2.48-.28-5.09-1.24-5.09-5.53 0-1.22.44-2.22 1.14-3-.12-.28-.5-1.42.11-2.96 0 0 .94-.3 3.06 1.14A10.7 10.7 0 0 1 12 6.15c.95 0 1.9.13 2.79.38 2.12-1.44 3.05-1.14 3.05-1.14.61 1.54.23 2.68.12 2.96.71.78 1.14 1.78 1.14 3 0 4.3-2.62 5.25-5.11 5.52.4.35.76 1.02.76 2.06v3.04c0 .29.2.64.77.53A11.1 11.1 0 0 0 12 .9Z"/></symbol>
+    <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M17.1 12.8c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-1.9-1.5-.2-2.9.9-3.6.9-.8 0-2-1-3.2-.9-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.2 10.2.8 1.2 1.8 2.5 3.1 2.4 1.2-.1 1.7-.8 3.2-.8 1.5 0 2 .8 3.3.8 1.4 0 2.2-1.2 3-2.4.9-1.4 1.4-2.8 1.5-2.9-.1 0-2.8-1.1-2.8-4.1Zm-2.4-7.3c.7-.9 1.2-2.1 1.1-3.3-1 .1-2.3.7-3.1 1.6-.7.7-1.3 1.9-1.2 3.1 1.2.1 2.4-.6 3.2-1.4Z"/></symbol>
+  </svg>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#" aria-label="MeetOdds home"><span class="brand-mark"><svg class="icon"><use href="#i-wave"/></svg></span>MeetOdds<span class="brand-dot">.</span></a>
+      <nav class="desktop-nav" aria-label="Main navigation">
+        <a href="#features">Features</a><a href="#intelligence">Your AI, your choice</a><a href="#open-source">Open source</a><a href="#faq">FAQ</a>
+      </nav>
+      <a class="button button-small header-cta" href="#download">Get MeetOdds<svg class="icon"><use href="#i-arrow"/></svg></a>
+      <details class="mobile-menu">
+        <summary aria-label="Navigation menu"><svg class="icon"><use href="#i-menu"/></svg></summary>
+        <nav aria-label="Mobile navigation"><a href="#features">Features</a><a href="#intelligence">Your AI, your choice</a><a href="#open-source">Open source</a><a href="#faq">FAQ</a><a href="#download">Get MeetOdds</a></nav>
+      </details>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-halo" aria-hidden="true"></div>
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="status-dot"></span> OPEN SOURCE. ON YOUR TERMS.</div>
+          <h1 id="hero-title">Turn conversations<br>into <span class="word-progress">progress.<svg viewBox="0 0 330 18" aria-hidden="true"><path d="M4 12Q153-3 326 9M22 16Q183 6 296 13"/></svg></span></h1>
+          <p class="hero-description">Be there for the conversation. MeetOdds takes care of the notes, with <strong>fully local AI</strong> or the added intelligence of <strong>your ChatGPT account.</strong></p>
+          <div class="hero-actions"><a class="button" href="#download"><svg class="icon"><use href="#i-apple"/></svg>Get MeetOdds for Mac</a><a class="button button-secondary" href="{{REPO_URL}}"><svg class="icon"><use href="#i-github"/></svg>View on GitHub</a></div>
+          <div class="hero-trust"><span><svg class="icon"><use href="#i-check"/></svg>Free &amp; open source</span><span><svg class="icon"><use href="#i-check"/></svg>No account for local mode</span></div>
+          <a class="hero-jump" href="#intelligence"><svg class="icon"><use href="#i-shield"/></svg>Local by default. Cloud only by choice.<svg class="icon"><use href="#i-arrow"/></svg></a>
+        </div>
+
+        <div class="hero-product">
+          <div class="preview-topline"><span class="preview-caption"><span class="small-dot"></span> A LITTLE LESS NOTE-TAKING. A LOT MORE PRESENCE.</span></div>
+          <div class="product-window" id="demo">
+            <div class="window-bar"><div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div><span>MeetOdds</span><span class="window-local"><svg class="icon"><use href="#i-shield"/></svg>On your Mac</span></div>
+            <div class="product-body">
+              <aside class="product-sidebar" aria-label="Illustrative app sidebar">
+                <span class="mini-brand"><span class="brand-mark"><svg class="icon"><use href="#i-wave"/></svg></span>MeetOdds</span>
+                <div class="sidebar-item"><svg class="icon"><use href="#i-home"/></svg>Overview</div>
+                <div class="sidebar-item selected"><svg class="icon"><use href="#i-folder"/></svg>My meetings</div>
+                <div class="sidebar-item"><svg class="icon"><use href="#i-doc"/></svg>Templates</div>
+                <span class="sidebar-label">RECENT MEETINGS</span>
+                <div class="recent-meeting active"><span>Product strategy</span><small>Today · 28 min</small></div>
+                <div class="recent-meeting"><span>Design catch-up</span><small>Yesterday · 19 min</small></div>
+                <div class="recent-meeting"><span>Customer interview</span><small>Tuesday · 42 min</small></div>
+                <div class="sidebar-bottom"><span class="avatar">JD</span><span>Your workspace<small>Stored on this Mac</small></span></div>
+              </aside>
+              <div class="meeting-content">
+                <div class="meeting-breadcrumb">My meetings <span>/</span> Today</div>
+                <div class="meeting-title-row"><h2>Product strategy sync</h2><span class="meeting-menu" aria-hidden="true">···</span></div>
+                <div class="meeting-meta"><span class="small-dot"></span> 28 minutes <span>·</span> Sample meeting</div>
+                <div class="demo-tabs" hidden role="tablist" aria-label="Explore the sample meeting">
+                  <button type="button" id="tab-summary" role="tab" aria-selected="true" aria-controls="panel-summary" tabindex="0">Summary</button>
+                  <button type="button" id="tab-transcript" role="tab" aria-selected="false" aria-controls="panel-transcript" tabindex="-1">Transcript</button>
+                  <button type="button" id="tab-actions" role="tab" aria-selected="false" aria-controls="panel-actions" tabindex="-1">Action items <span>3</span></button>
+                </div>
+                <div class="demo-panel" role="tabpanel" id="panel-summary" aria-labelledby="tab-summary" tabindex="0">
+                  <div class="summary-label"><span><svg class="icon"><use href="#i-spark"/></svg> THE SHORT VERSION</span><button class="copy-button" type="button" data-copy hidden aria-label="Copy sample summary"><svg class="icon"><use href="#i-copy"/></svg></button></div>
+                  <p class="sample-summary" data-summary>The team is simplifying onboarding so new users can reach their first win faster. Next up: a focused prototype, five customer conversations, and a check-in on Friday.</p>
+                  <h3>What we decided</h3>
+                  <div class="decision"><span class="decision-check"><svg class="icon"><use href="#i-check"/></svg></span><span>Start with one clear onboarding path.<small>Fewer choices. A more confident first step.</small></span></div>
+                  <div class="decision"><span class="decision-check"><svg class="icon"><use href="#i-check"/></svg></span><span>Validate before we build.<small>Talk to five new users this week.</small></span></div>
+                  <div class="insight" data-insight hidden><svg class="icon"><use href="#i-spark"/></svg><span><strong>A useful next question</strong>What would tell us the simpler onboarding actually helped?</span></div>
+                  <div class="summary-provider" data-provider><svg class="icon"><use href="#i-laptop"/></svg>Summarized with local AI<span class="tiny-pill">ON-DEVICE</span></div>
+                </div>
+                <div class="demo-panel" role="tabpanel" id="panel-transcript" aria-labelledby="tab-transcript" tabindex="0" hidden>
+                  <div class="transcript-line"><time>02:14</time><p>Let’s make the first five minutes feel simpler. One path, one clear next step.</p></div>
+                  <div class="transcript-line"><time>02:32</time><p>I’ll put together a focused prototype for Friday. We can test it before we build.</p></div>
+                  <div class="transcript-line"><time>03:05</time><p>Great. I’ll talk to five new users this week and bring their feedback to our check-in.</p></div>
+                  <div class="transcript-line"><time>03:26</time><p>I’ll schedule Friday’s review. Let’s agree on what a better first experience looks like.</p></div>
+                  <div class="summary-provider"><svg class="icon"><use href="#i-shield"/></svg>Transcription stays on-device</div>
+                </div>
+                <div class="demo-panel" role="tabpanel" id="panel-actions" aria-labelledby="tab-actions" tabindex="0" hidden>
+                  <p class="actions-intro">A good conversation deserves a next step.</p>
+                  <label class="sample-action"><input type="checkbox"><span>Create the onboarding prototype<small><b>Alex</b> By Friday</small></span></label>
+                  <label class="sample-action"><input type="checkbox"><span>Talk to five new users<small><b>Maya</b> This week</small></span></label>
+                  <label class="sample-action"><input type="checkbox"><span>Schedule the team check-in<small><b>Jordan</b> Friday</small></span></label>
+                  <p class="demo-hint">Try checking an item off. This is sample content.</p>
+                </div>
+                <div class="demo-recording"><span class="recorder-icon"><svg class="icon"><use href="#i-wave"/></svg></span><span>Every word, a little clearer.<small>Local audio capture + transcription</small></span><div class="waveform" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="preview-controls" hidden><span>TRY THE PREVIEW</span><fieldset class="mode-switch"><legend class="sr-only">Sample summary intelligence</legend><label><input type="radio" name="demo-mode" value="local" checked><span><svg class="icon"><use href="#i-laptop"/></svg>Local AI</span></label><label><input type="radio" name="demo-mode" value="chatgpt"><span><svg class="icon"><use href="#i-spark"/></svg>ChatGPT</span></label></fieldset></div>
+          <p class="preview-disclaimer" data-demo-notice>Illustrative preview. Local mode keeps recording, transcription, and summaries on-device.</p>
+          <p class="sr-only" role="status" data-demo-status></p>
+          <noscript><p class="preview-disclaimer">Static product preview. Both AI options are explained below.</p></noscript>
+        </div>
+      </div>
+      <div class="container value-strip">
+        <div><span class="value-icon green"><svg class="icon"><use href="#i-mic"/></svg></span><span><strong>Be in the room</strong><small>Not buried in your notes.</small></span></div>
+        <div><span class="value-icon blue"><svg class="icon"><use href="#i-laptop"/></svg></span><span><strong>Run it fully locally</strong><small>Your Mac. Your meeting.</small></span></div>
+        <div><span class="value-icon violet"><svg class="icon"><use href="#i-spark"/></svg></span><span><strong>Bring your ChatGPT</strong><small>More intelligence, your choice.</small></span></div>
+        <div><span class="value-icon peach"><svg class="icon"><use href="#i-code"/></svg></span><span><strong>Make it your own</strong><small>Free, open, and yours to shape.</small></span></div>
+      </div>
+    </section>
+
+    <section class="platforms container" aria-label="Meeting compatibility">
+      <span>FOR THE WAY YOU ALREADY MEET</span>
+      <div class="platform-names"><span>Zoom</span><span>Google Meet</span><span>Microsoft Teams</span><span>Slack</span><span>In person</span></div>
+      <p>Captures your microphone and system audio. No bot on the guest list.</p>
+    </section>
+
+    <section class="section intelligence-section" id="intelligence" aria-labelledby="intelligence-title">
+      <div class="container">
+        <div class="section-heading centered"><span class="eyebrow">YOUR NOTES. YOUR RULES.</span><h2 id="intelligence-title">Private by design.<br><span>Powerful by choice.</span></h2><p>Keep the whole workflow on your Mac. Or invite ChatGPT to help you see more in the conversation. You decide where the thinking happens.</p></div>
+        <div class="intelligence-grid">
+          <article class="intelligence-card local-card">
+            <div class="card-heading"><span class="feature-icon blue"><svg class="icon"><use href="#i-laptop"/></svg></span><span class="pill pill-blue">THE FULLY LOCAL OPTION</span></div>
+            <h3>Your Mac is all you need.</h3><p>Record, transcribe, and summarize with on-device models. Your meeting content stays with you, from the first word to the final takeaway.</p>
+            <div class="data-path local-path" aria-label="Your audio, transcript and summary are processed on your Mac"><div><svg class="icon"><use href="#i-mic"/></svg><span>Audio</span></div><svg class="icon path-arrow"><use href="#i-arrow"/></svg><div><svg class="icon"><use href="#i-doc"/></svg><span>Transcript</span></div><svg class="icon path-arrow"><use href="#i-arrow"/></svg><div><svg class="icon"><use href="#i-spark"/></svg><span>Summary</span></div><span class="path-caption"><svg class="icon"><use href="#i-shield"/></svg> All inside your Mac</span></div>
+            <ul class="check-list"><li><svg class="icon"><use href="#i-check"/></svg>Local transcription and local AI summaries</li><li><svg class="icon"><use href="#i-check"/></svg>No account or API key needed</li><li><svg class="icon"><use href="#i-check"/></svg>Works offline after model setup</li><li><svg class="icon"><use href="#i-check"/></svg>No cloud AI usage fees in local mode</li></ul>
+            <div class="card-footnote"><svg class="icon"><use href="#i-shield"/></svg>Built-in local AI or your local Ollama instance.</div>
+          </article>
+          <article class="intelligence-card cloud-card">
+            <div class="card-heading"><span class="feature-icon violet"><svg class="icon"><use href="#i-spark"/></svg></span><span class="pill pill-violet">OPTIONAL CHATGPT INTELLIGENCE</span></div>
+            <h3>A little more perspective.</h3><p>Connect your ChatGPT account for richer summaries and more considered takeaways. Bring more capable models to the same local meeting workflow.</p>
+            <div class="data-path cloud-path" aria-label="Recording and transcription stay local. Selected transcript text is sent to OpenAI for cloud summaries."><div><svg class="icon"><use href="#i-laptop"/></svg><span>Local transcript</span></div><svg class="icon path-arrow"><use href="#i-arrow"/></svg><div><svg class="icon"><use href="#i-cloud"/></svg><span>ChatGPT</span></div><span class="path-caption">Only when you choose cloud summaries</span></div>
+            <ul class="check-list"><li><svg class="icon"><use href="#i-check"/></svg>Sign in with your ChatGPT account in the app</li><li><svg class="icon"><use href="#i-check"/></svg>No separate OpenAI API key for this mode</li><li><svg class="icon"><use href="#i-check"/></svg>Recording and transcription remain local</li><li><svg class="icon"><use href="#i-check"/></svg>Local AI is always an alternative</li></ul>
+            <div class="card-footnote cloud-disclosure"><svg class="icon"><use href="#i-cloud"/></svg><span>Cloud summaries send the required transcript text to OpenAI. Uses your eligible account’s Codex access; OpenAI availability and usage limits apply.</span></div>
+          </article>
+        </div>
+        <p class="intelligence-bottom">Not a trade-off you have to make forever. <strong>Choose the right mode for the meeting.</strong></p>
+      </div>
+    </section>
+
+    <section class="section features-section container" id="features" aria-labelledby="features-title">
+      <div class="section-heading heading-split"><div><span class="eyebrow">FROM “GOOD TALK” TO WHAT’S NEXT</span><h2 id="features-title">The meeting ends.<br>The momentum doesn’t.</h2></div><p>Less admin between the conversation and the work that matters. Everything you need, without another bot in the room.</p></div>
+      <div class="features-grid">
+        <article class="feature-card feature-capture"><span class="feature-icon green"><svg class="icon"><use href="#i-mic"/></svg></span><h3>Catch the conversation.<br>Not just your side of it.</h3><p>Capture your microphone and system audio, with live on-device transcription powered by Whisper or Parakeet.</p><div class="capture-art" aria-hidden="true"><div class="capture-source"><span class="source-dot green-dot"></span>Your microphone<span class="signal-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div><div class="capture-source"><span class="source-dot blue-dot"></span>Meeting audio<span class="signal-bars alternate"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div><div class="capture-result"><svg class="icon"><use href="#i-shield"/></svg>Two audio sources. One local transcript.</div></div></article>
+        <article class="feature-card feature-notes"><span class="feature-icon peach"><svg class="icon"><use href="#i-doc"/></svg></span><h3>A place for your<br>own lightbulb moments.</h3><p>Keep a docked notes column beside your call. Add thoughts and timestamped moments without losing the thread.</p><div class="notes-art" aria-hidden="true"><span>MY NOTES <span>Saved locally</span></span><p>The real question isn’t “what can we add?”</p><p><mark>It’s “what can we make simpler?”</mark></p><div><span>12:48</span> A good place to start.<i></i></div></div></article>
+        <article class="feature-card feature-summary"><span class="feature-icon violet"><svg class="icon"><use href="#i-spark"/></svg></span><h3>A clear next chapter.<br>Not a wall of text.</h3><p>Turn a long conversation into a useful summary, key decisions, and action items. Review the output, then move forward.</p><div class="takeaway-art" aria-hidden="true"><div><span class="takeaway-dot"></span>THE DECISION<span>Keep it simple.</span></div><div><span class="takeaway-dot"></span>THE NEXT STEP<span>Test the prototype.</span></div><div><span class="takeaway-dot"></span>THE FOLLOW-THROUGH<span>Review on Friday.</span></div></div></article>
+        <article class="feature-card feature-export"><span class="feature-icon blue"><svg class="icon"><use href="#i-folder"/></svg></span><h3>Good notes deserve<br>to go places.</h3><p>Export to PDF, Word, Markdown, or JSON. Share the useful parts and keep your knowledge in the tools you already love.</p><div class="export-art" aria-hidden="true"><div class="file-card file-pdf"><svg class="icon"><use href="#i-doc"/></svg><b>PDF</b><span>Share it</span></div><div class="file-card file-docx"><svg class="icon"><use href="#i-doc"/></svg><b>DOCX</b><span>Make it yours</span></div><div class="file-card file-md"><svg class="icon"><use href="#i-code"/></svg><b>MD</b><span>Keep building</span></div></div></article>
+      </div>
+    </section>
+
+    <section class="section workflow-section" aria-labelledby="workflow-title"><div class="container"><div class="section-heading centered"><span class="eyebrow">A SMALL CHANGE TO YOUR MEETING DAY</span><h2 id="workflow-title">Three steps.<br>One less thing on your mind.</h2></div><ol class="workflow"><li><span class="step-number">01</span><h3>Make yourself at home.</h3><p>Install MeetOdds on your Mac. Set up local models, or connect your ChatGPT account for cloud summaries.</p></li><li><span class="step-number">02</span><h3>Show up. Press record.</h3><p>Let participants know you’re recording, then focus on the conversation while MeetOdds captures and transcribes.</p></li><li><span class="step-number">03</span><h3>Leave with a next step.</h3><p>Review your summary, check the decisions, and export the follow-up. Keep the good parts moving.</p></li></ol></div></section>
+
+    <section class="section container" id="open-source" aria-labelledby="open-source-title"><div class="open-source-card"><div><span class="eyebrow">OPEN SOURCE. NOT A BLACK BOX.</span><h2 id="open-source-title">Your meetings.<br>Your data. <span>Your code.</span></h2><p>MeetOdds is free and open source. Inspect how it works, shape it around your workflow, or help make it better for everyone.</p><a class="button button-dark" href="{{REPO_URL}}"><svg class="icon"><use href="#i-github"/></svg>Explore the source<svg class="icon"><use href="#i-arrow"/></svg></a><p class="source-status">{{REPO_STATUS}}</p></div><div class="source-art" aria-hidden="true"><div class="source-art-bar"><div class="traffic-lights"><i></i><i></i><i></i></div><span>the meetodds philosophy</span></div><div class="code-lines"><span class="code-comment">// A better kind of meeting assistant.</span><span><b>const</b> meetOdds = {</span><span>&nbsp; yourData: <em>"yours"</em>,</span><span>&nbsp; localFirst: <em>true</em>,</span><span>&nbsp; intelligence: <em>"your choice"</em>,</span><span>&nbsp; source: <em>"open"</em>,</span><span>&nbsp; possibilities: <em>Infinity</em></span><span>};</span></div><div class="source-art-footer"><svg class="icon"><use href="#i-code"/></svg>Built with Tauri + Rust. Built on Meetily.</div></div></div></section>
+
+    <section class="section faq-section container" id="faq" aria-labelledby="faq-title"><div class="faq-intro"><span class="eyebrow">A FEW THINGS WORTH KNOWING</span><h2 id="faq-title">Clear answers.<br>No fine-print energy.</h2><p>A little more about your data, your AI, and getting started.</p></div><div class="faq-list">
+      <details><summary>Can everything really stay on my Mac?<svg class="icon"><use href="#i-plus"/></svg></summary><p>Yes. Choose local transcription and Built-in Local AI, or an Ollama instance running on your own Mac, for summaries. Recording, transcription, and summarization can all happen on-device. Download your models first; after that, this local workflow can run offline. Cloud providers are optional.</p></details>
+      <details><summary>How does connecting my ChatGPT account work?<svg class="icon"><use href="#i-plus"/></svg></summary><p>In the desktop app, choose <strong>OpenAI Codex (ChatGPT subscription)</strong> as your summary provider and follow the OpenAI sign-in flow. MeetOdds uses the Codex access available to your eligible ChatGPT account, without a separate API key. Available models and usage limits are set by OpenAI. This website does not sign you in or collect your credentials.</p></details>
+      <details><summary>What leaves my device in ChatGPT mode?<svg class="icon"><use href="#i-plus"/></svg></summary><p>The transcript text needed to generate or translate your summary is sent to OpenAI. Audio recording and transcription remain local, but cloud summarization is not offline or fully local. Choose local AI when you need meeting content to stay on-device.</p></details>
+      <details><summary>Is MeetOdds free? Do I need an API subscription?<svg class="icon"><use href="#i-plus"/></svg></summary><p>MeetOdds is free and open source. Local AI does not require a paid cloud account or incur cloud AI usage fees. ChatGPT-connected summaries use your eligible account’s Codex access and are subject to OpenAI’s availability and limits. The separate OpenAI Cloud API option uses an API key and is billed separately from a ChatGPT subscription.</p></details>
+      <details><summary>Does a bot join my meetings?<svg class="icon"><use href="#i-plus"/></svg></summary><p>No. MeetOdds captures microphone and system audio on your Mac, rather than sending a bot to join a call. Enable the necessary macOS audio permissions and make sure participants know and agree that you are recording.</p></details>
+      <details><summary>What can I export?<svg class="icon"><use href="#i-plus"/></svg></summary><p>Export meeting documents as PDF, Microsoft Word (DOCX), Markdown, or JSON. Review AI-generated content before sharing: summaries can make mistakes, and the original transcript is there to help you check.</p></details>
+      <details><summary>When can I get the app and source code?<svg class="icon"><use href="#i-plus"/></svg></summary><p>{{AVAILABILITY_TEXT}} The marketing page focuses on the Mac experience. Check the public repository for platform-specific release and build details.</p></details>
+    </div></section>
+
+    <section class="download-section" id="download" aria-labelledby="download-title"><div class="container download-inner"><span class="brand-mark brand-mark-large"><svg class="icon"><use href="#i-wave"/></svg></span><span class="eyebrow">MORE PRESENT. LESS PREOCCUPIED.</span><h2 id="download-title">Your next meeting.<br><span>A clearer head.</span></h2><p>Fully local when it matters. ChatGPT when you choose.<br>Always your meeting, your notes, your call.</p><div class="download-actions">{{DOWNLOAD_CONTROL}}<a class="button button-secondary" href="{{REPO_URL}}"><svg class="icon"><use href="#i-github"/></svg>View on GitHub</a></div><p class="download-note">{{DOWNLOAD_STATUS}}</p><div class="download-trust"><span>Free &amp; open source</span><i aria-hidden="true"></i><span>Made for Mac</span><i aria-hidden="true"></i><span>Local-first, always</span></div></div></section>
+  </main>
+
+  <footer class="site-footer container"><div class="footer-top"><a class="brand" href="#" aria-label="MeetOdds home"><span class="brand-mark"><svg class="icon"><use href="#i-wave"/></svg></span>MeetOdds<span class="brand-dot">.</span></a><p>A little more presence. A lot more progress.</p><nav aria-label="Footer navigation"><a href="#intelligence">Privacy &amp; AI</a><a href="{{REPO_URL}}">GitHub</a><a href="#faq">FAQ</a></nav></div><div class="footer-bottom"><span>© {{YEAR}} MeetOdds. Open source, with care.</span><span>Built on <a href="https://github.com/Zackriya-Solutions/meetily">Meetily</a>. An independent project, not affiliated with OpenAI.</span></div></footer>
+</body>
+</html>
