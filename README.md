@@ -1,343 +1,198 @@
-<div align="center" style="border-bottom: none">
-    <h1>
-        <img src="docs/Meetily-6.png" style="border-radius: 10px;" />
-        <br>
-        Privacy-First AI Meeting Assistant
-    </h1>
-    <a href="https://trendshift.io/repositories/21958" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21958" alt="Zackriya-Solutions%2Fmeetily | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-    <br>
-    <br>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases/"><img src="https://img.shields.io/badge/Pre_Release-Link-brightgreen" alt="Pre-Release"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/zackriya-solutions/meeting-minutes?style=flat">
-</a>
- <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"> <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/zackriya-solutions/meeting-minutes/total?style=plastic"> </a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img src="https://img.shields.io/badge/Supported_OS-macOS,_Windows-white" alt="Supported OS"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img alt="GitHub Tag" src="https://img.shields.io/github/v/tag/zackriya-solutions/meeting-minutes?include_prereleases&color=yellow">
-</a>
-    <br>
-    <h3>
-    <br>
-    Open Source • Privacy-First • Enterprise-Ready
-    </h3>
-    <p align="center">
-    Get latest <a href="https://www.zackriya.com/meetily-subscribe/"><b>Product updates</b></a> <br><br>
-    <a href="https://meetily.ai"><b>Website</b></a> •
-    <a href="https://www.linkedin.com/company/106363062/"><b>LinkedIn</b></a> •
-    <a href="https://discord.gg/crRymMQBFH"><b>Meetily Discord</b></a> •
-    <a href="https://discord.com/invite/vCFJvN4BwJ"><b>Privacy-First AI</b></a> •
-    <a href="https://www.reddit.com/r/meetily/"><b>Reddit</b></a>
-</p>
-    <p align="center">
+# MeetOdds
 
-A privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on your infrastructure. Built by expert AI engineers passionate about data sovereignty and open source solutions. Perfect for enterprises that need advanced meeting intelligence without compromising on privacy, compliance, or control.
+**Private, local-first AI meeting notes — with optional ChatGPT intelligence.**
 
-</p>
+MeetOdds records meetings, transcribes them on your computer, turns conversations into structured notes, and helps you leave with clear decisions and action items.
 
-<p align="center">
-    <img src="docs/meetily_demo.gif" width="650" alt="Meetily Demo" />
-    <br>
-    <a href="https://youtu.be/6FnhSC_eSz8">View full Demo Video</a>
-</p>
+Your default workflow can stay fully local. When you want stronger AI reasoning, you can optionally connect your ChatGPT account for summaries without configuring a separate OpenAI API key.
 
-</div>
+[Website](https://meetodds.kamatbot.com) · [Latest release](https://github.com/kamatbot/meetodds/releases/latest) · [Issues](https://github.com/kamatbot/meetodds/issues) · [Source](https://github.com/kamatbot/meetodds)
 
 ---
 
-> **Meetily PRO Upgrade Offer** - Meetily PRO is available for users who need enhanced accuracy, advanced exports, custom summary workflows, and team-ready features. Use coupon code **LAUNCH20** for **20% off** until the next Meetily Community Edition release. Speaker diarization is also planned for PRO in mid-June. [Explore Meetily PRO →](https://meetily.ai/pro/)
+## Why MeetOdds
+
+Most meeting assistants send audio or transcripts to a cloud service. MeetOdds is designed so that you do not have to.
+
+### Fully local when you want it
+
+- Record microphone and system audio on your computer.
+- Transcribe locally with Whisper or Parakeet.
+- Generate summaries locally with the built-in `llama.cpp`-based helper or Ollama.
+- Keep recordings, transcripts, notes, and meeting history on your device.
+- Work without a cloud AI account after the required local models have been downloaded.
+
+### Optional ChatGPT intelligence
+
+MeetOdds can also use the **OpenAI Codex (ChatGPT subscription)** provider built into the app.
+
+- Sign in with an eligible ChatGPT account.
+- No separate OpenAI API key is required for this mode.
+- Recording and transcription remain local.
+- Only the transcript text required for the requested summary or translation is sent to OpenAI.
+- OpenAI account availability, usage limits, and service terms apply.
+
+This is intentionally separate from the fully local workflow. If a meeting must never leave your computer, use Built-in Local AI or Ollama instead.
+
+MeetOdds also supports the OpenAI API and other configurable AI providers for users who prefer them.
+
+See [OpenAI in MeetOdds](docs/OPENAI_CLOUD.md) for the exact provider and privacy boundaries.
 
 ---
 
-<details>
-<summary>Table of Contents</summary>
+## Core features
 
-- [Introduction](#introduction)
-- [Why Meetily / MeetOdds?](#why-meetily)
-- [Features](#features)
-- [MeetOdds Core Capabilities](#-meetodds-core-capabilities)
-  - [Docked Notes Sidecar Column](#-docked-notes-sidecar-column)
-  - [Zero-Drop Continuous Transcription](#-zero-drop-continuous-transcription)
-  - [Local On-Device AI Summaries](#-local-on-device-ai-summaries)
-  - [Professional Document Export](#-professional-document-export)
-- [Installation](#installation)
-- [macOS Packaging & Xcode Code Signing](#-macos-packaging--xcode-code-signing)
-- [Key Features in Action](#key-features-in-action)
-- [System Architecture](#system-architecture)
-- [For Developers](#for-developers)
-- [Meetily PRO](#meetily-pro)
-- [Contributing](#contributing)
-- [License](#license)
+### Local meeting capture
 
-</details>
+MeetOdds captures both microphone and system audio directly from the desktop app. It does not need to join your call as a meeting bot.
 
-## Introduction
+### Live local transcription
 
-Meetily is a privacy-first AI meeting assistant that runs entirely on your local machine. It captures your meetings, transcribes them in real-time, and generates summaries, all without sending any data to the cloud. This makes it the perfect solution for professionals and enterprises who need to maintain complete control over their sensitive information.
+- Whisper and Parakeet transcription engines
+- Apple Silicon acceleration on macOS
+- Voice activity detection
+- Separate recording and transcription paths so the saved recording is not dependent on transcript processing
 
-## Why Meetily?
+### Docked meeting notes
 
-While there are many meeting transcription tools available, this solution stands out by offering:
+Keep MeetOdds beside Zoom, Google Meet, Microsoft Teams, Slack, an IDE, or an in-person conversation without constantly switching windows.
 
-- **Privacy First:** All processing happens locally on your device.
-- **Cost-Effective:** Uses open-source AI models instead of expensive APIs.
-- **Flexible:** Works offline and supports multiple meeting platforms.
-- **Customizable:** Self-host and modify for your specific needs.
+Each meeting gets its own notes document, with local persistence and timestamped note breaks.
 
-<details>
-<summary>The Privacy Problem</summary>
+### AI summaries and action items
 
-Meeting AI tools create significant privacy and compliance risks across all sectors:
+Turn a transcript into useful meeting output such as:
 
-- **$4.4M average cost per data breach** (IBM 2024)
-- **€5.88 billion in GDPR fines** issued by 2025
-- **400+ unlawful recording cases** filed in California this year
+- concise summaries
+- key topics
+- decisions
+- follow-ups
+- action items
+- structured notes
 
-Whether you're a defense consultant, enterprise executive, legal professional, or healthcare provider, your sensitive discussions shouldn't live on servers you don't control. Cloud meeting tools promise convenience but deliver privacy nightmares with unclear data storage practices and potential unauthorized access.
+Choose between fully local AI and optional cloud intelligence depending on the sensitivity of the meeting.
 
-**Meetily solves this:** Complete data sovereignty on your infrastructure, zero vendor lock-in, and full control over your sensitive conversations.
+### Professional exports
 
-</details>
+Export meeting content as:
 
-## Features
+- PDF
+- Microsoft Word (`.docx`)
+- Markdown
+- JSON
 
-- **Local First:** All processing is done on your machine. No data ever leaves your computer.
-- **Real-time Transcription:** Get a live transcript of your meeting as it happens.
-- **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
-- **Multi-Platform:** Works on macOS, Windows, and Linux.
-- **Open Source:** Meetily / MeetOdds is open source and free to use.
-- **Flexible AI Provider Support:** Choose from local on-device models via `llama-helper` or Ollama, Claude, Groq, OpenRouter, or your own OpenAI-compatible endpoint.
+### Open source and inspectable
 
-## 🚀 MeetOdds Core Capabilities
-
-### 📌 Docked Notes Sidecar Column
-- **Screen-Edge Docking**: Never covers or crowds your screen. Opens as a sleek, docked column pinned to the right edge of your display, optimized for seamless note-taking alongside Zoom, Google Meet, Microsoft Teams, Slack huddles, or IDEs.
-- **Meeting-Isolated Documents**: Each new recording automatically provisions a clean, independent notes document so notes never bleed into future meetings.
-- **Single-Document Continuous Flow**: Clicking `+` inserts an unobtrusive timestamped breakpoint into the active document, keeping all notes for a meeting consolidated in one chronological document rather than scattering across multiple files.
-- **Conflict-Safe Local Persistence**: Automatic transactional persistence into SQLite (WAL mode) with compare-and-swap synchronization to prevent edits from being overwritten.
-
-### 🎙️ Zero-Drop Continuous Transcription
-- **Dual Stream Audio Capture**: Simultaneously captures system audio (remote speakers via Apple Core Audio and ScreenCaptureKit) and physical microphone input.
-- **Keystroke Noise Immunity**: Silero Voice Activity Detection (VAD) calibrated with resilient 0.40 / 0.25 speech thresholds and 60ms minimum speech windows. Active keyboard typing clicks will never drop words, truncate sentences, or falsely suppress transcription.
-- **Local Engine Flexibility**: Integrated support for on-device **Parakeet ONNX** and **Whisper** engines with Apple Silicon Metal acceleration.
-- **Separated Live Preview Lane**: Speculative live subtitle previews operate on a non-blocking dedicated lane, guaranteeing that UI rendering cannot delay or drop persisted meeting transcripts.
-
-### 🤖 Local On-Device AI Summaries
-- **Hardware-Accelerated Sidecar**: Built with a dedicated native `llama-helper` sidecar powered by `llama.cpp` and Metal GPU acceleration.
-- **Local Intelligence**: Summarize meetings directly on your device using optimized models (Qwen 2.5/3.5, Gemma 3) with zero API costs, zero internet required, and 100% data privacy.
-- **Flexible Providers**: Support for local Ollama instances as well as custom private OpenAI-compatible cloud endpoints with your own API keys.
-
-### 📄 Professional Document Export
-- **Microsoft Word (.docx)**: Clean document layout with structured meeting metadata, key topics, action items, and attributed speaker dialogue.
-- **Print-Ready PDF**: Clean typography with headers, timestamps, and executive summary blocks.
-- **Markdown & JSON**: Unformatted plain-text, Obsidian-ready Markdown, and structured JSON for integration into personal knowledge graphs or internal wikis.
-
-## Installation
-
-### 🍎 **macOS (Apple Silicon)**
-
-1. Download the latest `MeetOdds_0.4.19_aarch64.dmg` from Releases.
-2. Open the downloaded `.dmg` file.
-3. Drag **MeetOdds** to your Applications folder.
-4. Launch **MeetOdds** from Applications.
-
-### 🪟 **Windows**
-
-1. Download the latest `x64-setup.exe` from Releases.
-2. Run the installer.
-
-### 🐧 **Linux**
-
-Build from source following our detailed guides:
-
-- [Building on Linux](docs/building_in_linux.md)
-- [General Build Instructions](docs/BUILDING.md)
+MeetOdds is open source. You can inspect how recording, transcription, storage, and AI-provider routing work, modify the application, or build it yourself.
 
 ---
 
-## 🍎 macOS Packaging & Xcode Code Signing
+## Download
 
-MeetOdds is compiled with Apple Silicon Metal GPU acceleration and native sidecars. For distribution outside the Mac App Store, packages are signed with Apple Developer ID certificates to satisfy macOS Gatekeeper.
+### macOS — Apple Silicon
 
-### One-Step Release Build
+Download the latest signed release from:
 
-Run the distribution packaging script from the repository root:
+**[MeetOdds Releases →](https://github.com/kamatbot/meetodds/releases/latest)**
+
+Current public release: **MeetOdds 0.4.19**.
+
+1. Download the `.dmg`.
+2. Open it.
+3. Drag **MeetOdds** to Applications.
+4. Launch MeetOdds and grant the microphone/system-audio permissions required for recording.
+
+Windows and Linux build paths are also present in the source repository. Check the release page for currently published binaries.
+
+---
+
+## Build from source
+
+MeetOdds is a Tauri desktop application with a Rust core and a Next.js/TypeScript UI.
+
+### Requirements
+
+- Rust toolchain
+- Node.js 24
+- `pnpm`
+- platform-specific native dependencies described in [docs/BUILDING.md](docs/BUILDING.md)
+
+### Clone
 
 ```bash
-# Automatically detects your Developer ID Application certificate in macOS Keychain:
-bash frontend/scripts/build-macos-m5.sh
+git clone https://github.com/kamatbot/meetodds.git
+cd meetodds
 ```
 
-### Specifying an Explicit Signing Identity
-
-If you have multiple Xcode code signing identities or want to sign with a specific certificate:
+### Frontend / desktop development
 
 ```bash
-APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAM_ID)" bash frontend/scripts/build-macos-m5.sh
-```
-
-### Generated Artifacts
-
-The packaging script automatically produces:
-1. **Application Bundle**: `target/release/bundle/macos/MeetOdds.app`
-   - Hardened runtime enabled (`entitlements.plist` with microphone and audio capture permissions)
-   - Signed native binaries: `MeetOdds`, `llama-helper` sidecar, and production `ffmpeg` binary.
-2. **DMG Installer**: `target/release/bundle/dmg/MeetOdds_0.4.19_aarch64.dmg`
-   - Drag-and-drop installer with Applications shortcut, codesigned and ready for distribution.
-
-### Verifying Signatures
-
-```bash
-# Verify the .app bundle:
-codesign -dvvv target/release/bundle/macos/MeetOdds.app
-
-# Verify Gatekeeper assessment:
-spctl --assess --type exec -v target/release/bundle/macos/MeetOdds.app
-```
-
-**Quick start:**
-
-```bash
-git clone https://github.com/Zackriya-Solutions/meeting-minutes
-cd meeting-minutes/frontend
+cd frontend
 pnpm install
-./build-gpu.sh
+pnpm run tauri:dev
 ```
 
-## Key Features in Action
+For platform-specific build and packaging instructions, see [docs/BUILDING.md](docs/BUILDING.md).
 
-### 🎯 Local Transcription
+---
 
-Transcribe meetings entirely on your device using **Whisper** or **Parakeet** models. No cloud required.
+## Privacy model
 
-<p align="center">
-    <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />
-</p>
+MeetOdds distinguishes between **local processing** and **optional external AI processing**.
 
-### 📥 Import & Enhance `Beta`
+| Capability | Fully local mode | ChatGPT account mode |
+| --- | --- | --- |
+| Audio recording | On device | On device |
+| Transcription | On device | On device |
+| Meeting storage | On device | On device |
+| Summary generation | On device | OpenAI |
+| Transcript sent to cloud | No | Only when requesting cloud AI processing |
+| Separate OpenAI API key | No | No for ChatGPT subscription mode |
 
-Import existing audio files to generate transcripts, or enhance to re-transcribe any recorded meeting with a different model or language, all processed locally.
+If you configure another external provider, data sent to that provider is subject to its own terms and privacy practices.
 
-> Contributed by [Jeremi Joslin](https://github.com/jeremi), improved by [Vishnu P S](https://github.com/p-s-vishnu) and [Mohammed Safvan](https://github.com/mohammedsafvan)
+Always inform participants and obtain any consent required by the laws and policies that apply to your meeting.
 
-<p align="center">
-    <img src="docs/meetily-export.gif" width="650" style="border-radius: 10px;" alt="Import and Enhance" />
-</p>
+See [PRIVACY_POLICY.md](PRIVACY_POLICY.md) for more detail.
 
-### 🤖 AI-Powered Summaries
+---
 
-Generate meeting summaries with your choice of AI provider. **Ollama** (local) is recommended, with support for Claude, Groq, OpenRouter, and OpenAI.
+## Architecture
 
-<p align="center">
-    <img src="docs/summary.png" width="650" style="border-radius: 10px;" alt="Summary generation" />
-</p>
+The supported application consists of:
 
-<p align="center">
-    <img src="docs/editor1.png" width="650" style="border-radius: 10px;" alt="Editor Summary generation" />
-</p>
+- **Tauri 2 / Rust** for desktop integration, audio capture, persistence, transcription orchestration, and native functionality
+- **Next.js / React / TypeScript** for the user interface
+- **Whisper / Parakeet** for local transcription
+- **llama.cpp / Ollama** for local AI summaries
+- optional external AI providers, including ChatGPT-account access through the OpenAI Codex integration
 
-### 🔒 Privacy-First Design
+The historical Python/FastAPI backend in this repository is retained only as an archive and is not part of the supported runtime.
 
-All data stays on your machine. Transcription models, recordings, and transcripts are stored locally.
+See [docs/architecture.md](docs/architecture.md) for the detailed architecture.
 
-<p align="center">
-    <img src="docs/settings.png" width="650" style="border-radius: 10px;" alt="Local Transcription and storage" />
-</p>
-
-### 🌐 Custom OpenAI Endpoint Support
-
-Use your own OpenAI-compatible endpoint for AI summaries. Perfect for organizations with custom AI infrastructure or preferred providers.
-
-<p align="center">
-    <img src="docs/custom.png" width="650" style="border-radius: 10px;" alt="Custom OpenAI Endpoint Configuration" />
-</p>
-
-### 🎙️ Professional Audio Mixing
-
-Capture microphone and system audio simultaneously with intelligent ducking and clipping prevention.
-
-<p align="center">
-    <img src="docs/audio.png" width="650" style="border-radius: 10px;" alt="Device selection" />
-</p>
-
-### ⚡ GPU Acceleration
-
-Built-in support for hardware acceleration across platforms:
-
-- **macOS**: Apple Silicon (Metal) + CoreML
-- **Windows/Linux**: NVIDIA (CUDA), AMD/Intel (Vulkan)
-
-Automatically enabled at build time - no configuration needed.
-
-## System Architecture
-
-Meetily is a single, self-contained application built with [Tauri](https://tauri.app/). It uses a Rust-based backend to handle all the core logic, and a Next.js frontend for the user interface.
-
-For more details, see the [Architecture documentation](docs/architecture.md).
-
-## For Developers
-
-If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
-
-## Meetily Pro
-
-<p align="center">
-    <img src="docs/pv2.1.png" width="650" style="border-radius: 10px;" alt="Upcoming version" />
-</p>
-
-**Meetily PRO** is a professional-grade solution with enhanced accuracy and advanced features for serious users and teams. Built on a different codebase with superior transcription models and enterprise-ready capabilities.
-
-### Community Thank-You Offer
-
-Meetily Community Edition will remain free and open source. PRO exists for users and teams who want a more advanced meeting workflow, including higher transcription accuracy, custom summary templates, advanced exports, auto-meeting detection, and self-hosted deployment options.
-
-For the community that helped Meetily grow, we are making the upgrade easier: use coupon code **LAUNCH20** for **20% off Meetily PRO** until the next Meetily Community Edition release.
-
-Speaker diarization is planned for mid-June, bringing automatic speaker separation to PRO meetings.
-
-### Key Advantages Over Community Edition:
-
-- **Enhanced Accuracy**: Superior transcription models for professional-grade accuracy
-- **Custom Summary Templates**: Tailor summaries to your specific workflow and needs
-- **Advanced Export Options**: PDF, DOCX, and Markdown exports with formatting
-- **Auto-detect and Join Meetings**: Automatic meeting detection and joining
-- **Speaker Identification**: Distinguish between speakers automatically *(Coming Soon)*
-- **Chat with Meetings**: AI-powered meeting insights and queries *(Coming Soon)*
-- **Calendar Integration**: Seamless integration with your calendar *(Coming Soon)*
-- **Self-Hosted Deployment**: Deploy on your own infrastructure for teams
-- **GDPR Compliance Built-In**: Privacy by design architecture with complete audit trails
-- **Priority Support**: Dedicated support for PRO users
-
-### Who is PRO for?
-
-- **Professionals** who need the highest accuracy for critical meetings
-- **Teams and organizations** (2-100 users) requiring self-hosted deployment
-- **Power users** who need advanced export formats and custom workflows
-- **Compliance-focused organizations** requiring GDPR readiness
-
-> **Note:** Meetily Community Edition remains **free & open source forever** with local transcription, AI summaries, and core features. PRO is a separate professional solution for users who need enhanced accuracy and advanced capabilities.
-
-For organizations needing 100+ users or managed compliance solutions, explore [Meetily Enterprise](https://meetily.ai/enterprise/).
-
-**Learn more about pricing and features:** [https://meetily.ai/pro/](https://meetily.ai/pro/)
+---
 
 ## Contributing
 
-We welcome contributions from the community! If you have any questions or suggestions, please open an issue or submit a pull request. Please follow the established project structure and guidelines. For more details, refer to the [CONTRIBUTING.md](CONTRIBUTING.md) file.
+Issues and pull requests are welcome.
 
-Thanks for all the contributions. Our community is what makes this project possible.
+Before making changes, read:
 
-## License
+- [AGENTS.md](AGENTS.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [docs/BUILDING.md](docs/BUILDING.md)
 
-MIT License - Feel free to use this project for your own purposes.
+Please preserve the project's privacy boundary: meeting content must not be sent to an external service unless the user explicitly chooses that provider or workflow.
 
-## Acknowledgments
+---
 
-- We borrowed some code from [Whisper.cpp](https://github.com/ggerganov/whisper.cpp).
-- We borrowed some code from [Screenpipe](https://github.com/mediar-ai/screenpipe).
-- We borrowed some code from [transcribe-rs](https://crates.io/crates/transcribe-rs).
-- Thanks to **NVIDIA** for developing the **Parakeet** model.
-- Thanks to [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) for providing the **ONNX conversion** of the Parakeet model.
+## Original project and license
 
-## Star History
+MeetOdds is derived from the open-source **[Meetily](https://github.com/Zackriya-Solutions/meetily)** project created by **Zackriya Solutions**. Meetily provided the original foundation for the desktop meeting assistant and is an important upstream reference for this project.
 
-[![Star History Chart](https://api.star-history.com/chart?repos=Zackriya-Solutions/meetily&type=date&legend=top-left)](https://www.star-history.com/?repos=Zackriya-Solutions%2Fmeetily&type=date&legend=bottom-right)
+The original Meetily source is distributed under the **MIT License**. MeetOdds preserves the original copyright notice and license terms and includes additional MeetOdds contributor copyright notices.
+
+See [LICENSE.md](LICENSE.md) for the complete license text.
+
+MeetOdds is an independent derivative project and is not presented as the official Meetily distribution.
