@@ -5,7 +5,7 @@
 
 /// Default Whisper model for transcription when no preference is configured.
 /// This is the recommended balance of accuracy and speed.
-pub const DEFAULT_WHISPER_MODEL: &str = "large-v3-turbo";
+pub const DEFAULT_WHISPER_MODEL: &str = "small-q5_1";
 
 /// Default Parakeet model for transcription when no preference is configured.
 /// This is the quantized version optimized for speed.
@@ -16,6 +16,9 @@ pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";
 ///
 /// Format: (name, filename, size_mb, accuracy, speed, description)
 pub const WHISPER_MODEL_CATALOG: &[(&str, &str, u32, &str, &str, &str)] = &[
+    // Recommended default model
+    ("small-q5_1", "ggml-small-q5_1.bin", 181, "Good", "Fast", "Quantized small model, faster than f16 version"),
+
     // Standard f16 models (full precision)
     ("tiny", "ggml-tiny.bin", 74, "Decent", "Very Fast", "Fastest processing, good for real-time use"),
     ("base", "ggml-base.bin", 142, "Good", "Fast", "Good balance of speed and accuracy"),
@@ -27,7 +30,6 @@ pub const WHISPER_MODEL_CATALOG: &[(&str, &str, u32, &str, &str, &str)] = &[
     // Q5_1 quantized models (balanced speed/accuracy, slightly better quality than Q5_0)
     ("tiny-q5_1", "ggml-tiny-q5_1.bin", 31, "Decent", "Very Fast", "Quantized tiny model, ~50% faster processing"),
     ("base-q5_1", "ggml-base-q5_1.bin", 57, "Good", "Fast", "Quantized base model, good speed/accuracy balance"),
-    ("small-q5_1", "ggml-small-q5_1.bin", 181, "Good", "Fast", "Quantized small model, faster than f16 version"),
 
     // Q5_0 quantized models (balanced speed/accuracy)
     ("medium-q5_0", "ggml-medium-q5_0.bin", 514, "High", "Medium", "Quantized medium model, professional quality"),
