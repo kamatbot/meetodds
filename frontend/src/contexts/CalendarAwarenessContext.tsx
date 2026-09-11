@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { isPermissionGranted, sendNotification } from '@tauri-apps/plugin-notification';
 import { calendarService, type CalendarEvent, type CalendarPermissionStatus } from '@/services/calendarService';
+import { selectNextCalendarEvent, selectSuggestedCalendarEvent, shouldNotifyForCalendarEvent } from '@/lib/calendar-awareness';
 
 const ENABLED_KEY = 'meetodds.calendar-awareness.enabled.v1';
 const DISMISSED_KEY = 'meetodds.calendar-awareness.dismissed.v1';
@@ -44,14 +45,6 @@ function persistStringSet(key: string, values: Set<string>) {
   try { sessionStorage.setItem(key, JSON.stringify([...values])); } catch { /* Session preference only. */ }
 }
 
-function selectSuggested(events: CalendarEvent[], dismissed: Set<string>, nowMs: number): CalendarEvent | null {
-  const relevant = events.filter(event => !dismissed.has(event.id) && !event.allDay && event.endAtMs > nowMs - 15 * 60_000);
-  const live = relevant.find(event => nowMs >= event.startAtMs - 5 * 60_000 && nowMs <= event.endAtMs + 10 * 60_000);
-  if (live) return live;
-  const next = relevant.find(event => event.startAtMs >= nowMs);
-  return next && next.startAtMs - nowMs <= 15 * 60_000 ? next : null;
-}
-
 export function CalendarAwarenessProvider({ children }: { children: ReactNode }) {
   const [permission, setPermission] = useState<CalendarPermissionStatus | null>(null);
   const [enabled, setEnabledState] = useState(true);
@@ -60,34 +53,41 @@ export function CalendarAwarenessProvider({ children }: { children: ReactNode })
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [clockTick, setClockTick] = useState(0);
   const alive = useRef(true);
+  const enabledRef = useRef(true);
   const refreshing = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     alive.current = true;
-    setEnabledState(readBoolean(ENABLED_KEY, true));
+    const storedEnabled = readBoolean(ENABLED_KEY, true);
+    enabledRef.current = storedEnabled;
+    setEnabledState(storedEnabled);
     setDismissed(readStringSet(DISMISSED_KEY));
     return () => { alive.current = false; };
+  }, []);
+
+  const queryNearbyEvents = useCallback(async (status: CalendarPermissionStatus) => {
+    if (!enabledRef.current || status.status !== 'authorized') {
+      if (alive.current) setEvents([]);
+      return;
+    }
+    const now = Date.now();
+    const values = await calendarService.listEvents(new Date(now - 30 * 60_000), new Date(now + 24 * 60 * 60_000));
+    if (!alive.current) return;
+    setEvents(values.filter(event => !event.allDay && event.endAtMs > event.startAtMs));
   }, []);
 
   const refresh = useCallback((): Promise<void> => {
     if (refreshing.current) return refreshing.current;
     const work = async () => {
+      setIsLoading(true);
       try {
         const status = await calendarService.permissionStatus();
         if (!alive.current) return;
         setPermission(status);
-        if (!enabled || status.status !== 'authorized') {
-          setEvents([]);
-          setError(null);
-          return;
-        }
-        setIsLoading(true);
-        const now = Date.now();
-        const values = await calendarService.listEvents(new Date(now - 30 * 60_000), new Date(now + 24 * 60 * 60_000));
-        if (!alive.current) return;
-        setEvents(values.filter(event => !event.allDay && event.endAtMs > event.startAtMs));
-        setError(null);
+        await queryNearbyEvents(status);
+        if (alive.current) setError(null);
       } catch (failure) {
         if (!alive.current) return;
         setError(failure instanceof Error ? failure.message : String(failure));
@@ -98,13 +98,16 @@ export function CalendarAwarenessProvider({ children }: { children: ReactNode })
     };
     refreshing.current = work();
     return refreshing.current;
-  }, [enabled]);
+  }, [queryNearbyEvents]);
 
   useEffect(() => {
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 60_000);
-    const focus = () => void refresh();
-    const visibility = () => { if (!document.hidden) void refresh(); };
+    const interval = window.setInterval(() => {
+      setClockTick(value => value + 1);
+      void refresh();
+    }, 60_000);
+    const focus = () => { setClockTick(value => value + 1); void refresh(); };
+    const visibility = () => { if (!document.hidden) { setClockTick(value => value + 1); void refresh(); } };
     window.addEventListener('focus', focus);
     document.addEventListener('visibilitychange', visibility);
     return () => {
@@ -120,22 +123,25 @@ export function CalendarAwarenessProvider({ children }: { children: ReactNode })
     try {
       const status = await calendarService.requestAccess();
       if (!alive.current) return;
-      setPermission(status);
+      enabledRef.current = true;
       setEnabledState(true);
+      setPermission(status);
       try { localStorage.setItem(ENABLED_KEY, 'true'); } catch {}
-      await refresh();
+      await queryNearbyEvents(status);
     } catch (failure) {
       if (alive.current) setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
       if (alive.current) setIsLoading(false);
     }
-  }, [refresh]);
+  }, [queryNearbyEvents]);
 
   const setEnabled = useCallback((value: boolean) => {
+    enabledRef.current = value;
     setEnabledState(value);
     try { localStorage.setItem(ENABLED_KEY, String(value)); } catch {}
     if (!value) setEvents([]);
-  }, []);
+    else void refresh();
+  }, [refresh]);
 
   const dismissEvent = useCallback((eventId: string) => {
     setDismissed(previous => {
@@ -146,12 +152,12 @@ export function CalendarAwarenessProvider({ children }: { children: ReactNode })
     });
   }, []);
 
-  const nowMs = Date.now();
-  const nextEvent = useMemo(() => events.find(event => !dismissed.has(event.id) && event.endAtMs > nowMs) ?? null, [events, dismissed, nowMs]);
-  const suggestedEvent = useMemo(() => selectSuggested(events, dismissed, nowMs), [events, dismissed, nowMs]);
+  const nowMs = useMemo(() => Date.now(), [clockTick, events]);
+  const nextEvent = useMemo(() => selectNextCalendarEvent(events, dismissed, nowMs), [events, dismissed, nowMs]);
+  const suggestedEvent = useMemo(() => selectSuggestedCalendarEvent(events, dismissed, nowMs), [events, dismissed, nowMs]);
 
   useEffect(() => {
-    if (!suggestedEvent || suggestedEvent.startAtMs - Date.now() > 2 * 60_000) return;
+    if (!suggestedEvent || !shouldNotifyForCalendarEvent(suggestedEvent, Date.now())) return;
     const notified = readStringSet(NOTIFIED_KEY);
     if (notified.has(suggestedEvent.id)) return;
     notified.add(suggestedEvent.id);
