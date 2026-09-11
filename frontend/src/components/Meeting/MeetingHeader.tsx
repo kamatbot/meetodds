@@ -1,398 +1,43 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import {
-  FolderOpen,
-  MoreHorizontal,
-  Pencil,
-  Star,
-  Trash2,
-} from 'lucide-react';
+import { FolderOpen, MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import ShareMenu from '@/components/Meeting/ShareMenu';
 import type { DeferredDeleteResponse, MeetingListPage } from '@/types/meeting';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 export type MeetingDetailTab = 'summary' | 'notes' | 'transcript';
+interface Props { meetingId:string; title:string; createdAt:string; activeTab:MeetingDetailTab; onTabChange:(tab:MeetingDetailTab)=>void; onTitleSaved:(title:string)=>void; onDeleted:()=>void }
+const tabs:Array<{id:MeetingDetailTab;label:string;shortcut:string}>=[{id:'summary',label:'Summary',shortcut:'⌃1'},{id:'notes',label:'Notes',shortcut:'⌃2'},{id:'transcript',label:'Transcript',shortcut:'⌃3'}];
+function isEditableTarget(target:EventTarget|null){return target instanceof HTMLElement&&(target.isContentEditable||Boolean(target.closest('input,textarea,select,[contenteditable="true"]')))}
+function formatCreatedAt(value:string){const d=new Date(value);return Number.isNaN(d.getTime())?'Date unavailable':new Intl.DateTimeFormat(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}).format(d)}
+function formatDuration(ms:number|null){if(ms==null||!Number.isFinite(ms))return null;const m=Math.max(1,Math.round(ms/60000));return m<60?`${m} min`:`${Math.floor(m/60)}h${m%60?` ${m%60}m`:''}`}
 
-interface MeetingHeaderProps {
-  meetingId: string;
-  title: string;
-  createdAt: string;
-  activeTab: MeetingDetailTab;
-  onTabChange: (tab: MeetingDetailTab) => void;
-  onTitleSaved: (title: string) => void;
-  onDeleted: () => void;
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tagName = target.tagName.toLowerCase();
-  return (
-    target.isContentEditable ||
-    tagName === 'input' ||
-    tagName === 'textarea' ||
-    tagName === 'select' ||
-    Boolean(target.closest('[contenteditable="true"]'))
-  );
-}
-
-function formatCreatedAt(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Date unavailable';
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
-}
-
-function formatDuration(durationMs: number | null): string | null {
-  if (durationMs == null || !Number.isFinite(durationMs)) return null;
-  const totalMinutes = Math.max(1, Math.round(durationMs / 60_000));
-  if (totalMinutes < 60) return `${totalMinutes} min`;
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
-}
-
-const tabs: Array<{ id: MeetingDetailTab; label: string; shortcut: string }> = [
-  { id: 'summary', label: 'Summary', shortcut: '⌃1' },
-  { id: 'notes', label: 'Notes', shortcut: '⌃2' },
-  { id: 'transcript', label: 'Transcript', shortcut: '⌃3' },
-];
-
-export default function MeetingHeader({
-  meetingId,
-  title,
-  createdAt,
-  activeTab,
-  onTabChange,
-  onTitleSaved,
-  onDeleted,
-}: MeetingHeaderProps) {
-  const {
-    currentMeeting,
-    setCurrentMeeting,
-    meetings,
-    setMeetings,
-    refetchMeetings,
-  } = useSidebar();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const cancelBlurRef = useRef(false);
-  const [savedTitle, setSavedTitle] = useState(title);
-  const [draftTitle, setDraftTitle] = useState(title);
-  const [editing, setEditing] = useState(false);
-  const [isSavingTitle, setIsSavingTitle] = useState(false);
-  const [starred, setStarred] = useState(false);
-  const [starStateLoaded, setStarStateLoaded] = useState(false);
-  const [durationMs, setDurationMs] = useState<number | null>(null);
-
-  useEffect(() => {
-    setSavedTitle(title);
-    setDraftTitle(title);
-  }, [meetingId, title]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setStarStateLoaded(false);
-
-    const loadLibraryState = async () => {
-      try {
-        const page = await invoke<MeetingListPage>('api_list_meetings', {
-          request: {
-            limit: 100,
-            query: title,
-            sort: 'newest',
-          },
-        });
-        if (cancelled) return;
-        const item = page.items.find((candidate) => candidate.id === meetingId);
-        if (item) {
-          setStarred(item.starred);
-          setDurationMs(item.durationMs);
-        }
-      } catch (error) {
-        console.warn('[MeetingHeader] Could not load library metadata:', error);
-      } finally {
-        if (!cancelled) setStarStateLoaded(true);
-      }
-    };
-
-    void loadLibraryState();
-    return () => {
-      cancelled = true;
-    };
-  }, [meetingId, title]);
-
-  const beginRename = () => {
-    setEditing(true);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    });
-  };
-
-  useEffect(() => {
-    const handleShortcut = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target)) return;
-
-      if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'r') {
-        event.preventDefault();
-        beginRename();
-        return;
-      }
-
-      if (event.ctrlKey && !event.metaKey && ['1', '2', '3'].includes(event.key)) {
-        event.preventDefault();
-        onTabChange(tabs[Number(event.key) - 1].id);
-      }
-    };
-
-    window.addEventListener('keydown', handleShortcut);
-    return () => window.removeEventListener('keydown', handleShortcut);
-  }, [onTabChange]);
-
-  const saveTitle = async () => {
-    if (cancelBlurRef.current) {
-      cancelBlurRef.current = false;
-      return;
-    }
-
-    const nextTitle = draftTitle.trim();
-    if (!nextTitle) {
-      setDraftTitle(savedTitle);
-      setEditing(false);
-      toast.error('Meeting title cannot be empty');
-      return;
-    }
-    if (nextTitle === savedTitle) {
-      setEditing(false);
-      return;
-    }
-
-    setIsSavingTitle(true);
-    try {
-      await invoke<void>('api_rename_meeting', {
-        meetingId,
-        title: nextTitle,
-      });
-      setSavedTitle(nextTitle);
-      setDraftTitle(nextTitle);
-      setEditing(false);
-      setMeetings(meetings.map((meeting) => (
-        meeting.id === meetingId ? { ...meeting, title: nextTitle } : meeting
-      )));
-      if (currentMeeting?.id === meetingId) {
-        setCurrentMeeting({ id: meetingId, title: nextTitle });
-      }
-      onTitleSaved(nextTitle);
-      await refetchMeetings();
-    } catch (error) {
-      console.error('[MeetingHeader] Failed to rename meeting:', error);
-      setDraftTitle(savedTitle);
-      toast.error('Could not rename meeting', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setIsSavingTitle(false);
-    }
-  };
-
-  const toggleStar = async () => {
-    if (!starStateLoaded) return;
-    const next = !starred;
-    setStarred(next);
-    try {
-      await invoke<void>('api_set_meeting_starred', { meetingId, starred: next });
-      await refetchMeetings();
-    } catch (error) {
-      setStarred(!next);
-      console.error('[MeetingHeader] Failed to update starred state:', error);
-      toast.error('Could not update starred state', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
-
-  const deleteMeeting = async () => {
-    try {
-      await invoke<DeferredDeleteResponse>('api_defer_delete_meeting', { meetingId });
-      await refetchMeetings();
-      onDeleted();
-      toast('Meeting deleted', {
-        duration: 8_000,
-        action: {
-          label: 'Undo',
-          onClick: () => {
-            void (async () => {
-              try {
-                await invoke<void>('api_restore_meeting', { meetingId });
-                await refetchMeetings();
-                toast.success('Meeting restored');
-              } catch (error) {
-                toast.error('Could not restore meeting', {
-                  description: error instanceof Error ? error.message : String(error),
-                });
-              }
-            })();
-          },
-        },
-      });
-    } catch (error) {
-      console.error('[MeetingHeader] Failed to delete meeting:', error);
-      toast.error('Could not delete meeting', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
-
-  const openMeetingFolder = async () => {
-    try {
-      await invoke<void>('open_meeting_folder', { meetingId });
-    } catch (error) {
-      console.error('[MeetingHeader] Failed to open meeting folder:', error);
-      toast.error('Could not open meeting folder', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
-
-  const durationLabel = formatDuration(durationMs);
-
-  return (
-    <header className="shrink-0 border-b border-border bg-bg">
-      <div className="flex items-start gap-4 px-5 pb-3 pt-4 md:px-6">
-        <div className="min-w-0 flex-1">
-          {editing ? (
-            <input
-              ref={inputRef}
-              value={draftTitle}
-              disabled={isSavingTitle}
-              onChange={(event) => setDraftTitle(event.target.value)}
-              onBlur={() => void saveTitle()}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  inputRef.current?.blur();
-                }
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  cancelBlurRef.current = true;
-                  setDraftTitle(savedTitle);
-                  setEditing(false);
-                  inputRef.current?.blur();
-                }
-              }}
-              className="h-8 w-full max-w-[620px] rounded-control border border-accent bg-surface px-2.5 text-title text-text outline-none"
-              aria-label="Meeting title"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={beginRename}
-              className="group flex min-w-0 max-w-[680px] items-center gap-2 text-left"
-              title="Rename meeting (⌘⇧R)"
-            >
-              <h1 className="truncate text-display text-text">{savedTitle || 'Untitled meeting'}</h1>
-              <Pencil className="h-3.5 w-3.5 shrink-0 text-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus:opacity-100" strokeWidth={1.75} />
-            </button>
-          )}
-          <p className="mt-1 text-caption text-3">
-            {formatCreatedAt(createdAt)}{durationLabel ? ` · ${durationLabel}` : ''}
-          </p>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => void toggleStar()}
-            disabled={!starStateLoaded}
-            aria-label={starred ? 'Unstar meeting' : 'Star meeting'}
-            aria-pressed={starred}
-            className={`inline-grid h-8 w-8 place-items-center rounded-control border border-border bg-surface transition-colors duration-150 hover:bg-bg disabled:opacity-40 ${starred ? 'text-accent' : 'text-2'}`}
-          >
-            <Star className="h-4 w-4" fill={starred ? 'currentColor' : 'none'} strokeWidth={1.75} />
-          </button>
-          <button
-            type="button"
-            onClick={() => void openMeetingFolder()}
-            className="inline-flex h-8 items-center gap-1.5 rounded-control border border-border bg-surface px-2.5 text-ui font-medium text-text transition-colors duration-150 hover:bg-bg"
-            title="Open meeting folder in Finder"
-          >
-            <FolderOpen className="h-4 w-4" strokeWidth={1.75} />
-            <span className="hidden lg:inline">Open folder</span>
-          </button>
-          <ShareMenu meetingId={meetingId} />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="inline-grid h-8 w-8 place-items-center rounded-control border border-border bg-surface text-2 hover:bg-bg hover:text-text"
-                aria-label="More meeting actions"
-              >
-                <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="border-border bg-surface text-text">
-              <DropdownMenuItem onSelect={beginRename}>
-                <Pencil /> Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={!starStateLoaded} onSelect={() => void toggleStar()}>
-                <Star /> {starred ? 'Unstar' : 'Star'}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-border" />
-              <DropdownMenuItem
-                onSelect={() => void deleteMeeting()}
-                className="text-danger focus:bg-accent-soft focus:text-danger"
-              >
-                <Trash2 /> Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      <nav role="tablist" className="flex h-9 items-end gap-1 px-5 md:px-6" aria-label="Meeting detail sections">
-        {tabs.map((tab) => {
-          const selected = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              id={`meeting-tab-${tab.id}`}
-              aria-controls={`meeting-panel-${tab.id}`}
-              tabIndex={selected ? 0 : -1}
-              aria-selected={selected}
-              onKeyDown={(event) => {
-                const index = tabs.findIndex(candidate => candidate.id === tab.id);
-                const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : -1;
-                if (next >= 0) { event.preventDefault(); onTabChange(tabs[next].id); document.getElementById(`meeting-tab-${tabs[next].id}`)?.focus(); }
-              }}
-              onClick={() => onTabChange(tab.id)}
-              className={`relative h-9 rounded-t-control px-3 text-ui font-medium transition-colors duration-150 ${
-                selected ? 'text-text' : 'text-3 hover:text-text'
-              }`}
-            >
-              {tab.label}
-              <span className="ml-1.5 text-[10px] text-3">{tab.shortcut}</span>
-              {selected && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-accent" />}
-            </button>
-          );
-        })}
-      </nav>
-    </header>
-  );
+export default function MeetingHeader({meetingId,title,createdAt,activeTab,onTabChange,onTitleSaved,onDeleted}:Props){
+  const {currentMeeting,setCurrentMeeting,meetings,setMeetings,refetchMeetings}=useSidebar();
+  const inputRef=useRef<HTMLInputElement>(null); const cancelBlur=useRef(false); const [savedTitle,setSavedTitle]=useState(title); const [draftTitle,setDraftTitle]=useState(title); const [editing,setEditing]=useState(false); const [saving,setSaving]=useState(false); const [starred,setStarred]=useState(false); const [starLoaded,setStarLoaded]=useState(false); const [durationMs,setDurationMs]=useState<number|null>(null); const [centerHost,setCenterHost]=useState<Element|null>(null); const [trailingHost,setTrailingHost]=useState<Element|null>(null);
+  useEffect(()=>{setCenterHost(document.querySelector('[data-meetodds-toolbar-center]'));setTrailingHost(document.querySelector('[data-meetodds-toolbar-trailing]'))},[]);
+  useEffect(()=>{setSavedTitle(title);setDraftTitle(title)},[meetingId,title]);
+  useEffect(()=>{let cancelled=false;setStarLoaded(false);void invoke<MeetingListPage>('api_list_meetings',{request:{limit:100,query:title,sort:'newest'}}).then(page=>{if(cancelled)return;const item=page.items.find(x=>x.id===meetingId);if(item){setStarred(item.starred);setDurationMs(item.durationMs)}}).catch(()=>{}).finally(()=>{if(!cancelled)setStarLoaded(true)});return()=>{cancelled=true}},[meetingId,title]);
+  const beginRename=()=>{setEditing(true);requestAnimationFrame(()=>{inputRef.current?.focus();inputRef.current?.select()})};
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if(isEditableTarget(e.target))return;if(e.metaKey&&e.shiftKey&&e.key.toLowerCase()==='r'){e.preventDefault();beginRename();return}if(e.ctrlKey&&!e.metaKey&&['1','2','3'].includes(e.key)){e.preventDefault();onTabChange(tabs[Number(e.key)-1].id)}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key)},[onTabChange]);
+  const saveTitle=async()=>{if(cancelBlur.current){cancelBlur.current=false;return}const next=draftTitle.trim();if(!next){setDraftTitle(savedTitle);setEditing(false);toast.error('Meeting title cannot be empty');return}if(next===savedTitle){setEditing(false);return}setSaving(true);try{await invoke('api_rename_meeting',{meetingId,title:next});setSavedTitle(next);setDraftTitle(next);setEditing(false);setMeetings(meetings.map(m=>m.id===meetingId?{...m,title:next}:m));if(currentMeeting?.id===meetingId)setCurrentMeeting({id:meetingId,title:next});onTitleSaved(next);await refetchMeetings()}catch(e){setDraftTitle(savedTitle);toast.error('Could not rename meeting',{description:e instanceof Error?e.message:String(e)})}finally{setSaving(false)}};
+  const toggleStar=async()=>{if(!starLoaded)return;const next=!starred;setStarred(next);try{await invoke('api_set_meeting_starred',{meetingId,starred:next});await refetchMeetings()}catch{setStarred(!next);toast.error('Could not update starred state')}};
+  const deleteMeeting=async()=>{try{await invoke<DeferredDeleteResponse>('api_defer_delete_meeting',{meetingId});await refetchMeetings();onDeleted();toast('Meeting deleted',{duration:8000,action:{label:'Undo',onClick:()=>void invoke('api_restore_meeting',{meetingId}).then(()=>refetchMeetings())}})}catch(e){toast.error('Could not delete meeting',{description:String(e)})}};
+  const openFolder=async()=>{try{await invoke('open_meeting_folder',{meetingId})}catch(e){toast.error('Could not open meeting folder',{description:String(e)})}};
+  const duration=formatDuration(durationMs);
+  const tabControl=<div data-toolbar-center-active className="flex items-center rounded-[10px] border border-border bg-panel-2 p-[2px]">{tabs.map(tab=><button key={tab.id} type="button" role="tab" aria-selected={activeTab===tab.id} onClick={()=>onTabChange(tab.id)} className={`h-7 rounded-[8px] px-3 text-[11px] font-semibold transition ${activeTab===tab.id?'bg-panel text-text shadow-[0_1px_2px_rgba(24,18,12,.08)]':'text-3 hover:text-text'}`}>{tab.label}<span className="ml-1.5 font-mono text-[8px] text-3">{tab.shortcut}</span></button>)}</div>;
+  const trailing=<div className="flex items-center gap-1"><ShareMenu meetingId={meetingId}/><DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="inline-grid h-8 w-8 place-items-center rounded-[9px] text-2 hover:bg-[var(--hover)]" aria-label="More meeting actions"><MoreHorizontal className="h-4 w-4"/></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={beginRename}><Pencil/>Rename</DropdownMenuItem><DropdownMenuItem disabled={!starLoaded} onSelect={()=>void toggleStar()}><Star/>{starred?'Unstar':'Star'}</DropdownMenuItem><DropdownMenuSeparator/><DropdownMenuItem onSelect={()=>void deleteMeeting()} className="text-danger"><Trash2/>Delete</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>;
+  return <>
+    {centerHost&&createPortal(tabControl,centerHost)}{trailingHost&&createPortal(trailing,trailingHost)}
+    <header className="shrink-0 bg-bg"><div className="mx-auto flex w-full max-w-[760px] items-start gap-4 px-6 pb-5 pt-7">
+      <div className="min-w-0 flex-1">{editing?<input ref={inputRef} value={draftTitle} disabled={saving} onChange={e=>setDraftTitle(e.target.value)} onBlur={()=>void saveTitle()} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();inputRef.current?.blur()}if(e.key==='Escape'){e.preventDefault();cancelBlur.current=true;setDraftTitle(savedTitle);setEditing(false);inputRef.current?.blur()}}} className="h-10 w-full rounded-[10px] border border-accent bg-panel px-3 text-[22px] font-semibold tracking-[-.03em] outline-none"/>:<button type="button" onClick={beginRename} className="group flex min-w-0 max-w-full items-center gap-2 text-left"><h1 className="truncate text-[25px] font-semibold tracking-[-.035em] text-text">{savedTitle||'Untitled meeting'}</h1><Pencil className="h-3.5 w-3.5 shrink-0 text-3 opacity-0 group-hover:opacity-100"/></button>}
+      <p className="mt-1.5 font-mono text-[10.5px] text-3">{formatCreatedAt(createdAt)}{duration?` · ${duration}`:''}</p></div>
+      <div className="flex shrink-0 items-center gap-1.5"><button type="button" onClick={()=>void toggleStar()} disabled={!starLoaded} className={`inline-grid h-9 w-9 place-items-center rounded-[10px] border border-border bg-panel ${starred?'text-accent':'text-3'}`} aria-label={starred?'Unstar':'Star'}><Star className="h-4 w-4" fill={starred?'currentColor':'none'}/></button><button type="button" onClick={()=>void openFolder()} className="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-border bg-panel px-3 text-[11px] font-medium text-text hover:bg-[var(--hover)]"><FolderOpen className="h-3.5 w-3.5"/>Open folder</button></div>
+    </div></header>
+  </>;
 }
