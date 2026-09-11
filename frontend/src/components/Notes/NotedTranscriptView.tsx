@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { emit, listen } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
 import { Plus, LoaderCircle, NotebookPen } from 'lucide-react';
 import { VirtualizedTranscriptView, type VirtualizedTranscriptViewProps } from '@/components/VirtualizedTranscriptView';
 import { getManualNotes, openManualNotesWindow } from '@/services/manualNotesService';
+import { LIVE_NOTE_REQUEST_EVENT } from '@/components/Meeting/LiveMeetingNotes';
 import { formatTimestampLabel } from '@/types/moment-notes';
 import type { Transcript, TranscriptSegmentData } from '@/types';
 
@@ -22,7 +23,7 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
   const pending = useRef(false);
   const originals = useMemo(() => new Map(noteTranscripts.map(t => [t.id, t])), [noteTranscripts]);
 
-  // Load manual notes text and keep in sync
+  // Load manual notes text and keep timestamp indicators in sync with saved edits.
   useEffect(() => {
     if (!meetingId) {
       setNotesContent('');
@@ -47,7 +48,6 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
     };
   }, [meetingId]);
 
-  // Parse all timestamps in the document: <!-- [mm:ss] -->
   const notedTimestamps = useMemo(() => {
     const set = new Set<string>();
     if (!notesContent) return set;
@@ -57,6 +57,13 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
     }
     return set;
   }, [notesContent]);
+
+  const requestEmbeddedNotes = useCallback((appendText?: string | null) => {
+    if (!meetingId) return;
+    window.dispatchEvent(new CustomEvent(LIVE_NOTE_REQUEST_EVENT, {
+      detail: { meetingId, appendText: appendText ?? null },
+    }));
+  }, [meetingId]);
 
   const open = useCallback(async (segment: TranscriptSegmentData) => {
     if (!meetingId || pending.current) return;
@@ -69,12 +76,17 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
       const rawTime = realTime(original?.audio_start_time ?? segment.timestamp);
       const label = formatTimestampLabel(rawTime);
       const timestampTag = label ? `<!-- [${label}] -->` : '<!-- [Note] -->';
-
-      // If this moment already exists in the document, don't re-append a duplicate tag
       const alreadyNoted = Boolean(label && notedTimestamps.has(label));
       const tagToAppend = alreadyNoted ? null : timestampTag;
 
-      await openManualNotesWindow(meetingId, null, tagToAppend);
+      if (liveNotes) {
+        // Live mode is an embedded notebook. Do not launch another macOS window;
+        // append the moment marker into the main canvas and move focus there.
+        requestEmbeddedNotes(tagToAppend);
+      } else {
+        await openManualNotesWindow(meetingId, null, tagToAppend);
+      }
+
       if (tagToAppend && label) {
         setNotesContent(prev => {
           const trimmed = prev.trimEnd();
@@ -87,7 +99,7 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
       pending.current = false;
       setOpening(null);
     }
-  }, [meetingId, originals, liveNotes, notedTimestamps]);
+  }, [meetingId, originals, liveNotes, notedTimestamps, requestEmbeddedNotes]);
 
   const renderAction = useCallback((segment: TranscriptSegmentData) => {
     if (!meetingId || (liveNotes && !originals.has(segment.id))) return null;
@@ -95,7 +107,7 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
     const label = formatTimestampLabel(rawTime);
     const hasNote = Boolean(label && notedTimestamps.has(label));
     const title = hasNote
-      ? `View note · ${label}`
+      ? `${liveNotes ? 'Focus' : 'View'} note · ${label}`
       : `Add note at ${label || 'this moment'}`;
 
     return (
@@ -107,12 +119,12 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
         onClick={() => void open(segment)}
         className={`relative inline-grid h-8 w-8 shrink-0 place-items-center rounded-full border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-35 ${
           hasNote
-            ? 'border-accent bg-accent text-white shadow-xs'
+            ? 'border-accent bg-accent text-accent-foreground shadow-xs'
             : 'border-accent/35 bg-accent-soft/60 text-accent hover:border-accent hover:bg-accent-soft'
         }`}
       >
         {opening === segment.id ? (
-          <LoaderCircle className="h-4 w-4 animate-spin" />
+          <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" />
         ) : hasNote ? (
           <NotebookPen className="h-3.5 w-3.5" />
         ) : (
@@ -122,6 +134,15 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
     );
   }, [meetingId, liveNotes, originals, notedTimestamps, opening, open]);
 
+  const openNotes = useCallback(() => {
+    if (!meetingId) return;
+    if (liveNotes) {
+      requestEmbeddedNotes(null);
+      return;
+    }
+    void openManualNotesWindow(meetingId).catch(() => setOpenError('Could not open meeting notes. Retry.'));
+  }, [liveNotes, meetingId, requestEmbeddedNotes]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {meetingId && (
@@ -130,9 +151,9 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-accent hover:bg-accent-soft"
-            onClick={() => void openManualNotesWindow(meetingId).catch(() => setOpenError('Could not open meeting notes. Retry.'))}
+            onClick={openNotes}
           >
-            <NotebookPen className="h-3.5 w-3.5" /> Meeting notes
+            <NotebookPen className="h-3.5 w-3.5" /> {liveNotes ? 'Focus notes' : 'Meeting notes'}
           </button>
         </div>
       )}
