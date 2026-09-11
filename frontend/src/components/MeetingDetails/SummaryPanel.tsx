@@ -121,6 +121,9 @@ export function SummaryPanel(props: SummaryPanelProps) {
     setSummaryLang(language); setLangPickerOpen(false); void persistLanguage();
   };
   const generate = async (prompt: string) => {
+    const before = new CustomEvent('meetodds:before-summary-generation', { cancelable: true, detail: { meetingId: meeting.id } });
+    if (!window.dispatchEvent(before)) { toast.info('Save or cancel your action edits before regenerating.'); return; }
+    if (saveRunning.current) { toast.info('Wait for your summary language to save, then generate.'); return; }
     try {
       if (hasSummary) await props.onSaveAll();
       try { localStorage.setItem(AUTO_SUMMARY_CHOICE_KEY, 'chosen'); setFirstChoice(false); } catch { /* Optional preference. */ }
@@ -160,27 +163,25 @@ export function SummaryPanel(props: SummaryPanelProps) {
             <label className="flex cursor-pointer items-start gap-3 text-sm text-text"><input type="checkbox" className="mt-1 h-4 w-4 accent-current" checked={isAutoSummary} onChange={event => {
               toggleIsAutoSummary(event.target.checked);
               try { localStorage.setItem(AUTO_SUMMARY_CHOICE_KEY, 'chosen'); setFirstChoice(false); } catch { /* Preference only. */ }
-            }} /><span><strong className="font-medium">{firstChoice ? 'Make this automatic after future meetings' : 'Generate automatically after future meetings'}</strong><span className="mt-1 block max-w-[560px] text-xs leading-5 text-3">You will approve the provider and included notes on the next screen. Changing the provider, model, or destination requires a new approval. You can turn this off in Settings.</span></span></label>
+            }} /><span><strong className="font-medium">{firstChoice ? 'Make this automatic after future meetings' : 'Generate automatically after future meetings'}</strong><span className="mt-1 block max-w-[560px] text-xs leading-5 text-3">Approve your provider and included notes on the next screen. Future meetings then generate automatically. Changing provider, model, or destination requires a new approval. Turn this off in Settings.</span></span></label>
           </div>}
           {!transcripts.length && <p role="status" className="mt-5 text-sm text-2">No saved speech was found. Your notes are available in the Notes tab; no actions will be invented.</p>}
-          {busy && <p role="status" className="mt-5 text-xs leading-5 text-3">Your recording and notes are unchanged. Actions will appear only after the AI result is saved.</p>}
+          {busy && <p role="status" className="mt-5 text-xs leading-5 text-3">Your recording and notes are unchanged. The outcome will appear after the AI result is saved.</p>}
         </section> : <header className="space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[11px] font-semibold uppercase tracking-[.14em] text-3">{busy ? 'UPDATING YOUR AI SUMMARY' : 'READY TO REVIEW'}</p><h2 className="mt-1 text-2xl font-semibold tracking-tight text-text">Your meeting, made clear.</h2></div><span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1.5 text-xs text-accent"><Sparkles size={13} /> AI-generated · review before sharing</span></div>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface p-3">{controls}<SummaryUpdaterButtonGroup isSaving={props.isSaving} isDirty={props.isTitleDirty || (summaryRef.current?.isDirty || false)} onSave={() => props.onSaveAll().catch(() => undefined)} onCopy={props.onCopySummary} onFind={() => window.dispatchEvent(new CustomEvent('meetodds:find-summary'))} onOpenFolder={props.onOpenFolder} onExport={exportSummary} exportingFormat={exportingFormat} hasSummary /></div>
         </header>}
         {summaryError && <div role="alert" className="rounded-xl border border-border bg-surface p-4 text-sm leading-6 text-danger">{summaryError}</div>}
-        {busy && hasSummary && <div role="status" className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4 text-sm text-2"><Loader2 size={16} className="shrink-0 animate-spin motion-reduce:animate-none" />{props.getSummaryStatusMessage(summaryStatus)} Your previous summary is kept below until the new result succeeds.</div>}
-        {hasSummary && <>
-          <section className="overflow-hidden rounded-2xl border border-border bg-surface" aria-label="AI meeting summary">
-            <div className="border-b border-border px-6 py-4"><h3 className="text-sm font-semibold text-text">AI summary</h3><p className="mt-1 text-xs text-3">The full picture, with your notes in context. Editable without changing the original transcript.</p></div>
-            <div className="p-4 sm:p-6" aria-busy={busy} style={busy ? { pointerEvents: 'none' } : undefined}>
-              <BlockNoteSummaryView key={meeting.id} ref={summaryRef} summaryData={aiSummary} onSave={props.onSaveSummary} onSummaryChange={props.onSummaryChange} onDirtyChange={props.onDirtyChange} status={summaryStatus} error={summaryError}
-                onRegenerateSummary={() => void generate(props.customPrompt)} meeting={{ id: meeting.id, title: props.meetingTitle, created_at: meeting.created_at }} />
-            </div>
-          </section>
-          {!busy && <section aria-label="AI-generated meeting outcome and actions"><MeetingOutcomeWorkspace meetingId={meeting.id} /></section>}
-        </>}
-        <p className="pb-2 text-xs leading-5 text-3">{!hasSummary ? 'Your saved transcript and notes are always available in the tabs above.' : 'Actions are taken from the saved AI summary. Your confirmed decisions and completed work survive regeneration.'} {localProvider ? 'The next screen shows the exact processing destination.' : 'Only approved text is sent to the selected provider; audio is not sent for this summary.'}</p>
+        {busy && hasSummary && <div role="status" className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4 text-sm text-2"><Loader2 size={16} className="shrink-0 animate-spin motion-reduce:animate-none" />{props.getSummaryStatusMessage(summaryStatus)} Your previous summary is kept until the new result succeeds.</div>}
+        {hasSummary && !busy && <section aria-label="AI-generated meeting outcome and actions"><MeetingOutcomeWorkspace meetingId={meeting.id} /></section>}
+        {hasSummary && <details className="overflow-hidden rounded-2xl border border-border bg-surface">
+          <summary className="cursor-pointer px-6 py-4 text-sm font-semibold text-text">Read or edit the full AI summary <span className="ml-2 text-xs font-normal text-3">Your complete, exportable meeting record</span></summary>
+          <div className="border-t border-border p-4 sm:p-6" aria-busy={busy}>
+            <BlockNoteSummaryView key={meeting.id} ref={summaryRef} summaryData={aiSummary} onSave={props.onSaveSummary} onSummaryChange={props.onSummaryChange} onDirtyChange={props.onDirtyChange} status={summaryStatus} error={summaryError}
+              onRegenerateSummary={() => void generate(props.customPrompt)} meeting={{ id: meeting.id, title: props.meetingTitle, created_at: meeting.created_at }} />
+          </div>
+        </details>}
+        <p className="pb-2 text-xs leading-5 text-3">{!hasSummary ? 'Your saved transcript and notes are always available in the tabs above.' : 'Actions come from the saved AI summary. Confirmed decisions and completed work survive regeneration.'} {localProvider ? 'The input review shows the exact processing destination.' : 'Only approved text is sent to the selected provider; audio is not sent for this summary.'}</p>
       </div>
     </div>
   </div>;
