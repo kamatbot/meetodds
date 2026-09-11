@@ -16,6 +16,8 @@ interface Props extends VirtualizedTranscriptViewProps {
   liveNotes?: boolean;
 }
 const realTime = (value: number | undefined) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+const speakerName = (transcript?: Transcript, segment?: TranscriptSegmentData) =>
+  transcript?.speaker_label || transcript?.speaker || segment?.speaker_label || segment?.speaker || 'Speaker';
 
 export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNotes = false, ...view }: Props) {
   const router = useRouter();
@@ -79,27 +81,30 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
       const label = formatTimestampLabel(rawTime);
       const timestampTag = label ? `<!-- [${label}] -->` : '<!-- [Note] -->';
       const alreadyNoted = Boolean(label && notedTimestamps.has(label));
-      const tagToAppend = alreadyNoted ? null : timestampTag;
+      const speaker = speakerName(original, segment);
+      const visibleAnchor = label ? `**${label} · ${speaker}** — ` : `**${speaker}** — `;
+      const blockToAppend = alreadyNoted ? null : `${timestampTag}\n${visibleAnchor}`;
 
       if (liveNotes) {
-        // Live mode is an embedded notebook. Do not launch another macOS window;
-        // append the moment marker into the main canvas and move focus there.
-        requestEmbeddedNotes(tagToAppend);
+        // In the live notebook, + means “capture my thought at this moment”. The
+        // transcript remains evidence at the side; do not copy raw transcript text
+        // into the user's notes or manufacture an action before the AI summary.
+        requestEmbeddedNotes(blockToAppend);
       } else {
-        if (tagToAppend) {
+        if (blockToAppend) {
           const prev = await getManualNotes(meetingId);
           const trimmed = prev.trimEnd();
-          const next = trimmed ? `${trimmed}\n\n${tagToAppend}\n` : `${tagToAppend}\n`;
+          const next = trimmed ? `${trimmed}\n\n${blockToAppend}\n` : `${blockToAppend}\n`;
           await saveManualNotes(meetingId, next, prev);
           await emit('manual-notes:saved', { meetingId }).catch(() => undefined);
         }
         router.push(`/meeting?id=${encodeURIComponent(meetingId)}&tab=notes`);
       }
 
-      if (tagToAppend && label) {
+      if (blockToAppend && label) {
         setNotesContent(prev => {
           const trimmed = prev.trimEnd();
-          return trimmed ? `${trimmed}\n\n${tagToAppend}\n` : `${tagToAppend}\n`;
+          return trimmed ? `${trimmed}\n\n${blockToAppend}\n` : `${blockToAppend}\n`;
         });
       }
     } catch (e) {
@@ -117,7 +122,7 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
     const hasNote = Boolean(label && notedTimestamps.has(label));
     const title = hasNote
       ? `${liveNotes ? 'Focus' : 'View'} note · ${label}`
-      : `Add note at ${label || 'this moment'}`;
+      : `Capture a note at ${label || 'this moment'}`;
 
     return (
       <button
@@ -156,13 +161,13 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
     <div className="flex h-full min-h-0 flex-col">
       {meetingId && (
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-3">
-          <span>Use + beside a transcript line to add a note at that moment</span>
+          <span>{liveNotes ? 'Use + to capture your thought at that exact moment' : 'Use + beside a transcript line to add a linked note'}</span>
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-accent hover:bg-accent-soft"
             onClick={openNotes}
           >
-            <NotebookPen className="h-3.5 w-3.5" /> {liveNotes ? 'Focus notes' : 'Meeting notes'}
+            <NotebookPen className="h-3.5 w-3.5" /> {liveNotes ? 'Focus notebook' : 'Meeting notes'}
           </button>
         </div>
       )}
