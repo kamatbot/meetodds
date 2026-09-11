@@ -39,6 +39,7 @@ pub mod analytics;
 pub mod anthropic;
 pub mod api;
 pub mod audio;
+pub mod calendar;
 pub mod config;
 pub mod console_utils;
 pub mod database;
@@ -517,7 +518,6 @@ pub fn run() {
                     }
                 }
             }
-
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -631,6 +631,9 @@ pub fn run() {
             whisper_engine::parallel_commands::test_parallel_processing_setup,
             get_audio_devices,
             trigger_microphone_permission,
+            calendar::calendar_get_permission_status,
+            calendar::calendar_request_access,
+            calendar::calendar_list_events,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
             audio::capture_preflight::run_capture_preflight,
