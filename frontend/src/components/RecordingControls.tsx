@@ -12,7 +12,6 @@ import RecorderBar from '@/components/Meeting/RecorderBar';
 import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useTranscriptSession } from '@/contexts/TranscriptContext';
-import { openManualNotesWindow } from '@/services/manualNotesService';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -295,9 +294,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
               void handleStopRecording();
             }}
             onToggleCaptions={() => setCaptionsVisible(!captionsVisible)}
-            onOpenNotes={() => {
-              if (currentMeetingId) void openManualNotesWindow(currentMeetingId).catch(() => {});
-            }}
           />
         ) : (
           <Tooltip>

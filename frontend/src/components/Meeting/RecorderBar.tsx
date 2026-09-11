@@ -1,6 +1,6 @@
 'use client';
 
-import { Captions, CaptionsOff, LoaderCircle, NotebookPen, Pause, Play, Square } from 'lucide-react';
+import { Captions, CaptionsOff, LoaderCircle, Pause, Play, Square } from 'lucide-react';
 
 interface RecorderBarProps {
   isPaused: boolean;
@@ -15,7 +15,6 @@ interface RecorderBarProps {
   onPauseResume: () => void;
   onStop: () => void;
   onToggleCaptions: () => void;
-  onOpenNotes: () => void;
 }
 
 function formatDuration(seconds: number | null): string {
@@ -71,7 +70,6 @@ export default function RecorderBar({
   onPauseResume,
   onStop,
   onToggleCaptions,
-  onOpenNotes,
 }: RecorderBarProps) {
   const controlsBusy = isStopping || isPausing || isResuming;
 
@@ -115,15 +113,6 @@ export default function RecorderBar({
         ) : (
           <CaptionsOff className="h-4 w-4" strokeWidth={1.75} />
         )}
-      </button>
-
-      <button
-        type="button"
-        onClick={onOpenNotes}
-        className="inline-grid h-8 w-8 shrink-0 place-items-center rounded-full border border-border bg-bg text-text transition-colors duration-150 hover:bg-surface"
-        aria-label="Open meeting notes"
-      >
-        <NotebookPen className="h-4 w-4" strokeWidth={1.75} />
       </button>
 
       <button

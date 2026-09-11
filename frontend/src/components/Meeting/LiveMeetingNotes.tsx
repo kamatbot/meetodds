@@ -71,9 +71,8 @@ export default function LiveMeetingNotes({ meetingId }: { meetingId: string }) {
     focusEditor();
   }, [draft, focusEditor]);
 
-  // The embedded editor is now the default live-notes surface. Close a legacy
-  // notes window left open when this recording workspace first mounts. A later
-  // explicit "Pop out" action can reopen it and is never auto-closed.
+  // The embedded editor is the sole live-notes surface. Close any legacy
+  // notes window left open when this recording workspace mounts.
   useEffect(() => {
     void closeManualNotesWindow().catch(() => undefined);
   }, [meetingId]);

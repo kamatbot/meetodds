@@ -14,11 +14,11 @@ export async function linkManualNotes(draftMeetingId: string, meetingId: string)
 }
 
 export async function openManualNotesWindow(
-  meetingId: string,
-  noteId: string | null = null,
-  appendText: string | null = null,
+  _meetingId: string,
+  _noteId: string | null = null,
+  _appendText: string | null = null,
 ): Promise<void> {
-  await invoke<void>('open_manual_notes_window', { meetingId, noteId, appendText });
+  // Pop-out notes window is removed; notes live directly in the central meeting canvas.
 }
 
 export async function closeManualNotesWindow(): Promise<void> {

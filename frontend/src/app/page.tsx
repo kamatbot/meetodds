@@ -12,7 +12,6 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { useTranscriptSession } from '@/contexts/TranscriptContext';
-import { openManualNotesWindow } from '@/services/manualNotesService';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import Analytics from '@/lib/analytics';
@@ -100,6 +99,6 @@ export default function Home() {
       </div> : <div className="min-w-0 flex-1"><HomeDashboard hasMicrophone={hasMicrophone} hasSystemAudio={hasSystemAudio} permissionsLoading={isCheckingPermissions} permissionError={permissionError} recoverableMeetings={recoverableMeetings} isRecoveryLoading={isLoadingRecovery} isRecording={inAppRecording} recordingStatus={status} recordingDuration={recordingState.recordingDuration} newMeetingDisabled={!hasMicrophone || isRecordingDisabled} onNewMeeting={() => void handleNewMeeting()} onImport={(filePath) => openImportDialog(filePath)} onReviewRecovery={() => setShowRecoveryDialog(true)} onOpenSettings={() => router.push('/settings')} /></div>}
     </div>
 
-    {(inAppRecording || isStopping || isProcessingStop) && <LiveMeetingBar isPaused={recordingState.isPaused} isBusy={isHomeControlBusy || isStopping || isProcessingStop} captionsVisible={captionsVisible} onPauseResume={() => void handleHomePauseResume()} onStop={() => void handleHomeStop()} onOpenNotes={() => { const id = currentMeetingId; if (id) void openManualNotesWindow(id).catch(() => {}); }} onToggleCaptions={() => setCaptionsVisible(!captionsVisible)} />}
+    {(inAppRecording || isStopping || isProcessingStop) && <LiveMeetingBar isPaused={recordingState.isPaused} isBusy={isHomeControlBusy || isStopping || isProcessingStop} captionsVisible={captionsVisible} onPauseResume={() => void handleHomePauseResume()} onStop={() => void handleHomeStop()} onToggleCaptions={() => setCaptionsVisible(!captionsVisible)} />}
   </div>;
 }

@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowUpRight } from 'lucide-react';
-import { getManualNotes, openManualNotesWindow } from '@/services/manualNotesService';
+import { getManualNotes } from '@/services/manualNotesService';
 import { NoteMarkdown } from './MarkdownNoteEditor';
 
 export default function MeetingNotesShelf({ meetingId }: { meetingId: string }) {
@@ -34,21 +33,10 @@ export default function MeetingNotesShelf({ meetingId }: { meetingId: string }) 
     };
   }, [meetingId]);
 
-  const open = () => {
-    void openManualNotesWindow(meetingId).catch(() => setLocalError('Could not open meeting notes. Retry.'));
-  };
-
   return (
     <section className="mx-6 mt-5 shrink-0 border-b border-border pb-5 text-text" aria-label="Personal notes linked to the meeting">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">Meeting notes</h2>
-        <button
-          type="button"
-          onClick={() => open()}
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-accent hover:bg-accent-soft"
-        >
-          Open notes window <ArrowUpRight className="h-3.5 w-3.5" />
-        </button>
       </div>
       <div className="max-h-56 space-y-2 overflow-y-auto">
         {content.trim() ? (
@@ -57,16 +45,13 @@ export default function MeetingNotesShelf({ meetingId }: { meetingId: string }) 
           </div>
         ) : (
           <p className="text-sm leading-6 text-3">
-            Click “+” beside any transcript turn or click “Open notes window” to take notes for this meeting.
+            Click “+” beside any transcript turn to take notes linked to this meeting.
           </p>
         )}
       </div>
       {localError && (
         <p role="alert" className="mt-2 text-sm text-danger">
           {localError}
-          <button type="button" onClick={() => { setLocalError(null); open(); }} className="ml-2 underline">
-            Retry
-          </button>
         </p>
       )}
     </section>

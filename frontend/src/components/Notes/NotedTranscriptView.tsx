@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 import { Plus, LoaderCircle, NotebookPen } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { VirtualizedTranscriptView, type VirtualizedTranscriptViewProps } from '@/components/VirtualizedTranscriptView';
-import { getManualNotes, openManualNotesWindow } from '@/services/manualNotesService';
+import { getManualNotes, saveManualNotes } from '@/services/manualNotesService';
 import { LIVE_NOTE_REQUEST_EVENT } from '@/components/Meeting/LiveMeetingNotes';
 import { formatTimestampLabel } from '@/types/moment-notes';
 import type { Transcript, TranscriptSegmentData } from '@/types';
@@ -17,6 +18,7 @@ interface Props extends VirtualizedTranscriptViewProps {
 const realTime = (value: number | undefined) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 
 export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNotes = false, ...view }: Props) {
+  const router = useRouter();
   const [notesContent, setNotesContent] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -84,7 +86,14 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
         // append the moment marker into the main canvas and move focus there.
         requestEmbeddedNotes(tagToAppend);
       } else {
-        await openManualNotesWindow(meetingId, null, tagToAppend);
+        if (tagToAppend) {
+          const prev = await getManualNotes(meetingId);
+          const trimmed = prev.trimEnd();
+          const next = trimmed ? `${trimmed}\n\n${tagToAppend}\n` : `${tagToAppend}\n`;
+          await saveManualNotes(meetingId, next, prev);
+          await emit('manual-notes:saved', { meetingId }).catch(() => undefined);
+        }
+        router.push(`/meeting?id=${encodeURIComponent(meetingId)}&tab=notes`);
       }
 
       if (tagToAppend && label) {
@@ -99,7 +108,7 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
       pending.current = false;
       setOpening(null);
     }
-  }, [meetingId, originals, liveNotes, notedTimestamps, requestEmbeddedNotes]);
+  }, [meetingId, originals, liveNotes, notedTimestamps, requestEmbeddedNotes, router]);
 
   const renderAction = useCallback((segment: TranscriptSegmentData) => {
     if (!meetingId || (liveNotes && !originals.has(segment.id))) return null;
@@ -140,8 +149,8 @@ export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNo
       requestEmbeddedNotes(null);
       return;
     }
-    void openManualNotesWindow(meetingId).catch(() => setOpenError('Could not open meeting notes. Retry.'));
-  }, [liveNotes, meetingId, requestEmbeddedNotes]);
+    router.push(`/meeting?id=${encodeURIComponent(meetingId)}&tab=notes`);
+  }, [liveNotes, meetingId, requestEmbeddedNotes, router]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
