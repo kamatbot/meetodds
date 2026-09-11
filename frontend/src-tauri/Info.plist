@@ -8,6 +8,10 @@
     <string>This application needs screen recording permission to capture system audio during meetings.</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>This application needs permission to capture system audio output for meeting transcription and recording.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>MeetOdds can read nearby calendar events to show upcoming meetings and make starting the right recording one click.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>MeetOdds can read nearby calendar events to show upcoming meetings and make starting the right recording one click. Calendar details stay on this Mac unless you explicitly use them in an external AI workflow.</string>
     <key>com.apple.security.device.audio-input</key>
     <true/>
 </dict>

@@ -6,14 +6,16 @@ import { AlertCircle, ArrowRight, CheckCircle2, FileAudio, LoaderCircle, Mic, Ra
 import { useConfig } from '@/contexts/ConfigContext';
 import { useMeetingList } from '@/hooks/useMeetingList';
 import type { MeetingMetadata } from '@/services/indexedDBService';
+import type { CalendarEvent } from '@/services/calendarService';
 import type { MeetingListItem } from '@/types/meeting';
 import { RecordingStatus } from '@/contexts/RecordingStateContext';
 import ActionInboxPreview from '@/components/Home/ActionInboxPreview';
+import CalendarAgendaCard from '@/components/Home/CalendarAgendaCard';
 
 interface HomeDashboardProps {
   hasMicrophone: boolean; hasSystemAudio: boolean; permissionsLoading: boolean; permissionError: string | null;
   recoverableMeetings: MeetingMetadata[]; isRecoveryLoading: boolean; isRecording: boolean; recordingStatus: RecordingStatus;
-  recordingDuration: number | null; newMeetingDisabled: boolean; onNewMeeting: () => void; onImport: (filePath?: string | null) => void;
+  recordingDuration: number | null; newMeetingDisabled: boolean; onNewMeeting: () => void; onCalendarMeetingStart: (event: CalendarEvent) => void; onImport: (filePath?: string | null) => void;
   onReviewRecovery: () => void; onOpenSettings: () => void;
 }
 function greetingFor(date: Date) { const hour = date.getHours(); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening' }
@@ -52,6 +54,8 @@ export default function HomeDashboard(props: HomeDashboardProps) {
   return <div className="h-full overflow-y-auto bg-bg custom-scrollbar" onDragOver={e => e.preventDefault()} onDrop={handleDrop}>
     <div className="mx-auto w-full max-w-[760px] px-6 pb-12 pt-7 md:px-8">
       <div className="flex items-start justify-between gap-6"><div><h1 className="text-[26px] font-semibold tracking-[-.035em] text-text">{greetingFor(now)}</h1><p className="mt-1 font-mono text-[11px] text-3">{formatDate(now)}</p></div><button type="button" onClick={props.onNewMeeting} disabled={props.newMeetingDisabled || busyRecording} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-[11px] bg-accent px-4 text-[12px] font-semibold text-accent-foreground shadow-[0_6px_18px_rgba(204,72,5,.16)] hover:brightness-95 disabled:opacity-45"><span className="h-2 w-2 rounded-full bg-current" />{busyRecording ? 'Meeting in progress' : 'New meeting'}</button></div>
+
+      <CalendarAgendaCard onStart={props.onCalendarMeetingStart} />
 
       <div className="mt-7"><ActionInboxPreview /></div>
 

@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Moon, Monitor, Sun } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { CalendarDays, ChevronRight, LoaderCircle, Moon, Monitor, Sun } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { useCalendarAwareness } from '@/contexts/CalendarAwarenessContext';
 import { useConfig, type NotificationSettings } from '@/contexts/ConfigContext';
 import SettingRow from './SettingRow';
 
@@ -39,6 +41,7 @@ export default function GeneralSettings() {
     loadPreferences,
     updateNotificationSettings,
   } = useConfig();
+  const calendar = useCalendarAwareness();
   const [appearance, setAppearance] = useState<AppearancePreference>('system');
   const [updatingNotifications, setUpdatingNotifications] = useState(false);
 
@@ -76,6 +79,19 @@ export default function GeneralSettings() {
     }
   };
 
+  const calendarStatus = calendar.permission?.status;
+  const calendarControl = !calendar.permission || calendar.isLoading ? (
+    <span className="inline-flex h-8 items-center gap-2 text-caption text-3"><LoaderCircle className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />Checking…</span>
+  ) : calendarStatus === 'unsupported' ? (
+    <span className="text-caption text-3">macOS only</span>
+  ) : calendarStatus === 'authorized' ? (
+    <Switch checked={calendar.enabled} onCheckedChange={calendar.setEnabled} />
+  ) : calendarStatus === 'notDetermined' ? (
+    <button type="button" onClick={() => void calendar.requestAccess()} className="inline-flex h-8 items-center gap-1.5 rounded-control border border-border bg-surface px-3 text-caption font-medium text-text hover:bg-bg"><CalendarDays className="h-3.5 w-3.5" />Connect</button>
+  ) : (
+    <button type="button" onClick={() => void invoke('open_system_settings', { preference_pane: 'Privacy_Calendars' })} className="inline-flex h-8 items-center gap-1 rounded-control border border-border bg-surface px-3 text-caption font-medium text-text hover:bg-bg">System Settings <ChevronRight className="h-3 w-3" /></button>
+  );
+
   return (
     <div>
       <SettingRow
@@ -102,6 +118,15 @@ export default function GeneralSettings() {
           </div>
         )}
       />
+
+      <SettingRow
+        label="Calendar awareness"
+        description="Read nearby Apple Calendar events on this Mac to surface the next meeting, use its title, and remind you when MeetOdds is ready. MeetOdds never starts recording automatically."
+        control={calendarControl}
+      >
+        {calendar.error && <p role="alert" className="text-caption text-danger">{calendar.error}</p>}
+        {calendarStatus === 'authorized' && <p className="text-caption leading-5 text-3">Calendar details remain local. Starting a detected meeting is still an explicit click so recording consent stays under your control.</p>}
+      </SettingRow>
 
       <SettingRow
         label="Meeting notifications"

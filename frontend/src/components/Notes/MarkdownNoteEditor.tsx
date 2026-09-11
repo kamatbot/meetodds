@@ -35,10 +35,16 @@ export function NoteMarkdown({ content }: { content: string }) {
 }
 
 const MarkdownNoteEditor = forwardRef<MarkdownNoteEditorHandle, {
-  value: string; onChange: (text: string) => void; readOnly: boolean; onSave: () => void;
-}>(function MarkdownNoteEditor({ value, onChange, readOnly, onSave }, ref) {
+  value: string;
+  onChange: (text: string) => void;
+  readOnly: boolean;
+  onSave: () => void;
+  variant?: 'default' | 'live';
+  placeholder?: string;
+}>(function MarkdownNoteEditor({ value, onChange, readOnly, onSave, variant = 'default', placeholder }, ref) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [mode, setMode] = useState<'write' | 'preview'>('write');
+  const live = variant === 'live';
 
   useImperativeHandle(ref, () => ({
     focusAndScrollEnd: () => {
@@ -79,21 +85,21 @@ const MarkdownNoteEditor = forwardRef<MarkdownNoteEditorHandle, {
     { title: 'Quote', Icon: Quote, run: () => insert('\n> ', '', 'Quote') },
     { title: 'Code', Icon: Code2, run: () => insert('`', '`', 'code') },
   ];
-  return <div className="flex min-h-[360px] flex-1 flex-col">
-    <div className="mb-4 flex flex-wrap items-center gap-1 border-b border-border pb-2.5">
+  return <div className={`flex flex-1 flex-col ${live ? 'min-h-[460px]' : 'min-h-[360px]'}`}>
+    <div className={`${live ? 'sticky top-0 z-10 -mx-2 mb-5 border-y border-border/70 bg-bg/95 px-2 py-2 backdrop-blur-sm' : 'mb-4 border-b border-border pb-2.5'} flex flex-wrap items-center gap-1`}>
       {tools.map(({ title, Icon, run }) => <button key={title} type="button" aria-label={title} title={title}
         disabled={readOnly || mode !== 'write'} onMouseDown={e => e.preventDefault()} onClick={run}
-        className="inline-grid h-8 w-8 place-items-center rounded-md text-2 hover:bg-bg hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-30"><Icon className="h-4 w-4" /></button>)}
-      <div className="ml-auto flex rounded-md bg-bg p-0.5" role="group" aria-label="Markdown view">
+        className="inline-grid h-8 w-8 place-items-center rounded-md text-2 hover:bg-panel-2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-30"><Icon className="h-4 w-4" /></button>)}
+      <div className="ml-auto flex rounded-md bg-panel-2 p-0.5" role="group" aria-label="Markdown view">
         {(['write', 'preview'] as const).map(option => <button type="button" key={option} aria-pressed={mode === option}
-          onClick={() => setMode(option)} className={`rounded px-2.5 py-1 text-xs font-medium ${mode === option ? 'bg-surface text-text shadow-sm' : 'text-2'}`}>
+          onClick={() => setMode(option)} className={`rounded px-2.5 py-1 text-xs font-medium ${mode === option ? 'bg-panel text-text shadow-sm' : 'text-2'}`}>
           {option === 'write' ? 'Write' : 'Preview'}</button>)}
       </div>
     </div>
-    {mode === 'preview' ? <div className="min-h-[300px] pb-12" aria-label="Markdown preview">
+    {mode === 'preview' ? <div className={`pb-12 ${live ? 'min-h-[420px] text-[15px]' : 'min-h-[300px]'}`} aria-label="Markdown preview">
       {value.trim() ? <NoteMarkdown content={value} /> : <p className="text-sm text-3">Your formatted note will appear here.</p>}
     </div> : <textarea ref={input} value={value} readOnly={readOnly} autoFocus spellCheck aria-label="Personal Markdown note"
-      placeholder="What stood out? Capture a thought, question, or next step…"
+      placeholder={placeholder || 'What stood out? Capture a thought, question, or next step…'}
       onChange={e => onChange(e.target.value)}
       onKeyDown={event => {
         if (event.nativeEvent.isComposing || !(event.metaKey || event.ctrlKey)) return;
@@ -103,8 +109,8 @@ const MarkdownNoteEditor = forwardRef<MarkdownNoteEditorHandle, {
         if (key === 'i') { event.preventDefault(); insert('*', '*'); }
         if (key === 'k') { event.preventDefault(); insert('[', '](https://)', 'link text'); }
       }}
-      className="min-h-[45vh] w-full flex-1 resize-y border-0 bg-transparent pb-12 text-sm font-normal leading-relaxed text-text outline-none placeholder:text-3 read-only:opacity-60" />}
-    <p className="pb-4 text-[11px] text-3">Markdown supported · Headings, lists, checkboxes, links and code · ⌘S to save</p>
+      className={`${live ? 'min-h-[52vh] text-[15.5px] leading-[1.75] tracking-[-.005em]' : 'min-h-[45vh] text-sm leading-relaxed'} w-full flex-1 resize-y border-0 bg-transparent pb-12 font-normal text-text outline-none placeholder:text-3 read-only:opacity-60`} />}
+    <p className="pb-4 pt-1 text-[10.5px] text-3">Markdown · ⌘B bold · ⌘I italic · ⌘K link · ⌘S save</p>
   </div>;
 });
 

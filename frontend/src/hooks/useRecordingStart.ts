@@ -9,8 +9,12 @@ import { showRecordingNotification } from '@/lib/recordingNotification';
 import { captureStartMessage, createCaptureStartGate, loadApprovedCapture, saveApprovedCapture } from '@/lib/capture-start';
 import { toast } from 'sonner';
 
+export interface RecordingStartOptions {
+  title?: string | null;
+}
+
 interface UseRecordingStartReturn {
-  handleRecordingStart: () => Promise<void>;
+  handleRecordingStart: (options?: RecordingStartOptions) => Promise<void>;
   isAutoStarting: boolean;
 }
 
@@ -29,7 +33,7 @@ export function useRecordingStart(
   const { selectedDevices } = useConfig();
   const { setStatus } = useRecordingState();
 
-  const handleRecordingStart = useCallback(async () => {
+  const handleRecordingStart = useCallback(async (options?: RecordingStartOptions) => {
     if (isRecording) return;
     await startGate.run(async () => {
       setIsAutoStarting(true);
@@ -54,7 +58,9 @@ export function useRecordingStart(
         if (!capture || abort.signal.aborted) return;
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, '0');
-        const title = `Meeting ${pad(now.getDate())}_${pad(now.getMonth() + 1)}_${String(now.getFullYear()).slice(-2)}_${pad(now.getHours())}_${pad(now.getMinutes())}_${pad(now.getSeconds())}`;
+        const fallbackTitle = `Meeting ${pad(now.getDate())}_${pad(now.getMonth() + 1)}_${String(now.getFullYear()).slice(-2)}_${pad(now.getHours())}_${pad(now.getMinutes())}_${pad(now.getSeconds())}`;
+        const requestedTitle = options?.title?.trim();
+        const title = requestedTitle || fallbackTitle;
         setStatus(RecordingStatus.STARTING, 'Checking selected model and audio sources…');
         // The native command validates the configured engine/model, not an unrelated
         // Parakeet installation. This also keeps all three start routes consistent.
@@ -72,7 +78,7 @@ export function useRecordingStart(
         // Notifications and telemetry must never turn successful capture into an error.
         try { await showRecordingNotification(); }
         catch { toast.info('Recording started', { description: 'The system notification could not be shown.' }); }
-        void Promise.resolve(Analytics.trackButtonClick('start_recording', 'unified_start')).catch(() => undefined);
+        void Promise.resolve(Analytics.trackButtonClick('start_recording', requestedTitle ? 'calendar_meeting' : 'unified_start')).catch(() => undefined);
       } catch (error) {
         if (!nativeStarted) {
           // A lost command response does not prove capture failed; reconcile before
