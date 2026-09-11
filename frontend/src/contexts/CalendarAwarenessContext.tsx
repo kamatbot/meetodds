@@ -174,7 +174,7 @@ export function CalendarAwarenessProvider({ children }: { children: ReactNode })
   const value = useMemo<CalendarAwarenessValue>(() => ({
     permission, enabled, events, suggestedEvent, nextEvent, recordingEvent,
     isLoading, error, requestAccess, refresh, setEnabled, dismissEvent, setRecordingEvent,
-  }), [permission, enabled, events, suggestedEvent, nextEvent, recordingEvent, isLoading, error, requestAccess, refresh, setEnabled, dismissEvent]);
+  }), [permission, enabled, events, suggestedEvent, nextEvent, recordingEvent, isLoading, error, requestAccess, refresh, setEnabled, dismissEvent, setRecordingEvent]);
 
   return <CalendarAwarenessContext.Provider value={value}>{children}</CalendarAwarenessContext.Provider>;
 }

@@ -35,7 +35,7 @@ export default function Home() {
   const [isHomeControlBusy, setIsHomeControlBusy] = useState(false);
   const { transcriptModelConfig } = useConfig();
   const { openImportDialog } = useImportDialog();
-  const calendar = useCalendarAwareness();
+  const { recordingEvent, setRecordingEvent } = useCalendarAwareness();
   const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscriptSession();
   const recordingState = useRecordingState();
   const { status, isStopping, isProcessing } = recordingState;
@@ -63,9 +63,9 @@ export default function Home() {
 
   useEffect(() => {
     if (!inAppRecording && status !== RecordingStatus.STARTING && status !== RecordingStatus.STOPPING && status !== RecordingStatus.PROCESSING_TRANSCRIPTS && status !== RecordingStatus.SAVING) {
-      calendar.setRecordingEvent(null);
+      setRecordingEvent(null);
     }
-  }, [inAppRecording, status, calendar.setRecordingEvent]);
+  }, [inAppRecording, status, setRecordingEvent]);
 
   const handleRecovery = async (meetingId: string) => {
     try {
@@ -83,7 +83,7 @@ export default function Home() {
   const recordingBusy = inAppRecording || status === RecordingStatus.STARTING || status === RecordingStatus.STOPPING || status === RecordingStatus.PROCESSING_TRANSCRIPTS || status === RecordingStatus.SAVING;
   const handleNewMeeting = async () => {
     if (!hasMicrophone || recordingBusy || isRecordingDisabled) return;
-    calendar.setRecordingEvent(null);
+    setRecordingEvent(null);
     try { await handleRecordingStart(); }
     catch (error) { showModal('errorAlert', error instanceof Error ? error.message : 'Failed to start recording'); }
   };
@@ -91,11 +91,11 @@ export default function Home() {
     if (!hasMicrophone || recordingBusy || isRecordingDisabled) return;
     try {
       await handleRecordingStart({ title: event.title });
-      if (await recordingService.isRecording().catch(() => false)) calendar.setRecordingEvent(event);
+      if (await recordingService.isRecording().catch(() => false)) setRecordingEvent(event);
     } catch (error) {
       showModal('errorAlert', error instanceof Error ? error.message : 'Failed to start recording');
     }
-  }, [hasMicrophone, recordingBusy, isRecordingDisabled, handleRecordingStart, calendar.setRecordingEvent, showModal]);
+  }, [hasMicrophone, recordingBusy, isRecordingDisabled, handleRecordingStart, setRecordingEvent, showModal]);
   const handleHomePauseResume = useCallback(async () => {
     if (!inAppRecording || isHomeControlBusy) return; setIsHomeControlBusy(true);
     try { await invoke(recordingState.isPaused ? 'resume_recording' : 'pause_recording'); }
@@ -109,11 +109,11 @@ export default function Home() {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       await invoke('stop_recording', { args: { save_path: `${dataDir}/recording-${timestamp}.wav` } });
       await handleRecordingStop(true);
-      calendar.setRecordingEvent(null);
+      setRecordingEvent(null);
     }
     catch (error) { setIsStopping(false); toast.error('Could not stop recording', { description: error instanceof Error ? error.message : String(error) }); }
     finally { setIsHomeControlBusy(false); }
-  }, [handleRecordingStop, inAppRecording, isHomeControlBusy, setIsStopping, calendar.setRecordingEvent]);
+  }, [handleRecordingStop, inAppRecording, isHomeControlBusy, setIsStopping, setRecordingEvent]);
 
   return <div className="relative flex h-full min-h-0 flex-col bg-bg">
     <SettingsModals modals={modals} messages={messages} onClose={hideModal} />
@@ -123,7 +123,7 @@ export default function Home() {
     <div className="relative flex min-h-0 flex-1">
       {inAppRecording || isStopping || isProcessingStop ? <div className="live-recording-layout w-full">
         <main className="live-notes-pane" aria-label="Live meeting notes">
-          {currentMeetingId ? <LiveMeetingNotes meetingId={currentMeetingId} calendarEvent={calendar.recordingEvent} /> : <div className="flex h-full items-center justify-center text-[12px] text-3">Preparing meeting notes…</div>}
+          {currentMeetingId ? <LiveMeetingNotes meetingId={currentMeetingId} calendarEvent={recordingEvent} /> : <div className="flex h-full items-center justify-center text-[12px] text-3">Preparing meeting notes…</div>}
         </main>
         <TranscriptDrawer presentation="drawer" isProcessingStop={isProcessingStop} isStopping={isStopping} showModal={showModal} />
       </div> : <div className="min-w-0 flex-1"><HomeDashboard hasMicrophone={hasMicrophone} hasSystemAudio={hasSystemAudio} permissionsLoading={isCheckingPermissions} permissionError={permissionError} recoverableMeetings={recoverableMeetings} isRecoveryLoading={isLoadingRecovery} isRecording={inAppRecording} recordingStatus={status} recordingDuration={recordingState.recordingDuration} newMeetingDisabled={!hasMicrophone || isRecordingDisabled} onNewMeeting={() => void handleNewMeeting()} onCalendarMeetingStart={(event) => void handleCalendarMeetingStart(event)} onImport={(filePath) => openImportDialog(filePath)} onReviewRecovery={() => setShowRecoveryDialog(true)} onOpenSettings={() => router.push('/settings')} /></div>}
