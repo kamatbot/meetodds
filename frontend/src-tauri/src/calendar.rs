@@ -57,6 +57,15 @@ mod platform {
         CalendarPermissionStatus { supported: true, status: status_name(raw).to_string() }
     }
 
+    fn access_error_for_status(status: &CalendarPermissionStatus, fallback: String) -> String {
+        match status.status.as_str() {
+            "denied" | "restricted" => "Calendar access is off. Enable MeetOdds in System Settings → Privacy & Security → Calendars.".to_string(),
+            "writeOnly" => "MeetOdds has write-only calendar access, but upcoming-meeting detection needs Full Access. Change MeetOdds to Full Access in System Settings → Privacy & Security → Calendars.".to_string(),
+            "notDetermined" => "macOS did not present the Calendar permission sheet. Quit and reopen this updated MeetOdds build, then press Connect again. If Calendar already appears in System Settings → Privacy & Security → Calendars, enable MeetOdds there.".to_string(),
+            _ => fallback,
+        }
+    }
+
     extern "C" fn permission_callback(granted: c_int, error: *const c_char, context: *mut c_void) {
         if context.is_null() {
             return;
@@ -85,7 +94,7 @@ mod platform {
             return Ok(status);
         }
         if status.status == "denied" || status.status == "restricted" {
-            return Err("Calendar access is disabled. Enable MeetOdds in System Settings → Privacy & Security → Calendars.".to_string());
+            return Err(access_error_for_status(&status, "Calendar access is unavailable.".to_string()));
         }
 
         let (tx, rx) = oneshot::channel::<Result<(), String>>();
@@ -97,10 +106,16 @@ mod platform {
                 if updated.status == "authorized" {
                     Ok(updated)
                 } else {
-                    Err("Calendar permission was requested, but full event access is still unavailable.".to_string())
+                    Err(access_error_for_status(
+                        &updated,
+                        "Calendar permission was requested, but full event access is still unavailable.".to_string(),
+                    ))
                 }
             }
-            Ok(Ok(Err(message))) => Err(message),
+            Ok(Ok(Err(message))) => {
+                let updated = current_status();
+                Err(access_error_for_status(&updated, message))
+            }
             Ok(Err(_)) => Err("Calendar permission request was interrupted.".to_string()),
             Err(_) => Err("Calendar permission request timed out. Try again from MeetOdds settings.".to_string()),
         }
