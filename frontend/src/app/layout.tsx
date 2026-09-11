@@ -1,7 +1,7 @@
 'use client'
 
 import './globals.css'
-import { Source_Sans_3 } from 'next/font/google'
+import { JetBrains_Mono, Space_Grotesk } from 'next/font/google'
 import { usePathname } from 'next/navigation'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import AppShell from '@/components/AppShell/AppShell'
@@ -27,7 +27,9 @@ import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioF
 import { LiveMeetingTranslationProvider } from '@/contexts/LiveMeetingTranslationContext'
 import LiveCaptionBridge from '@/components/Captions/LiveCaptionBridge'
 
-const sourceSans3 = Source_Sans_3({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-source-sans-3' })
+const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-space-grotesk' })
+const jetBrainsMono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-jetbrains-mono' })
+const fontVariables = `${spaceGrotesk.variable} ${jetBrainsMono.variable}`
 
 function ConditionalImportDialog({ showImportDialog, handleImportDialogClose, importFilePath }: { showImportDialog: boolean; handleImportDialogClose: (open: boolean) => void; importFilePath: string | null }) {
   return <ImportAudioDialog open={showImportDialog} onOpenChange={handleImportDialogClose} preselectedFile={importFilePath} />
@@ -42,10 +44,7 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     invoke<{ completed: boolean } | null>('get_onboarding_status')
       .then((status) => setShowOnboarding(!(status?.completed ?? false)))
-      .catch((error) => {
-        console.error('[Layout] Failed to check onboarding status:', error)
-        setShowOnboarding(true)
-      })
+      .catch((error) => { console.error('[Layout] Failed to check onboarding status:', error); setShowOnboarding(true) })
   }, [])
 
   useEffect(() => {
@@ -58,26 +57,16 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unlisten = listen('request-recording-toggle', () => {
-      if (showOnboarding) {
-        toast.error('Please complete setup first', { description: 'Finish onboarding before starting a recording.' })
-      } else {
-        window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'))
-      }
+      if (showOnboarding) toast.error('Please complete setup first', { description: 'Finish onboarding before starting a recording.' })
+      else window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'))
     })
     return () => { unlisten.then((fn) => fn()) }
   }, [showOnboarding])
 
   const handleFileDrop = useCallback((paths: string[]) => {
-    const audioFile = paths.find((path) => {
-      const extension = path.split('.').pop()?.toLowerCase()
-      return Boolean(extension && isAudioExtension(extension))
-    })
-    if (audioFile) {
-      setImportFilePath(audioFile)
-      setShowImportDialog(true)
-    } else if (paths.length > 0) {
-      toast.error('Please drop an audio file', { description: `Supported formats: ${getAudioFormatsDisplayList()}` })
-    }
+    const audioFile = paths.find((path) => { const extension = path.split('.').pop()?.toLowerCase(); return Boolean(extension && isAudioExtension(extension)) })
+    if (audioFile) { setImportFilePath(audioFile); setShowImportDialog(true) }
+    else if (paths.length > 0) toast.error('Please drop an audio file', { description: `Supported formats: ${getAudioFormatsDisplayList()}` })
   }, [])
 
   useEffect(() => {
@@ -85,65 +74,31 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
     const unlisteners: UnlistenFn[] = []
     const cleanedUpRef = { current: false }
     const setupListeners = async () => {
-      const add = (unlisten: UnlistenFn) => {
-        if (cleanedUpRef.current) unlisten()
-        else unlisteners.push(unlisten)
-      }
+      const add = (unlisten: UnlistenFn) => { if (cleanedUpRef.current) unlisten(); else unlisteners.push(unlisten) }
       add(await listen('tauri://drag-enter', () => setShowDropOverlay(true)))
       add(await listen('tauri://drag-leave', () => setShowDropOverlay(false)))
-      add(await listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
-        setShowDropOverlay(false)
-        handleFileDrop(event.payload.paths)
-      }))
+      add(await listen<{ paths: string[] }>('tauri://drag-drop', (event) => { setShowDropOverlay(false); handleFileDrop(event.payload.paths) }))
     }
     void setupListeners()
-    return () => {
-      cleanedUpRef.current = true
-      unlisteners.forEach((unlisten) => unlisten())
-    }
+    return () => { cleanedUpRef.current = true; unlisteners.forEach((unlisten) => unlisten()) }
   }, [showOnboarding, handleFileDrop])
 
-  const handleImportDialogClose = useCallback((open: boolean) => {
-    setShowImportDialog(open)
-    if (!open) setImportFilePath(null)
-  }, [])
-  const handleOpenImportDialog = useCallback((filePath?: string | null) => {
-    setImportFilePath(filePath ?? null)
-    setShowImportDialog(true)
-  }, [])
+  const handleImportDialogClose = useCallback((open: boolean) => { setShowImportDialog(open); if (!open) setImportFilePath(null) }, [])
+  const handleOpenImportDialog = useCallback((filePath?: string | null) => { setImportFilePath(filePath ?? null); setShowImportDialog(true) }, [])
   const handleOnboardingComplete = useCallback(() => setShowOnboarding(false), [])
 
   return (
-    <html lang="en">
-      <body className={`${sourceSans3.variable} font-sans antialiased`}>
-        <AnalyticsProvider>
-          <RecordingStateProvider>
-            <TranscriptProvider>
-              <ConfigProvider>
-                <LiveMeetingTranslationProvider>
-                <LiveCaptionBridge />
-                <OllamaDownloadProvider>
-                  <OnboardingProvider>
-                    <SidebarProvider>
-                      <TooltipProvider>
-                        <RecordingPostProcessingProvider>
-                          <ImportDialogProvider onOpen={handleOpenImportDialog}>
-                            <NotesNavigationBridge />
-                            <DownloadProgressToastProvider />
-                            {showOnboarding ? <OnboardingFlow onComplete={handleOnboardingComplete} /> : <AppShell>{children}</AppShell>}
-                            <ImportDropOverlay visible={showDropOverlay} />
-                            <ConditionalImportDialog showImportDialog={showImportDialog} handleImportDialogClose={handleImportDialogClose} importFilePath={importFilePath} />
-                          </ImportDialogProvider>
-                        </RecordingPostProcessingProvider>
-                      </TooltipProvider>
-                    </SidebarProvider>
-                  </OnboardingProvider>
-                </OllamaDownloadProvider>
-                </LiveMeetingTranslationProvider>
-              </ConfigProvider>
-            </TranscriptProvider>
-          </RecordingStateProvider>
-        </AnalyticsProvider>
+    <html lang="en" className={fontVariables}>
+      <body className="font-sans antialiased">
+        <AnalyticsProvider><RecordingStateProvider><TranscriptProvider><ConfigProvider><LiveMeetingTranslationProvider>
+          <LiveCaptionBridge />
+          <OllamaDownloadProvider><OnboardingProvider><SidebarProvider><TooltipProvider><RecordingPostProcessingProvider><ImportDialogProvider onOpen={handleOpenImportDialog}>
+            <NotesNavigationBridge /><DownloadProgressToastProvider />
+            {showOnboarding ? <OnboardingFlow onComplete={handleOnboardingComplete} /> : <AppShell>{children}</AppShell>}
+            <ImportDropOverlay visible={showDropOverlay} />
+            <ConditionalImportDialog showImportDialog={showImportDialog} handleImportDialogClose={handleImportDialogClose} importFilePath={importFilePath} />
+          </ImportDialogProvider></RecordingPostProcessingProvider></TooltipProvider></SidebarProvider></OnboardingProvider></OllamaDownloadProvider>
+        </LiveMeetingTranslationProvider></ConfigProvider></TranscriptProvider></RecordingStateProvider></AnalyticsProvider>
         <Toaster position="bottom-center" richColors closeButton />
       </body>
     </html>
@@ -152,20 +107,11 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  // This display-only route must not mount recorder, recovery, onboarding or AI providers.
   if (pathname === '/live-captions' || pathname === '/live-captions/') {
-    return (
-      <html lang="en" className={`${sourceSans3.variable} caption-root`} style={{ background: 'transparent' }}>
-        <body style={{ margin: 0, background: 'transparent', overflow: 'hidden' }}>{children}</body>
-      </html>
-    )
+    return <html lang="en" className={`${fontVariables} caption-root`} style={{ background: 'transparent' }}><body style={{ margin: 0, background: 'transparent', overflow: 'hidden' }}>{children}</body></html>
   }
   if (pathname === '/manual-notes') {
-    return (
-      <html lang="en" className={sourceSans3.variable}>
-        <body className="h-screen w-screen overflow-hidden bg-bg text-text">{children}</body>
-      </html>
-    )
+    return <html lang="en" className={fontVariables}><body className="h-screen w-screen overflow-hidden bg-bg text-text">{children}</body></html>
   }
   return <MainAppLayout>{children}</MainAppLayout>
 }
