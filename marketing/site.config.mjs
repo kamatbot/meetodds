@@ -5,5 +5,5 @@ export default Object.freeze({
   // Public repository and installer are published.
   repositoryAvailable: true,
   // Verified HTTPS URL of the signed Mac installer.
-  macDownloadUrl: 'https://github.com/kamatbot/meetodds/releases/download/v0.4.19/MeetOdds_0.4.19_aarch64.dmg',
+  macDownloadUrl: 'https://github.com/kamatbot/meetodds/releases/download/v0.4.20/MeetOdds_0.4.20_aarch64.dmg',
 });

@@ -1,6 +1,6 @@
 [package]
 name = "meetodds"
-version = "0.4.19"
+version = "0.4.20"
 description = "MeetOdds local-first meeting capture, transcription, and summaries"
 authors = ["MeetOdds contributors"]
 license = "MIT"

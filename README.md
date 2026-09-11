@@ -95,7 +95,7 @@ Download the latest signed release from:
 
 **[MeetOdds Releases →](https://github.com/kamatbot/meetodds/releases/latest)**
 
-Current public release: **MeetOdds 0.4.19**.
+Current public release: **MeetOdds 0.4.20**.
 
 1. Download the `.dmg`.
 2. Open it.
