@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <EventKit/EventKit.h>
+#import <dispatch/dispatch.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,35 +28,40 @@ int meetodds_calendar_authorization_status(void) {
 __attribute__((visibility("default")))
 void meetodds_calendar_request_access(MeetOddsCalendarPermissionCallback callback, void *context) {
     if (!callback) return;
-    @autoreleasepool {
-        EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
-        if (MeetOddsCalendarHasFullAccess()) {
-            callback(1, NULL, context);
-            return;
-        }
-        if (status == EKAuthorizationStatusDenied || status == EKAuthorizationStatusRestricted) {
-            callback(0, "Calendar access is disabled in System Settings.", context);
-            return;
-        }
 
-        EKEventStore *store = [[EKEventStore alloc] init];
-        void (^completion)(BOOL, NSError *) = ^(BOOL granted, NSError *error) {
-            const char *message = error.localizedDescription.UTF8String;
-            callback(granted ? 1 : 0, message, context);
-            (void)store; // Keep the store alive until EventKit finishes the request.
-        };
+    // Tauri async commands may run on a worker thread. Ask EventKit for privacy
+    // permission from the app's main queue so macOS can reliably present its sheet.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
+            if (MeetOddsCalendarHasFullAccess()) {
+                callback(1, NULL, context);
+                return;
+            }
+            if (status == EKAuthorizationStatusDenied || status == EKAuthorizationStatusRestricted) {
+                callback(0, "Calendar access is disabled in System Settings.", context);
+                return;
+            }
+
+            EKEventStore *store = [[EKEventStore alloc] init];
+            void (^completion)(BOOL, NSError *) = ^(BOOL granted, NSError *error) {
+                const char *message = error.localizedDescription.UTF8String;
+                callback(granted ? 1 : 0, message, context);
+                (void)store; // Keep the store alive until EventKit finishes the request.
+            };
 
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000
-        if (@available(macOS 14.0, *)) {
-            [store requestFullAccessToEventsWithCompletion:completion];
-            return;
-        }
+            if (@available(macOS 14.0, *)) {
+                [store requestFullAccessToEventsWithCompletion:completion];
+                return;
+            }
 #endif
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        [store requestAccessToEntityType:EKEntityTypeEvent completion:completion];
+            [store requestAccessToEntityType:EKEntityTypeEvent completion:completion];
 #pragma clang diagnostic pop
-    }
+        }
+    });
 }
 
 static BOOL MeetOddsLooksLikeConferenceHost(NSString *host) {
