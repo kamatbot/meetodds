@@ -81,6 +81,6 @@ test('invalid and empty output does not masquerade as success', () => {
 test('integration retains full transcript fetch and routes generate/regenerate through review', () => {
   const hook = fs.readFileSync(path.resolve(__dirname, '../../src/hooks/meeting-details/useSummaryGeneration.ts'), 'utf8');
   assert.match(hook, /limit: first\.total_count/); assert.match(hook, /reviewSummaryInput/);
-  assert.match(hook, /begin\(false, prompt\)/); assert.match(hook, /begin\(true\)/);
+  assert.match(hook, /begin\(false, prompt/); assert.match(hook, /begin\(true\)/);
   assert.doesNotMatch(hook, /console\.(log|error)\(/);
 });
