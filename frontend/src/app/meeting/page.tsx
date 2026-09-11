@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { LoaderIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -9,365 +9,68 @@ import MeetingHeader, { type MeetingDetailTab } from '@/components/Meeting/Meeti
 import AudioPlayer from '@/components/AudioPlayer';
 import { useConfig } from '@/contexts/ConfigContext';
 import { usePaginatedTranscripts } from '@/hooks/usePaginatedTranscripts';
-import Analytics from '@/lib/analytics';
-import type { Summary, Transcript } from '@/types';
+import { parseSummaryData } from '@/lib/summary-input';
+import type { Summary } from '@/types';
 import PageContent from '@/app/meeting-details/page-content';
 
-interface MeetingDetailsResponse {
-  id: string;
-  title: string;
-  created_at: string;
-  updated_at: string;
-  transcripts: Transcript[];
-  folder_path?: string;
-}
-
-interface OllamaModelResponse {
-  name: string;
-}
-
-interface StoredModelConfig {
-  model?: string | null;
-}
-
-interface SummaryEnvelope {
-  status: string;
-  data?: unknown;
-  error?: string | null;
-}
-
-interface LegacySection {
-  title?: string;
-  blocks?: unknown[];
-}
-
-function isMeetingTab(value: string | null): value is MeetingDetailTab {
-  return value === 'summary' || value === 'notes' || value === 'transcript';
-}
+interface SummaryEnvelope { status: string; data?: unknown; error?: string | null }
+function isMeetingTab(value: string | null): value is MeetingDetailTab { return value === 'summary' || value === 'notes' || value === 'transcript'; }
 
 function MeetingContent() {
-  const searchParams = useSearchParams();
-  const meetingId = searchParams.get('id');
-  const source = searchParams.get('source');
-  const requestedTab = searchParams.get('tab');
-  const evidenceSegmentId = searchParams.get('evidence');
-  const rawEvidenceTime = searchParams.get('at');
-  const parsedEvidenceTime = rawEvidenceTime === null ? null : Number(rawEvidenceTime);
-  const evidenceTime = parsedEvidenceTime !== null && Number.isFinite(parsedEvidenceTime) ? parsedEvidenceTime : null;
-  const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
+  const params = useSearchParams();
+  const meetingId = params.get('id') || '';
+  const source = params.get('source');
+  const requestedTab = params.get('tab');
+  const evidenceSegmentId = params.get('evidence');
+  const rawTime = params.get('at');
+  const time = rawTime === null ? null : Number(rawTime);
+  const evidenceTime = time !== null && Number.isFinite(time) ? time : null;
+  const { setCurrentMeeting, refetchMeetings } = useSidebar();
   const { isAutoSummary } = useConfig();
   const router = useRouter();
-  const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
-  const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [shouldAutoGenerate, setShouldAutoGenerate] = useState(false);
-  const [hasCheckedAutoGen, setHasCheckedAutoGen] = useState(false);
-  const [activeTab, setActiveTab] = useState<MeetingDetailTab>(
-    isMeetingTab(requestedTab) ? requestedTab : 'summary',
-  );
+  const [savedSummary, setSavedSummary] = useState<{ id: string; ready: boolean; summary: Summary | null; status: string }>({ id: '', ready: false, summary: null, status: 'idle' });
+  const [titleOverride, setTitleOverride] = useState<{ id: string; title: string } | null>(null);
+  const [autoHandled, setAutoHandled] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<MeetingDetailTab>(isMeetingTab(requestedTab) ? requestedTab : 'summary');
+  // Capture the preference on arrival. Checking "automatic next time" on this
+  // meeting's generation card must not unexpectedly submit the current meeting.
+  const autoAtArrival = useRef({ id: meetingId, enabled: isAutoSummary });
+  if (autoAtArrival.current.id !== meetingId) autoAtArrival.current = { id: meetingId, enabled: isAutoSummary };
+  const { metadata, segments, transcripts, isLoading: loadingTranscripts, isLoadingMore, hasMore, totalCount, loadedCount, loadMore, refetch, error } = usePaginatedTranscripts({ meetingId, initialTimestamp: evidenceTime ?? undefined, initialTranscriptId: evidenceSegmentId });
+  const meeting = useMemo(() => metadata?.id === meetingId ? {
+    ...metadata, transcripts, title: titleOverride?.id === meetingId ? titleOverride.title : metadata.title,
+  } : null, [metadata, meetingId, titleOverride, transcripts]);
 
-  const {
-    metadata,
-    segments,
-    transcripts,
-    isLoading: isLoadingTranscripts,
-    isLoadingMore,
-    hasMore,
-    totalCount,
-    loadedCount,
-    loadMore,
-    refetch,
-    error: transcriptError,
-  } = usePaginatedTranscripts({
-    meetingId: meetingId || '',
-    initialTimestamp: evidenceTime ?? undefined,
-    initialTranscriptId: evidenceSegmentId,
-  });
-
+  useEffect(() => { setActiveTab(isMeetingTab(requestedTab) ? requestedTab : 'summary'); }, [meetingId, requestedTab]);
   useEffect(() => {
-    if (isMeetingTab(requestedTab)) setActiveTab(requestedTab);
-  }, [requestedTab]);
-
-  const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
-    try {
-      const models = await invoke<OllamaModelResponse[]>('get_ollama_models', { endpoint: null });
-      const hasGemma = models.some((model) => model.name === 'gemma3:1b');
-      console.log('🔍 Checked for gemma3:1b:', hasGemma);
-      return hasGemma;
-    } catch (modelError) {
-      console.error('❌ Failed to check Ollama models:', modelError);
-      return false;
-    }
-  }, []);
-
-  const setupAutoGeneration = useCallback(async () => {
-    if (hasCheckedAutoGen) return;
-
-    if (source !== 'recording') {
-      console.log('Not from recording navigation, skipping auto-generation');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
-    if (!isAutoSummary) {
-      console.log('Auto-summary is disabled in settings');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
-    try {
-      const currentConfig = await invoke<StoredModelConfig | null>('api_get_model_config');
-
-      if (currentConfig?.model) {
-        console.log('Using existing model from DB:', currentConfig.model);
-        setShouldAutoGenerate(true);
-        setHasCheckedAutoGen(true);
-        return;
-      }
-
-      const hasGemma = await checkForGemmaModel();
-      if (hasGemma) {
-        console.log('💾 DB empty, using gemma3:1b as initial default');
-        await invoke('api_save_model_config', {
-          provider: 'ollama',
-          model: '',
-          whisperModel: 'large-v3',
-          apiKey: null,
-          ollamaEndpoint: null,
-        });
-        setShouldAutoGenerate(true);
-      } else {
-        console.log('⚠️ No model configured and gemma3:1b not found');
-      }
-    } catch (setupError) {
-      console.error('❌ Failed to setup auto-generation:', setupError);
-    }
-
-    setHasCheckedAutoGen(true);
-  }, [checkForGemmaModel, hasCheckedAutoGen, isAutoSummary, source]);
-
+    if (meeting) setCurrentMeeting({ id: meeting.id, title: meeting.title });
+  }, [meeting?.id, meeting?.title, setCurrentMeeting]);
   useEffect(() => {
-    if (metadata && (!meetingId || meetingId === 'intro-call')) return;
-
-    if (metadata) {
-      setMeetingDetails({
-        id: metadata.id,
-        title: metadata.title,
-        created_at: metadata.created_at,
-        updated_at: metadata.updated_at,
-        transcripts,
-        folder_path: metadata.folder_path,
-      });
-      setCurrentMeeting({ id: metadata.id, title: metadata.title });
-    }
-  }, [meetingId, metadata, setCurrentMeeting, transcripts]);
-
-  useEffect(() => {
-    if (transcriptError) {
-      console.error('Error loading transcripts:', transcriptError);
-      setError(transcriptError);
-    }
-  }, [transcriptError]);
-
-  useEffect(() => {
-    setMeetingDetails(null);
-    setMeetingSummary(null);
-    setError(null);
-    setIsLoading(true);
-    setHasCheckedAutoGen(false);
-    setShouldAutoGenerate(false);
+    let disposed = false;
+    setSavedSummary({ id: meetingId, ready: false, summary: null, status: 'idle' });
+    if (!meetingId || meetingId === 'intro-call') return () => { disposed = true; };
+    void invoke<SummaryEnvelope>('api_get_summary', { meetingId }).then(result => {
+      if (!disposed) setSavedSummary({ id: meetingId, ready: true, summary: parseSummaryData(result.data) as Summary | null, status: result.status.toLowerCase() });
+    }).catch(() => {
+      // Notes/transcript remain accessible. The generation hook shows the status
+      // error and retries the native check before allowing a manual request.
+      if (!disposed) setSavedSummary({ id: meetingId, ready: true, summary: null, status: 'error' });
+    });
+    return () => { disposed = true; };
   }, [meetingId]);
 
-  useEffect(() => {
-    return () => {
-      if (meetingId) {
-        stopSummaryPolling(meetingId);
-      }
-    };
-  }, [meetingId, stopSummaryPolling]);
-
-  useEffect(() => {
-    if (!meetingId || meetingId === 'intro-call') {
-      setError('No meeting selected');
-      setIsLoading(false);
-      Analytics.trackPageView('meeting_details');
-      return;
-    }
-
-    setMeetingSummary(null);
-    setError(null);
-    setIsLoading(true);
-
-    const fetchMeetingSummary = async () => {
-      try {
-        const summary = await invoke<SummaryEnvelope>('api_get_summary', { meetingId });
-
-        if (summary.status === 'idle' || (!summary.data && summary.status === 'error')) {
-          setMeetingSummary(null);
-          return;
-        }
-
-        let parsedData: unknown = summary.data ?? {};
-        if (typeof parsedData === 'string') {
-          try {
-            parsedData = JSON.parse(parsedData);
-          } catch {
-            parsedData = {};
-          }
-        }
-
-        if (!parsedData || typeof parsedData !== 'object') {
-          setMeetingSummary(null);
-          return;
-        }
-
-        const record = parsedData as Record<string, unknown>;
-        if (record.summary_json || record.markdown) {
-          setMeetingSummary(record as unknown as Summary);
-          return;
-        }
-
-        const restSummaryData = { ...record };
-        delete restSummaryData.MeetingName;
-        const sectionOrder = Array.isArray(record._section_order)
-          ? record._section_order.filter((key): key is string => typeof key === 'string')
-          : Object.keys(restSummaryData).filter((key) => key !== '_section_order');
-        delete restSummaryData._section_order;
-
-        const formattedSummary: Summary = {};
-        for (const key of sectionOrder) {
-          const rawSection = restSummaryData[key];
-          if (!rawSection || typeof rawSection !== 'object') continue;
-          const section = rawSection as LegacySection;
-          if (!Array.isArray(section.blocks)) continue;
-
-          formattedSummary[key] = {
-            title: section.title || key,
-            blocks: section.blocks.map((rawBlock, index) => {
-              const block = rawBlock && typeof rawBlock === 'object'
-                ? rawBlock as Record<string, unknown>
-                : {};
-              const content = typeof block.content === 'string' ? block.content.trim() : '';
-              return {
-                id: typeof block.id === 'string' ? block.id : `${key}-${index}`,
-                type: typeof block.type === 'string' ? block.type : 'bullet',
-                color: 'default',
-                content,
-              };
-            }),
-          };
-        }
-        setMeetingSummary(formattedSummary);
-      } catch (summaryError) {
-        console.error('FETCH SUMMARY: Error fetching meeting summary:', summaryError);
-        setMeetingSummary(null);
-      }
-    };
-
-    const loadData = async () => {
-      try {
-        await fetchMeetingSummary();
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    void loadData();
-  }, [meetingId]);
-
-  useEffect(() => {
-    const checkAutoGen = async () => {
-      if (
-        meetingDetails &&
-        meetingSummary === null &&
-        meetingDetails.transcripts.length > 0 &&
-        !hasCheckedAutoGen
-      ) {
-        await setupAutoGeneration();
-      }
-    };
-
-    void checkAutoGen();
-  }, [hasCheckedAutoGen, meetingDetails, meetingSummary, setupAutoGeneration]);
-
-  if (error) {
-    return (
-      <div className="flex h-full items-center justify-center bg-bg px-6">
-        <div className="max-w-sm text-center">
-          <p className="text-ui font-semibold text-danger">{error}</p>
-          <button
-            type="button"
-            onClick={() => router.push('/meetings')}
-            className="mt-4 h-8 rounded-control border border-border bg-surface px-3 text-ui font-medium text-text hover:bg-bg"
-          >
-            Back to meetings
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (isLoading || isLoadingTranscripts || !meetingDetails) {
-    return (
-      <div className="flex h-full items-center justify-center bg-bg text-3">
-        <LoaderIcon className="h-5 w-5 animate-spin" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-bg">
-      <MeetingHeader
-        key={meetingDetails.id}
-        meetingId={meetingDetails.id}
-        title={meetingDetails.title}
-        createdAt={meetingDetails.created_at}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        onTitleSaved={(title) => {
-          setMeetingDetails((current) => current ? { ...current, title } : current);
-        }}
-        onDeleted={() => router.replace('/meetings')}
-      />
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <PageContent
-          key={meetingDetails.id}
-          meeting={meetingDetails}
-          summaryData={meetingSummary}
-          activeTab={activeTab}
-          shouldAutoGenerate={shouldAutoGenerate}
-          onAutoGenerateComplete={() => setShouldAutoGenerate(false)}
-          onMeetingUpdated={async () => {
-            await refetchMeetings();
-          }}
-          onRefetchTranscripts={refetch}
-          segments={segments}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          totalCount={totalCount}
-          loadedCount={loadedCount}
-          onLoadMore={loadMore}
-          focusSegmentId={evidenceSegmentId}
-        />
-      </div>
-      {activeTab === 'transcript' && (
-        <AudioPlayer key={meetingDetails.id} meetingId={meetingDetails.id} initialSeek={evidenceTime} />
-      )}
-    </div>
-  );
+  const summaryLoaded = savedSummary.id === meetingId && savedSummary.ready;
+  const shouldAutoGenerate = summaryLoaded && source === 'recording' && autoAtArrival.current.enabled
+    && autoHandled !== meetingId && !savedSummary.summary && !['pending', 'processing', 'summarizing', 'regenerating', 'failed', 'error', 'cancelled'].includes(savedSummary.status)
+    && transcripts.length > 0;
+  if (!meetingId || meetingId === 'intro-call' || error) return <div className="flex h-full items-center justify-center bg-bg px-6"><div className="max-w-sm text-center"><p className="text-sm font-semibold text-danger">{error || 'No meeting selected'}</p><button type="button" onClick={() => router.push('/meetings')} className="mt-4 rounded-control border border-border bg-surface px-3 py-2 text-sm text-text">Back to meetings</button></div></div>;
+  if (!summaryLoaded || loadingTranscripts || !meeting) return <div role="status" aria-label="Loading saved meeting" className="flex h-full items-center justify-center bg-bg text-3"><LoaderIcon className="h-5 w-5 animate-spin motion-reduce:animate-none" /></div>;
+  return <div className="flex h-full min-h-0 flex-col bg-bg">
+    <MeetingHeader key={meeting.id} meetingId={meeting.id} title={meeting.title} createdAt={meeting.created_at} activeTab={activeTab} onTabChange={setActiveTab} onTitleSaved={title => setTitleOverride({ id: meeting.id, title })} onDeleted={() => router.replace('/meetings')} />
+    <div className="min-h-0 flex-1 overflow-hidden"><PageContent key={meeting.id} meeting={meeting} summaryData={savedSummary.summary} activeTab={activeTab}
+      shouldAutoGenerate={shouldAutoGenerate} onAutoGenerateComplete={() => setAutoHandled(meeting.id)} onMeetingUpdated={refetchMeetings}
+      onRefetchTranscripts={refetch} segments={segments} hasMore={hasMore} isLoadingMore={isLoadingMore} totalCount={totalCount} loadedCount={loadedCount} onLoadMore={loadMore} focusSegmentId={evidenceSegmentId} /></div>
+    {activeTab === 'transcript' && <AudioPlayer key={meeting.id} meetingId={meeting.id} initialSeek={evidenceTime} />}
+  </div>;
 }
-
-export default function MeetingPage() {
-  return (
-    <Suspense
-      fallback={(
-        <div className="flex h-full items-center justify-center bg-bg text-3">
-          <LoaderIcon className="h-5 w-5 animate-spin" />
-        </div>
-      )}
-    >
-      <MeetingContent />
-    </Suspense>
-  );
-}
+export default function MeetingPage() { return <Suspense fallback={<div className="flex h-full items-center justify-center bg-bg text-3"><LoaderIcon className="h-5 w-5 animate-spin motion-reduce:animate-none" /></div>}><MeetingContent /></Suspense>; }
