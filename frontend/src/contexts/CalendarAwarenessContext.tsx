@@ -45,6 +45,16 @@ function persistStringSet(key: string, values: Set<string>) {
   try { sessionStorage.setItem(key, JSON.stringify([...values])); } catch { /* Session preference only. */ }
 }
 
+function deniedMessage(status: CalendarPermissionStatus, fallback: string): string {
+  if (status.status === 'denied' || status.status === 'restricted') {
+    return 'Calendar access is off. Enable MeetOdds in System Settings → Privacy & Security → Calendars.';
+  }
+  if (status.status === 'writeOnly') {
+    return 'MeetOdds needs Full Access to read upcoming meetings. Change Calendar access to Full Access in System Settings.';
+  }
+  return fallback;
+}
+
 export function CalendarAwarenessProvider({ children }: { children: ReactNode }) {
   const [permission, setPermission] = useState<CalendarPermissionStatus | null>(null);
   const [enabled, setEnabledState] = useState(true);
@@ -129,7 +139,20 @@ export function CalendarAwarenessProvider({ children }: { children: ReactNode })
       try { localStorage.setItem(ENABLED_KEY, 'true'); } catch {}
       await queryNearbyEvents(status);
     } catch (failure) {
-      if (alive.current) setError(failure instanceof Error ? failure.message : String(failure));
+      if (!alive.current) return;
+      const fallback = failure instanceof Error ? failure.message : String(failure);
+      // A failed native request can change TCC from notDetermined → denied. Re-read
+      // the authoritative status so the UI switches to its System Settings recovery
+      // state instead of leaving a useless Connect button and generic error behind.
+      try {
+        const status = await calendarService.permissionStatus();
+        if (!alive.current) return;
+        setPermission(status);
+        setEvents([]);
+        setError(deniedMessage(status, fallback));
+      } catch {
+        setError(fallback);
+      }
     } finally {
       if (alive.current) setIsLoading(false);
     }
