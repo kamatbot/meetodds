@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import config from '../site.config.mjs';
 import { build } from '../tools/site-horizon.mjs';
 
-const expectedVideoSha256 = 'adb865da4b371f4e6d42170419129ec6b7c072e0093cfa48821bf7e98b7945a1';
+const expectedVideoSha256 = '24add1b82249c2322391a171cc1789f582f38e8bdd7eccb6a200e41ce020b00e';
 const videoName = `meetodds-hero.${expectedVideoSha256.slice(0, 12)}.mp4`;
 
 test('Horizon build emits the real hero video and app-aligned theme', async () => {

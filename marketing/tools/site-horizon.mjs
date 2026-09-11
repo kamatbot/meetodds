@@ -8,25 +8,11 @@ import config from '../site.config.mjs';
 import { build as buildBase, output, root, safePath, validateConfig } from './site.mjs';
 
 const source = resolve(root, 'src');
-const videoParts = [
-  'hero.00.b64',
-  'hero.01.b64',
-  'hero.02.b64',
-  'hero.03a.b64',
-  'hero.03b.b64',
-  'hero.04.b64',
-  'hero.05.b64',
-  'hero.06.b64',
-  'hero.07.b64',
-  'hero.08.b64',
-].map((filename) => resolve(source, filename));
-const expectedVideoSha256 = 'adb865da4b371f4e6d42170419129ec6b7c072e0093cfa48821bf7e98b7945a1';
+const heroVideoSource = resolve(source, 'hero.mp4');
 
 async function materializeVideo(destination) {
-  const encoded = (await Promise.all(videoParts.map((path) => readFile(path, 'utf8')))).join('').replace(/\s+/g, '');
-  const bytes = Buffer.from(encoded, 'base64');
+  const bytes = await readFile(heroVideoSource);
   const digest = createHash('sha256').update(bytes).digest('hex');
-  if (digest !== expectedVideoSha256) throw new Error('MeetOdds hero video source is incomplete or corrupted');
   const filename = `meetodds-hero.${digest.slice(0, 12)}.mp4`;
   const path = resolve(destination, filename);
   await writeFile(path, bytes);

@@ -13,6 +13,7 @@
 !.yarn/releases
 !.yarn/versions
 *.mp4
+!marketing/src/*.mp4
 
 # testing
 /coverage
