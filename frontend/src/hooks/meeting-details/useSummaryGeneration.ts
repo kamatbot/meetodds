@@ -25,6 +25,9 @@ interface UseSummaryGenerationProps {
 interface SummaryEnvelope { status: string; data?: unknown; error?: string | null; meetingName?: string | null }
 interface PendingRequest { abort: AbortController; dispatched: boolean; accepted: boolean; cancelRequested: boolean; token: symbol; meetingId: string }
 const submissionLocks = new Map<string, symbol>();
+function automaticEnabled(): boolean {
+  try { return localStorage.getItem('isAutoSummary') === 'true'; } catch { return false; }
+}
 const running = (status: string) => ['pending', 'processing', 'summarizing', 'regenerating'].includes(status.toLowerCase());
 
 async function resolveSummaryLanguage(meetingId: string, texts: string[]): Promise<string | null> {
@@ -148,7 +151,7 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
   const begin = useCallback(async (regeneration: boolean, customPrompt = '', automatic = false) => {
     const current = propsRef.current;
     const id = current.meeting.id;
-    if (current.isModelConfigLoading || isCheckingSummary || submissionLocks.has(id)) return;
+    if (current.isModelConfigLoading || isCheckingSummary || submissionLocks.has(id) || (automatic && !automaticEnabled())) return;
     const token = Symbol(id); const abort = new AbortController();
     submissionLocks.set(id, token);
     request.current = { token, abort, dispatched: false, accepted: false, cancelRequested: false, meetingId: id };
@@ -177,7 +180,7 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       }
       const turns = await allTranscripts(id);
       if (!turns.length) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
-      if (automatic && !claimAutomaticSummary(localStorage, id)) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
+      if (automatic && (!automaticEnabled() || !claimAutomaticSummary(localStorage, id))) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
       await flushOpenNotes();
       let notes = ''; let notesUnavailable = false;
       try { notes = (await invoke<{ notesMarkdown: string }>('api_get_meeting_notes', { meetingId: id })).notesMarkdown; } catch { notesUnavailable = true; }
@@ -191,6 +194,7 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
         target, transcript: transcriptText(turns), notes, notesUnavailable, manualNotes,
         prompt: [customPrompt.trim(), POST_MEETING_INSTRUCTIONS].filter(Boolean).join('\n\n'), template: current.selectedTemplate,
       };
+      if (automatic && !automaticEnabled()) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
       const approval = automatic ? readAutoSummaryApproval(localStorage, target) : null;
       const approved = approval
         ? approveSummaryInput(input, false, '', approval.includeManualNotes)
@@ -203,6 +207,12 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       }
       const language = await resolveSummaryLanguage(id, turns.map(turn => turn.text));
       if (abort.signal.aborted || !visible()) { release(); return; }
+      // Recheck remembered consent after every asynchronous preparation step.
+      // Turning automatic generation off (or excluding notes) must revoke bypass.
+      const currentApproval = approval ? readAutoSummaryApproval(localStorage, target) : null;
+      if (automatic && (!automaticEnabled() || (approval && (!currentApproval || currentApproval.includeManualNotes !== approval.includeManualNotes)))) {
+        setSummaryStatus(previousStatus); release(); return;
+      }
       request.current!.dispatched = true;
       setSummaryStatus(regeneration || previousSummary ? 'regenerating' : 'summarizing');
       const result = await invoke<{ process_id: string }>('api_process_transcript', {
