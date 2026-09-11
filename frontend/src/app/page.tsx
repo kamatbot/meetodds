@@ -6,7 +6,7 @@ import { appDataDir } from '@tauri-apps/api/path';
 import HomeDashboard from '@/components/Home/HomeDashboard';
 import LiveMeetingBar from '@/components/Meeting/LiveMeetingBar';
 import TranscriptDrawer from '@/components/Meeting/TranscriptDrawer';
-import NotesEditor from '@/components/Meeting/NotesEditor';
+import LiveMeetingNotes from '@/components/Meeting/LiveMeetingNotes';
 import StopProgressStrip from '@/components/Meeting/StopProgressStrip';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
@@ -94,7 +94,7 @@ export default function Home() {
     <div className="relative flex min-h-0 flex-1">
       {inAppRecording || isStopping || isProcessingStop ? <div className="live-recording-layout w-full">
         <main className="live-notes-pane" aria-label="Live meeting notes">
-          {currentMeetingId ? <NotesEditor meetingId={currentMeetingId} /> : <div className="flex h-full items-center justify-center text-[12px] text-3">Preparing meeting notes…</div>}
+          {currentMeetingId ? <LiveMeetingNotes meetingId={currentMeetingId} /> : <div className="flex h-full items-center justify-center text-[12px] text-3">Preparing meeting notes…</div>}
         </main>
         <TranscriptDrawer presentation="drawer" isProcessingStop={isProcessingStop} isStopping={isStopping} showModal={showModal} />
       </div> : <div className="min-w-0 flex-1"><HomeDashboard hasMicrophone={hasMicrophone} hasSystemAudio={hasSystemAudio} permissionsLoading={isCheckingPermissions} permissionError={permissionError} recoverableMeetings={recoverableMeetings} isRecoveryLoading={isLoadingRecovery} isRecording={inAppRecording} recordingStatus={status} recordingDuration={recordingState.recordingDuration} newMeetingDisabled={!hasMicrophone || isRecordingDisabled} onNewMeeting={() => void handleNewMeeting()} onImport={(filePath) => openImportDialog(filePath)} onReviewRecovery={() => setShowRecoveryDialog(true)} onOpenSettings={() => router.push('/settings')} /></div>}
