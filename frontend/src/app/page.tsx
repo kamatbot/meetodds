@@ -12,8 +12,11 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { useTranscriptSession } from '@/contexts/TranscriptContext';
+import { useCalendarAwareness } from '@/contexts/CalendarAwarenessContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
+import { recordingService } from '@/services/recordingService';
+import type { CalendarEvent } from '@/services/calendarService';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { useModalState } from '@/hooks/useModalState';
@@ -32,6 +35,7 @@ export default function Home() {
   const [isHomeControlBusy, setIsHomeControlBusy] = useState(false);
   const { transcriptModelConfig } = useConfig();
   const { openImportDialog } = useImportDialog();
+  const calendar = useCalendarAwareness();
   const { currentMeetingId, captionsVisible, setCaptionsVisible } = useTranscriptSession();
   const recordingState = useRecordingState();
   const { status, isStopping, isProcessing } = recordingState;
@@ -57,6 +61,12 @@ export default function Home() {
     void performStartupChecks();
   }, [checkForRecoverableTranscripts, recordingState.isRecording, status]);
 
+  useEffect(() => {
+    if (!inAppRecording && status !== RecordingStatus.STARTING && status !== RecordingStatus.STOPPING && status !== RecordingStatus.PROCESSING_TRANSCRIPTS && status !== RecordingStatus.SAVING) {
+      calendar.setRecordingEvent(null);
+    }
+  }, [inAppRecording, status, calendar.setRecordingEvent]);
+
   const handleRecovery = async (meetingId: string) => {
     try {
       const result = await recoverMeeting(meetingId);
@@ -71,7 +81,21 @@ export default function Home() {
   const handleDialogClose = () => { setShowRecoveryDialog(false); if (recoverableMeetings.length === 0) sessionStorage.removeItem('recovery_dialog_shown'); };
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
   const recordingBusy = inAppRecording || status === RecordingStatus.STARTING || status === RecordingStatus.STOPPING || status === RecordingStatus.PROCESSING_TRANSCRIPTS || status === RecordingStatus.SAVING;
-  const handleNewMeeting = async () => { if (!hasMicrophone || recordingBusy || isRecordingDisabled) return; try { await handleRecordingStart(); } catch (error) { showModal('errorAlert', error instanceof Error ? error.message : 'Failed to start recording'); } };
+  const handleNewMeeting = async () => {
+    if (!hasMicrophone || recordingBusy || isRecordingDisabled) return;
+    calendar.setRecordingEvent(null);
+    try { await handleRecordingStart(); }
+    catch (error) { showModal('errorAlert', error instanceof Error ? error.message : 'Failed to start recording'); }
+  };
+  const handleCalendarMeetingStart = useCallback(async (event: CalendarEvent) => {
+    if (!hasMicrophone || recordingBusy || isRecordingDisabled) return;
+    try {
+      await handleRecordingStart({ title: event.title });
+      if (await recordingService.isRecording().catch(() => false)) calendar.setRecordingEvent(event);
+    } catch (error) {
+      showModal('errorAlert', error instanceof Error ? error.message : 'Failed to start recording');
+    }
+  }, [hasMicrophone, recordingBusy, isRecordingDisabled, handleRecordingStart, calendar.setRecordingEvent, showModal]);
   const handleHomePauseResume = useCallback(async () => {
     if (!inAppRecording || isHomeControlBusy) return; setIsHomeControlBusy(true);
     try { await invoke(recordingState.isPaused ? 'resume_recording' : 'pause_recording'); }
@@ -80,10 +104,16 @@ export default function Home() {
   }, [inAppRecording, isHomeControlBusy, recordingState.isPaused]);
   const handleHomeStop = useCallback(async () => {
     if (!inAppRecording || isHomeControlBusy) return; setIsHomeControlBusy(true); setIsStopping(true);
-    try { const dataDir = await appDataDir(); const timestamp = new Date().toISOString().replace(/[:.]/g, '-'); await invoke('stop_recording', { args: { save_path: `${dataDir}/recording-${timestamp}.wav` } }); await handleRecordingStop(true); }
+    try {
+      const dataDir = await appDataDir();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      await invoke('stop_recording', { args: { save_path: `${dataDir}/recording-${timestamp}.wav` } });
+      await handleRecordingStop(true);
+      calendar.setRecordingEvent(null);
+    }
     catch (error) { setIsStopping(false); toast.error('Could not stop recording', { description: error instanceof Error ? error.message : String(error) }); }
     finally { setIsHomeControlBusy(false); }
-  }, [handleRecordingStop, inAppRecording, isHomeControlBusy, setIsStopping]);
+  }, [handleRecordingStop, inAppRecording, isHomeControlBusy, setIsStopping, calendar.setRecordingEvent]);
 
   return <div className="relative flex h-full min-h-0 flex-col bg-bg">
     <SettingsModals modals={modals} messages={messages} onClose={hideModal} />
@@ -93,10 +123,10 @@ export default function Home() {
     <div className="relative flex min-h-0 flex-1">
       {inAppRecording || isStopping || isProcessingStop ? <div className="live-recording-layout w-full">
         <main className="live-notes-pane" aria-label="Live meeting notes">
-          {currentMeetingId ? <LiveMeetingNotes meetingId={currentMeetingId} /> : <div className="flex h-full items-center justify-center text-[12px] text-3">Preparing meeting notes…</div>}
+          {currentMeetingId ? <LiveMeetingNotes meetingId={currentMeetingId} calendarEvent={calendar.recordingEvent} /> : <div className="flex h-full items-center justify-center text-[12px] text-3">Preparing meeting notes…</div>}
         </main>
         <TranscriptDrawer presentation="drawer" isProcessingStop={isProcessingStop} isStopping={isStopping} showModal={showModal} />
-      </div> : <div className="min-w-0 flex-1"><HomeDashboard hasMicrophone={hasMicrophone} hasSystemAudio={hasSystemAudio} permissionsLoading={isCheckingPermissions} permissionError={permissionError} recoverableMeetings={recoverableMeetings} isRecoveryLoading={isLoadingRecovery} isRecording={inAppRecording} recordingStatus={status} recordingDuration={recordingState.recordingDuration} newMeetingDisabled={!hasMicrophone || isRecordingDisabled} onNewMeeting={() => void handleNewMeeting()} onImport={(filePath) => openImportDialog(filePath)} onReviewRecovery={() => setShowRecoveryDialog(true)} onOpenSettings={() => router.push('/settings')} /></div>}
+      </div> : <div className="min-w-0 flex-1"><HomeDashboard hasMicrophone={hasMicrophone} hasSystemAudio={hasSystemAudio} permissionsLoading={isCheckingPermissions} permissionError={permissionError} recoverableMeetings={recoverableMeetings} isRecoveryLoading={isLoadingRecovery} isRecording={inAppRecording} recordingStatus={status} recordingDuration={recordingState.recordingDuration} newMeetingDisabled={!hasMicrophone || isRecordingDisabled} onNewMeeting={() => void handleNewMeeting()} onCalendarMeetingStart={(event) => void handleCalendarMeetingStart(event)} onImport={(filePath) => openImportDialog(filePath)} onReviewRecovery={() => setShowRecoveryDialog(true)} onOpenSettings={() => router.push('/settings')} /></div>}
     </div>
 
     {(inAppRecording || isStopping || isProcessingStop) && <LiveMeetingBar isPaused={recordingState.isPaused} isBusy={isHomeControlBusy || isStopping || isProcessingStop} captionsVisible={captionsVisible} onPauseResume={() => void handleHomePauseResume()} onStop={() => void handleHomeStop()} onToggleCaptions={() => setCaptionsVisible(!captionsVisible)} />}
