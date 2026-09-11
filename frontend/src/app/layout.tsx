@@ -17,6 +17,7 @@ import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
 import { ConfigProvider } from '@/contexts/ConfigContext'
+import { CalendarAwarenessProvider } from '@/contexts/CalendarAwarenessContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
@@ -90,7 +91,7 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={fontVariables}>
       <body className="font-sans antialiased">
-        <AnalyticsProvider><RecordingStateProvider><TranscriptProvider><ConfigProvider><LiveMeetingTranslationProvider>
+        <AnalyticsProvider><RecordingStateProvider><TranscriptProvider><ConfigProvider><CalendarAwarenessProvider><LiveMeetingTranslationProvider>
           <LiveCaptionBridge />
           <OllamaDownloadProvider><OnboardingProvider><SidebarProvider><TooltipProvider><RecordingPostProcessingProvider><ImportDialogProvider onOpen={handleOpenImportDialog}>
             <NotesNavigationBridge /><DownloadProgressToastProvider />
@@ -98,7 +99,7 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
             <ImportDropOverlay visible={showDropOverlay} />
             <ConditionalImportDialog showImportDialog={showImportDialog} handleImportDialogClose={handleImportDialogClose} importFilePath={importFilePath} />
           </ImportDialogProvider></RecordingPostProcessingProvider></TooltipProvider></SidebarProvider></OnboardingProvider></OllamaDownloadProvider>
-        </LiveMeetingTranslationProvider></ConfigProvider></TranscriptProvider></RecordingStateProvider></AnalyticsProvider>
+        </LiveMeetingTranslationProvider></CalendarAwarenessProvider></ConfigProvider></TranscriptProvider></RecordingStateProvider></AnalyticsProvider>
         <Toaster position="bottom-center" richColors closeButton />
       </body>
     </html>
