@@ -1,7 +1,7 @@
 'use client';
 
 import { invoke } from '@tauri-apps/api/core';
-import { CalendarDays, ChevronRight, Clock3, ExternalLink, LoaderCircle, Video, X } from 'lucide-react';
+import { CalendarDays, ChevronRight, ExternalLink, LoaderCircle, Video, X } from 'lucide-react';
 import { useCalendarAwareness } from '@/contexts/CalendarAwarenessContext';
 import type { CalendarEvent } from '@/services/calendarService';
 
@@ -20,14 +20,20 @@ function relativeStart(event: CalendarEvent, now = Date.now()) {
 export default function CalendarAgendaCard({ onStart }: { onStart: (event: CalendarEvent) => void }) {
   const calendar = useCalendarAwareness();
   const status = calendar.permission?.status;
+  if (!calendar.permission) {
+    return <section className="mt-6 flex min-h-[66px] items-center gap-3 rounded-[16px] border border-border bg-panel px-4 py-3" aria-label="Checking calendar">
+      <LoaderCircle className="h-4 w-4 animate-spin text-3 motion-reduce:animate-none" />
+      <span className="text-[11px] text-3">Checking your local calendar…</span>
+    </section>;
+  }
   if (status === 'unsupported' || calendar.enabled === false) return null;
 
-  if (!calendar.permission || status === 'notDetermined') {
+  if (status === 'notDetermined') {
     return <section className="mt-6 rounded-[16px] border border-border bg-panel p-4" aria-label="Calendar awareness">
       <div className="flex items-center gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-accent-soft text-accent"><CalendarDays className="h-4.5 w-4.5" /></div>
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-accent-soft text-accent"><CalendarDays className="h-[18px] w-[18px]" /></div>
         <div className="min-w-0 flex-1"><h2 className="text-[12.5px] font-semibold text-text">Know what meeting is next</h2><p className="mt-0.5 text-[11px] leading-5 text-2">Connect Apple Calendar so MeetOdds can surface the right meeting and title the recording automatically. Event details stay on this Mac.</p></div>
-        <button type="button" disabled={calendar.isLoading} onClick={() => void calendar.requestAccess()} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] bg-text px-3 text-[11px] font-semibold text-bg disabled:opacity-50">{calendar.isLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <CalendarDays className="h-3.5 w-3.5" />}Connect</button>
+        <button type="button" disabled={calendar.isLoading} onClick={() => void calendar.requestAccess()} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] bg-text px-3 text-[11px] font-semibold text-bg disabled:opacity-50">{calendar.isLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> : <CalendarDays className="h-3.5 w-3.5" />}Connect</button>
       </div>
       {calendar.error && <p role="alert" className="mt-3 text-[11px] text-danger">{calendar.error}</p>}
     </section>;
@@ -45,13 +51,13 @@ export default function CalendarAgendaCard({ onStart }: { onStart: (event: Calen
   if (!event) return <section className="mt-6 flex items-center gap-3 rounded-[16px] border border-border bg-panel px-4 py-3" aria-label="Calendar clear">
     <div className="grid h-8 w-8 place-items-center rounded-[10px] bg-panel-2 text-3"><CalendarDays className="h-4 w-4" /></div>
     <div className="min-w-0 flex-1"><p className="text-[11.5px] font-medium text-text">Calendar is clear</p><p className="mt-0.5 text-[10.5px] text-3">No meetings in the next 24 hours.</p></div>
-    <button type="button" onClick={() => void calendar.refresh()} className="text-[10.5px] font-medium text-accent">Refresh</button>
+    <button type="button" onClick={() => void calendar.refresh()} disabled={calendar.isLoading} className="text-[10.5px] font-medium text-accent disabled:opacity-40">Refresh</button>
   </section>;
 
   const soon = calendar.suggestedEvent?.id === event.id;
   return <section className={`mt-6 overflow-hidden rounded-[16px] border bg-panel ${soon ? 'border-accent/40 shadow-[0_8px_24px_rgba(204,72,5,.08)]' : 'border-border'}`} aria-label="Upcoming calendar meeting">
     <div className="flex items-center gap-3 px-4 py-3.5">
-      <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-[12px] ${soon ? 'bg-accent text-accent-foreground' : 'bg-panel-2 text-2'}`}>{event.conferenceUrl ? <Video className="h-4.5 w-4.5" /> : <CalendarDays className="h-4.5 w-4.5" />}</div>
+      <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-[12px] ${soon ? 'bg-accent text-accent-foreground' : 'bg-panel-2 text-2'}`}>{event.conferenceUrl ? <Video className="h-[18px] w-[18px]" /> : <CalendarDays className="h-[18px] w-[18px]" />}</div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2"><span className={`font-mono text-[9.5px] font-semibold uppercase tracking-[.08em] ${soon ? 'text-accent' : 'text-3'}`}>{soon ? relativeStart(event) : 'Up next'}</span><span className="font-mono text-[9.5px] text-3">{clock(event.startAtMs)}–{clock(event.endAtMs)}</span></div>
         <h2 className="mt-1 truncate text-[13.5px] font-semibold tracking-[-.015em] text-text">{event.title}</h2>
