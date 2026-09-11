@@ -3,6 +3,11 @@ MIT License
 Copyright (c) 2024 Zackriya Solutions
 Copyright (c) 2026 MeetOdds contributors
 
+MeetOdds is derived from Meetily (https://github.com/Zackriya-Solutions/meeting-minutes),
+created by Zackriya Solutions and licensed under the MIT License. That copyright notice is
+retained above, and the permission notice below applies to the original work as well as to
+subsequent MeetOdds changes.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
