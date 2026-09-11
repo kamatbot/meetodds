@@ -6,9 +6,9 @@
   "description": "The standalone, zero-dependency MeetOdds marketing website.",
   "engines": { "node": ">=24 <25" },
   "scripts": {
-    "dev": "node tools/site.mjs dev",
-    "build": "node tools/site.mjs build",
-    "preview": "node tools/site.mjs preview",
+    "dev": "node tools/site-horizon.mjs dev",
+    "build": "node tools/site-horizon.mjs build",
+    "preview": "node tools/site-horizon.mjs preview",
     "test": "node --test tests/*.test.mjs"
   }
 }
