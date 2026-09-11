@@ -1,6 +1,15 @@
 'use client';
 
+import { Suspense } from 'react';
 import MeetingLibrary from '@/components/Meetings/MeetingLibrary';
+
+function LibraryFallback() {
+  return (
+    <div className="flex h-full items-center justify-center text-ui text-3">
+      Loading meetings…
+    </div>
+  );
+}
 
 export default function MeetingsPage() {
   return (
@@ -11,7 +20,9 @@ export default function MeetingsPage() {
       </header>
       <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 md:px-8">
         <div className="h-full overflow-hidden rounded-[16px] border border-border bg-panel shadow-[0_1px_2px_rgba(24,18,12,.03)]">
-          <MeetingLibrary />
+          <Suspense fallback={<LibraryFallback />}>
+            <MeetingLibrary />
+          </Suspense>
         </div>
       </div>
     </div>

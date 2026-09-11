@@ -30,7 +30,43 @@ export default function MeetingHeader({meetingId,title,createdAt,activeTab,onTab
   const deleteMeeting=async()=>{try{await invoke<DeferredDeleteResponse>('api_defer_delete_meeting',{meetingId});await refetchMeetings();onDeleted();toast('Meeting deleted',{duration:8000,action:{label:'Undo',onClick:()=>void invoke('api_restore_meeting',{meetingId}).then(()=>refetchMeetings())}})}catch(e){toast.error('Could not delete meeting',{description:String(e)})}};
   const openFolder=async()=>{try{await invoke('open_meeting_folder',{meetingId})}catch(e){toast.error('Could not open meeting folder',{description:String(e)})}};
   const duration=formatDuration(durationMs);
-  const tabControl=<div data-toolbar-center-active className="flex items-center rounded-[10px] border border-border bg-panel-2 p-[2px]">{tabs.map(tab=><button key={tab.id} type="button" role="tab" aria-selected={activeTab===tab.id} onClick={()=>onTabChange(tab.id)} className={`h-7 rounded-[8px] px-3 text-[11px] font-semibold transition ${activeTab===tab.id?'bg-panel text-text shadow-[0_1px_2px_rgba(24,18,12,.08)]':'text-3 hover:text-text'}`}>{tab.label}<span className="ml-1.5 font-mono text-[8px] text-3">{tab.shortcut}</span></button>)}</div>;
+  const tabControl = (
+    <div
+      role="tablist"
+      aria-label="Meeting views"
+      data-toolbar-center-active
+      className="flex items-center rounded-[10px] border border-border bg-panel-2 p-[2px]"
+    >
+      {tabs.map(tab => {
+        const selected = activeTab === tab.id;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            id={`meeting-tab-${tab.id}`}
+            aria-controls={`meeting-panel-${tab.id}`}
+            tabIndex={selected ? 0 : -1}
+            aria-selected={selected}
+            onKeyDown={(event) => {
+              const index = tabs.findIndex(candidate => candidate.id === tab.id);
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : -1;
+              if (next >= 0) {
+                event.preventDefault();
+                onTabChange(tabs[next].id);
+                document.getElementById(`meeting-tab-${tabs[next].id}`)?.focus();
+              }
+            }}
+            onClick={() => onTabChange(tab.id)}
+            className={`h-7 rounded-[8px] px-3 text-[11px] font-semibold transition ${selected ? 'bg-panel text-text shadow-[0_1px_2px_rgba(24,18,12,.08)]' : 'text-3 hover:text-text'}`}
+          >
+            {tab.label}
+            <span className="ml-1.5 font-mono text-[8px] text-3">{tab.shortcut}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
   const trailing=<div className="flex items-center gap-1"><ShareMenu meetingId={meetingId}/><DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="inline-grid h-8 w-8 place-items-center rounded-[9px] text-2 hover:bg-[var(--hover)]" aria-label="More meeting actions"><MoreHorizontal className="h-4 w-4"/></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={beginRename}><Pencil/>Rename</DropdownMenuItem><DropdownMenuItem disabled={!starLoaded} onSelect={()=>void toggleStar()}><Star/>{starred?'Unstar':'Star'}</DropdownMenuItem><DropdownMenuSeparator/><DropdownMenuItem onSelect={()=>void deleteMeeting()} className="text-danger"><Trash2/>Delete</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>;
   return <>
     {centerHost&&createPortal(tabControl,centerHost)}{trailingHost&&createPortal(trailing,trailingHost)}
