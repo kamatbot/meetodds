@@ -697,17 +697,21 @@ function SessionScreen({
   useEffect(() => { finalizeReplyRef.current = finalizeReply; }, [finalizeReply]);
   useEffect(() => { finalizePracticeRef.current = finalizePractice; }, [finalizePractice]);
 
+  // How long to wait after the last transcribed phrase before treating the turn as
+  // finished. New learners pause mid-sentence while they search for words, so the
+  // wait scales with level. Measured from partial arrival, so STT latency adds to it.
+  const silenceMs = { beginner: 3200, intermediate: 2500, advanced: 1800 }[profile.level] ?? 2500;
   const handlePartial = (text: string) => {
     if (modeRef.current === 'practice') {
       pendingRef.current = `${pendingRef.current} ${text}`.trim();
       if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => void finalizePracticeRef.current(), 900);
+      timerRef.current = setTimeout(() => void finalizePracticeRef.current(), 1500);
       return;
     }
     if (busyRef.current) return; // ignore partials that arrive while busy
     pendingRef.current = `${pendingRef.current} ${text}`.trim();
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => void finalizeReplyRef.current(), 900);
+    timerRef.current = setTimeout(() => void finalizeReplyRef.current(), silenceMs);
   };
 
   useEffect(() => {
@@ -874,19 +878,22 @@ function SessionScreen({
           {error && <p className="pb-1.5 text-[12px] text-danger">{error}</p>}
 
           {helpText && (
-            <div className="mb-2 flex items-start gap-2 rounded-[10px] bg-accent-soft px-3 py-2 text-[12.5px] text-accent">
-              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-              <span className="min-w-0 flex-1">{helpText}</span>
+            <div className="mb-3 flex items-start gap-3 rounded-[14px] bg-accent-soft px-5 py-4 text-accent">
+              <Sparkles className="mt-1 h-5 w-5 shrink-0" strokeWidth={1.8} />
+              <div className="min-w-0 flex-1">
+                <p className="horizon-eyebrow mb-1">You could say</p>
+                <p className="text-[22px] font-semibold leading-snug">{helpText}</p>
+              </div>
               <button type="button" aria-label="Dismiss suggestion" onClick={() => setHelpText(null)} className="shrink-0">
-                <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                <X className="h-5 w-5" strokeWidth={1.8} />
               </button>
             </div>
           )}
 
           {feedbackCard && !practice && (
-            <div className={`horizon-card mb-3 p-4 ${feedbackCard.kind === 'praise' ? 'border-success/40' : ''}`}>
+            <div className={`horizon-card mb-3 p-5 ${feedbackCard.kind === 'praise' ? 'border-success/40' : ''}`}>
               <div className="flex items-start justify-between gap-2">
-                <h3 className={`text-[13.5px] font-semibold ${feedbackCard.kind === 'praise' ? 'text-success' : 'text-text'}`}>
+                <h3 className={`text-[15px] font-semibold ${feedbackCard.kind === 'praise' ? 'text-success' : 'text-text'}`}>
                   {feedbackCard.kind === 'praise' ? 'Nice phrase' : 'A small correction'}
                 </h3>
                 <button type="button" aria-label="Dismiss feedback" onClick={() => setFeedbackCard(null)} className="text-2 hover:text-text">
@@ -895,18 +902,24 @@ function SessionScreen({
               </div>
 
               {feedbackCard.kind === 'correction' ? (
-                <div className="mt-2 grid gap-1.5 text-[12.5px]">
-                  <p><span className="font-medium text-2">You said: </span>{feedbackCard.youSaid}</p>
-                  <p><span className="font-medium text-2">Try this: </span>{feedbackCard.tryThis}</p>
-                  <button type="button" onClick={() => setWhyOpen((v) => !v)} className="mt-0.5 flex items-center gap-1 text-left text-[11.5px] font-medium text-2 hover:text-text">
-                    Why? <ChevronDown className={`h-3 w-3 transition-transform ${whyOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
+                <div className="mt-3 grid gap-3">
+                  <div>
+                    <p className="horizon-eyebrow mb-1">You said</p>
+                    <p className="text-[17px] leading-snug text-2">{feedbackCard.youSaid}</p>
+                  </div>
+                  <div>
+                    <p className="horizon-eyebrow mb-1">Try this</p>
+                    <p className="text-[24px] font-semibold leading-snug text-text">{feedbackCard.tryThis}</p>
+                  </div>
+                  <button type="button" onClick={() => setWhyOpen((v) => !v)} className="flex items-center gap-1 text-left text-[13px] font-medium text-2 hover:text-text">
+                    Why? <ChevronDown className={`h-3.5 w-3.5 transition-transform ${whyOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
                   </button>
-                  {whyOpen && <p className="text-[12px] text-2">{feedbackCard.why}</p>}
+                  {whyOpen && <p className="text-[15px] leading-snug text-2">{feedbackCard.why}</p>}
                 </div>
               ) : (
-                <div className="mt-2 grid gap-1.5 text-[12.5px]">
-                  <p className="text-text">{feedbackCard.tryThis}</p>
-                  <p className="text-[12px] text-2">{feedbackCard.why}</p>
+                <div className="mt-3 grid gap-2">
+                  <p className="text-[22px] font-semibold leading-snug text-text">{feedbackCard.tryThis}</p>
+                  <p className="text-[15px] leading-snug text-2">{feedbackCard.why}</p>
                 </div>
               )}
 
@@ -914,15 +927,15 @@ function SessionScreen({
                 <button
                   type="button"
                   onClick={() => void speak(feedbackCard.tryThis, 130)}
-                  className="inline-flex items-center gap-1.5 rounded-[9px] border border-border bg-panel px-2.5 py-1.5 text-[11.5px] font-medium text-text hover:bg-[var(--hover)]"
+                  className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-panel px-3.5 py-2 text-[13.5px] font-medium text-text hover:bg-[var(--hover)]"
                 >
-                  <Volume2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  <Volume2 className="h-4 w-4" strokeWidth={1.8} />
                   Hear the phrase
                 </button>
                 <button
                   type="button"
                   onClick={() => void startPracticeIt(feedbackCard.tryThis)}
-                  className="rounded-[9px] bg-accent px-2.5 py-1.5 text-[11.5px] font-semibold text-accent-foreground"
+                  className="rounded-[10px] bg-accent px-3.5 py-2 text-[13.5px] font-semibold text-accent-foreground"
                 >
                   Practice it
                 </button>
@@ -931,10 +944,10 @@ function SessionScreen({
           )}
 
           {practice && (
-            <div className="horizon-card mb-3 p-4">
-              <p className="text-[12.5px] font-medium text-2">Repeat this phrase:</p>
-              <p className="mt-1 text-[16px] font-semibold text-accent">{practice.target}</p>
-              {practice.result === 'retry' && <p className="mt-1 text-[12px] text-danger">Try again ({practice.attempts}/3)</p>}
+            <div className="horizon-card mb-3 p-5">
+              <p className="horizon-eyebrow mb-1">Repeat this phrase</p>
+              <p className="text-[24px] font-semibold leading-snug text-accent">{practice.target}</p>
+              {practice.result === 'retry' && <p className="mt-2 text-[14px] text-danger">Try again ({practice.attempts}/3)</p>}
             </div>
           )}
 
