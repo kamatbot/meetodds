@@ -679,8 +679,9 @@ function SessionScreen({
     feedback: [],
     levelSignal: null,
   });
-  const [, setVersion] = useState(0);
+  const [version, setVersion] = useState(0);
   const bump = () => setVersion((v) => v + 1);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
   const [status, setStatus] = useState<Status>('thinking');
   const [error, setError] = useState<string | null>(null);
@@ -963,9 +964,13 @@ function SessionScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Follow the conversation: new turns, live partial text, cards, and the help
+  // callout all change the height, so scroll the container itself each time.
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [sessionRef.current.turns.length]);
+    const el = transcriptScrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, livePartial, feedbackCard, helpText, practice]);
 
   useEffect(() => {
     const start = Date.now();
@@ -1152,7 +1157,7 @@ function SessionScreen({
       </div>
 
       <div className="mx-auto flex w-full max-w-[640px] min-h-0 flex-1 flex-col px-6">
-        <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar py-4">
+        <div ref={transcriptScrollRef} className="min-h-0 flex-1 overflow-y-auto py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="grid gap-3">
             {sessionRef.current.turns.map((turn, i) => {
               const isLastTutor = turn.role === 'tutor' && turn.text === lastTutorLine && i === sessionRef.current.turns.length - 1;
@@ -1491,8 +1496,21 @@ function RecapScreen({
   return (
     <div className="flex h-screen w-screen flex-col overflow-y-auto bg-bg text-text custom-scrollbar">
       <div data-tauri-drag-region className="h-[52px] shrink-0" aria-hidden="true" />
+      <div className="sticky top-0 z-10 border-b border-border bg-bg/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-[640px] items-center justify-between gap-3 px-6 py-2">
+          <p className="horizon-eyebrow">Session recap</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={onPracticeAgain} className="h-9 rounded-[10px] border border-border bg-panel px-3 text-[12.5px] font-medium text-text hover:bg-[var(--hover)]">
+              Practice again
+            </button>
+            <button type="button" onClick={onDone} className="h-9 rounded-[10px] bg-accent px-4 text-[12.5px] font-semibold text-accent-foreground">
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
       <div className="mx-auto w-full max-w-[640px] flex-1 px-6 pb-16">
-        <h1 className="text-display text-text">Good work, {profile.name}</h1>
+        <h1 className="mt-4 text-display text-text">Good work, {profile.name}</h1>
         <div className="mt-4 flex gap-2">
           <div className="horizon-card flex-1 p-3 text-center">
             <p className="text-[20px] font-semibold text-text">{counts.learnerTurns}</p>
