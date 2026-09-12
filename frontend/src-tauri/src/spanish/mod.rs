@@ -1,5 +1,6 @@
 //! Spanish tutoring core. No microphone, voice, window, meeting, or cloud ownership.
 //! The companion branch supplies its command shell and persists these values.
+pub mod commands;
 pub mod persistence;
 pub mod policy;
 pub mod scenes;
