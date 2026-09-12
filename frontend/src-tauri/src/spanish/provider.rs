@@ -74,10 +74,11 @@ impl MeetOddsModel {
 }
 impl Model for MeetOddsModel {
     fn token_count(&self, text: &str) -> usize {
-        self.token_counter
-            .as_ref()
-            .map(|count| count(text))
-            .unwrap_or(text.len())
+        self.token_counter.as_ref().map(|count| count(text)).unwrap_or_else(|| {
+            // ponytail: byte heuristic (UTF-8 bytes per token for Spanish ~3.5); wire the
+            // llama tokenizer via with_token_counter if prompts get clipped.
+            text.len() / 3 + 1
+        })
     }
     // Keep one native tutoring request in flight. The core emits the reply
     // before making a judge request; no competing analytic slot on llama-helper.
@@ -245,28 +246,28 @@ impl<R: Runtime> EventSink for WindowSink<R> {
     }
 }
 
-/// Call inside the companion branch's migration transaction AFTER its existing
-/// spanish_profiles table is present. Do not add this to global startup before
-/// that branch lands; no replacement profile/session tables are created here.
-pub async fn migrate_practicing(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-) -> Result<(), String> {
-    use sqlx::Row;
-    let columns = sqlx::query("PRAGMA table_info(spanish_profiles)")
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(|e| e.to_string())?;
-    if columns.is_empty() {
-        return Err("Spanish profile foundation has not been installed.".into());
+// ponytail: the `practicing`/`allow_cloud` columns are now added by the repo's own
+// sqlx::migrate!("./migrations") run (see migrations/20260913100000_spanish_practicing.sql).
+// migrate_practicing used to hand-roll this from an out-of-tree migration file; deleted.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_count_falls_back_to_byte_heuristic() {
+        let config = ProviderConfig {
+            provider: LLMProvider::BuiltInAI,
+            model: "test-model".into(),
+            api_key: String::new(),
+            app_data_dir: PathBuf::new(),
+            ollama_endpoint: None,
+            custom_endpoint: None,
+            allow_external_text: false,
+            cloud_sampling_supported: false,
+        };
+        let model = MeetOddsModel::new(reqwest::Client::new(), config).unwrap();
+        assert_eq!(model.token_count("hola mundo!!"), 5); // 12 bytes / 3 + 1
+        assert_eq!(model.token_count(""), 1);
     }
-    let present = columns
-        .iter()
-        .any(|row| row.try_get::<String, _>("name").ok().as_deref() == Some("practicing"));
-    if !present {
-        sqlx::query(include_str!("migrations/001_practicing.sql"))
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }

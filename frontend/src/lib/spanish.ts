@@ -1,8 +1,36 @@
 // Types, constants, and pure helpers for the Spanish practice feature.
 // Kept in one file (ponytail: no separate types/ + utils/ split for ~10 helpers).
+// Tutor-turn event/reply types folded in from types/spanishTutor.ts (single home for types).
 
 export type Level = 'beginner' | 'intermediate' | 'advanced';
 export type Variety = 'es_MX' | 'es_ES';
+
+// ponytail: category is a plain string on the wire (native owns the enum); we only need
+// it to key CATEGORY_LABELS, so no separate union type to keep in lockstep with Rust.
+export const CATEGORY_LABELS: Record<string, string> = {
+  verb_tense: 'Past, present, and future',
+  verb_conjugation: 'Verb endings',
+  ser_estar: 'Ser vs. estar',
+  gender_agreement: 'Gender agreement',
+  number_agreement: 'Singular and plural',
+  article: 'Articles (el, la, un…)',
+  preposition: 'Prepositions',
+  word_choice: 'Word choice',
+  word_order: 'Word order',
+  missing_word: 'Missing words',
+  english_mixed: 'Saying it in Spanish',
+  other: 'Other',
+};
+
+export interface PracticingPhrase {
+  phrase: string;
+  category: string;
+  uses: number;
+  mastered: boolean;
+  addedAt: number;
+  /** Internal evidence natively used to distinguish repeated practice from cross-session use. */
+  useSessionIds?: string[];
+}
 
 export interface SpanishProfile {
   id: string;
@@ -10,6 +38,8 @@ export interface SpanishProfile {
   level: Level;
   variety: Variety;
   topics: string[];
+  practicing: PracticingPhrase[];
+  allowCloud: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -20,10 +50,15 @@ export interface Turn {
 }
 
 export interface Feedback {
-  kind: 'correction' | 'praise';
+  kind: 'correction' | 'praise' | 'practiced' | 'translation';
   youSaid: string;
   tryThis: string;
   why: string;
+  category: string;
+  severity: 'blocking' | 'core' | 'polish';
+  shown: boolean;
+  turnIndex: number;
+  count: number;
 }
 
 export interface SpanishSession {
@@ -37,9 +72,52 @@ export interface SpanishSession {
   levelSignal: 'easier' | 'right' | 'harder' | null;
 }
 
-export interface TutorResponse {
-  reply: string;
+export type TutorMode = 'open' | 'reply' | 'help' | 'stuck';
+
+/** Emitted by the native side while spanish_tutor_turn is still awaiting the judge.
+ * THE APP SPEAKS ONLY FROM THESE EVENTS, never from the command's return value. */
+export interface TutorReplyEvent {
+  text: string;
+  repeat: boolean;
+  rate?: number;
+  filler?: boolean;
+  requestId: string;
+  sessionId: string;
+}
+
+export interface TutorTurnResponse {
   feedback: Feedback | null;
+  beat: number;
+  sceneDone: boolean;
+}
+
+export interface FocusItem {
+  category: string;
+  title: string;
+  count: number;
+  example: Feedback;
+}
+
+export interface SessionRecap {
+  focusNextTime: FocusItem[];
+  findings: Feedback[];
+  masteredPhrases: string[];
+  suggestLevelBump: boolean;
+}
+
+export interface SessionCounts {
+  learnerTurns: number;
+  corrections: number;
+  praise: number;
+}
+
+export interface PracticeResult {
+  score: number;
+  missedWordIndices: number[];
+  message: string;
+  done: boolean;
+  succeeded: boolean;
+  attempts: number;
 }
 
 export interface Readiness {
@@ -83,59 +161,26 @@ export function nextLevel(level: Level, signal: 'easier' | 'right' | 'harder'): 
   return level;
 }
 
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[.,!¡?¿"'`´;:()\[\]{}]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+/**
+ * Listen before invoking spanish_tutor_turn. The app speaks ONLY from this
+ * event, never again when the command resolves. Scope the listener to the
+ * originating window, and use fresh request IDs on every turn.
+ * This predicate rejects late replies after cancellation/navigation/a new turn.
+ */
+export function isCurrentSpanishReply(
+  event: TutorReplyEvent,
+  sessionId: string,
+  requestId: string,
+  cancelled: boolean,
+): boolean {
+  return !cancelled && event.sessionId === sessionId && event.requestId === requestId
+    && typeof event.text === 'string' && event.text.trim().length > 0;
 }
 
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const row = new Array(n + 1);
-  for (let j = 0; j <= n; j++) row[j] = j;
-  for (let i = 1; i <= m; i++) {
-    let prev = row[0];
-    row[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const tmp = row[j];
-      row[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, row[j], row[j - 1]);
-      prev = tmp;
-    }
-  }
-  return row[n];
-}
-
-// 0..1, 1 = identical after normalization (lowercase, punctuation/space stripped, accents kept).
-export function similarity(a: string, b: string): number {
-  const na = normalize(a);
-  const nb = normalize(b);
-  const maxLen = Math.max(na.length, nb.length);
-  if (maxLen === 0) return 1;
-  return 1 - levenshtein(na, nb) / maxLen;
-}
-
-// ponytail: no test runner configured in this repo (no test script, no vitest/jest) -
-// run this by hand with `npx tsx src/lib/spanish.ts` instead of a proper test file.
-export function selfCheckSimilarity(): void {
-  const identical = similarity('Hola, ¿cómo estás?', 'hola como estas');
-  console.assert(identical > 0.85 && identical < 1, `expected accent mismatch to reduce ratio, got ${identical}`);
-
-  const exact = similarity('Buenos días!!', 'buenos días');
-  console.assert(exact === 1, `expected punctuation/case-only diff to be 1, got ${exact}`);
-
-  const different = similarity('hola', 'adiós');
-  console.assert(different < 0.4, `expected unrelated strings to score low, got ${different}`);
-
-  console.log('selfCheckSimilarity: ok', { identical, exact, different });
-}
-
-if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
-  selfCheckSimilarity();
+/** Server-supplied optional metadata wins; legacy repeat events retain rate 115. */
+export function spanishReplyRate(event: TutorReplyEvent, normalRate: number): number {
+  if (event.rate !== undefined && Number.isFinite(event.rate) && event.rate >= 80 && event.rate <= 240) return event.rate;
+  return event.repeat ? 115 : normalRate;
 }
 
 // --- Lessons built from recorded classes (meeting transcripts) ---

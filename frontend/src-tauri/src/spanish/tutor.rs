@@ -33,6 +33,10 @@ pub struct TutorRequest {
     pub request_id: String,
     #[serde(default)]
     pub now_ms: u64,
+    /// Free-text goal for the `just_talk` scene (e.g. a class-lesson brief's
+    /// situation text). Ignored for scripted scenes, which use their own beat goal.
+    #[serde(default)]
+    pub goal: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -473,9 +477,18 @@ pub fn reply_prompt<M: Model>(
     s: &SessionState,
     r: &TutorRequest,
 ) -> Result<Prompt, TutorError> {
-    let goal = scenes::scene(&s.scene_id)
-        .map(|x| x.beat(s.beat).goal)
-        .unwrap_or("follow the learner's chosen topic");
+    let free_goal = (s.scene_id == "just_talk")
+        .then(|| r.goal.as_deref())
+        .flatten()
+        .map(str::trim)
+        .filter(|g| !g.is_empty());
+    let goal = match free_goal {
+        Some(g) => bounded(g, 700),
+        None => scenes::scene(&s.scene_id)
+            .map(|x| x.beat(s.beat).goal)
+            .unwrap_or("follow the learner's chosen topic")
+            .to_string(),
+    };
     let learner = serde_json::to_string(&r.text).map_err(|_| TutorError::InvalidRequest)?;
     let mut user = format!(
         "Level:{}; dial:{}; variety:{}\nGoal:{}\nLearner:{}",

@@ -1,5 +1,10 @@
 //! Spanish tutoring core. No microphone, voice, window, meeting, or cloud ownership.
 //! The companion branch supplies its command shell and persists these values.
+// ponytail: gated so `cargo test --manifest-path tools/spanish-core-tests/Cargo.toml`
+// (which compiles this file as a standalone lib target with no tauri/sqlx/reqwest
+// deps) doesn't try to pull in the Tauri command shell. See Cargo.toml's
+// `tauri-commands` feature, on by default for the real frontend crate.
+#[cfg(feature = "tauri-commands")]
 pub mod commands;
 pub mod persistence;
 pub mod policy;

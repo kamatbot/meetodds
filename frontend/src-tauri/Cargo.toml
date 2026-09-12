@@ -24,8 +24,13 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["platform-default"]
-platform-default = []
+default = ["platform-default", "tauri-commands"]
+platform-default = ["tauri-commands"]
+# Gates `spanish::commands` (Tauri/sqlx/reqwest-dependent command shell) out of the
+# model-free `spanish` core when it's compiled standalone as the `spanish_core` lib
+# target used by tools/spanish-core-tests (that package defines no such feature, so
+# this cfg is simply false there — no Tauri/sqlx/reqwest dependency needed).
+tauri-commands = []
 metal = ["whisper-rs/metal"]
 coreml = ["whisper-rs/coreml"]
 cuda = ["whisper-rs/cuda"]

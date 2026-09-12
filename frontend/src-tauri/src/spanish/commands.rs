@@ -1,5 +1,6 @@
 //! Spanish practice: profiles/sessions persistence, mic-only live listening (VAD + STT),
-//! macOS `say` playback, and an LLM tutor turn. One file, all Tauri commands for the feature.
+//! macOS `say` playback, and the LLM tutor turn (delegates to the `spanish` tutoring
+//! engine — see spanish/tutor.rs, policy.rs, scenes.rs, text.rs, persistence.rs).
 use crate::audio::devices::{default_input_device, parse_audio_device};
 use crate::audio::recording_state::{AudioChunk, DeviceType, RecordingState};
 use crate::audio::stream::AudioStream;
@@ -7,12 +8,13 @@ use crate::audio::transcription::{
     get_or_init_transcription_engine, validate_transcription_model_ready, TranscriptionEngine,
 };
 use crate::audio::vad::ContinuousVadProcessor;
+use crate::spanish as core;
 use crate::state::AppState;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -28,6 +30,14 @@ pub struct SpanishProfile {
     pub level: String,
     pub variety: String,
     pub topics: Vec<String>,
+    /// Owned by the tutoring engine (spanish_tutor_turn); the client may echo
+    /// this back but spanish_save_profile never persists it from the request.
+    #[serde(default)]
+    pub practicing: Vec<core::PracticingPhrase>,
+    /// Client-editable: explicit per-profile consent to send learner text to a
+    /// non-loopback (cloud) provider. See spanish_provider::MeetOddsModel::new.
+    #[serde(default)]
+    pub allow_cloud: bool,
     #[serde(default)]
     pub created_at: String,
     #[serde(default)]
@@ -48,10 +58,22 @@ pub struct Feedback {
     pub you_said: String,
     pub try_this: String,
     pub why: String,
+    // Additive: populated by the tutoring engine's own Feedback (category/severity
+    // are its snake_case enum strings); absent/None for older saved cards.
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub severity: Option<String>,
+    #[serde(default)]
+    pub shown: Option<bool>,
+    #[serde(default)]
+    pub turn_index: Option<usize>,
+    #[serde(default)]
+    pub count: Option<usize>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct SpanishSession {
     pub id: String,
     pub profile_id: String,
@@ -63,21 +85,20 @@ pub struct SpanishSession {
     pub level_signal: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TutorRequest {
-    pub profile: SpanishProfile,
-    pub situation: Option<String>,
-    pub history: Vec<Turn>,
-    pub learner_text: Option<String>,
-    pub mode: String,
+pub struct SessionCounts {
+    pub learner_turns: usize,
+    pub corrections: usize,
+    pub praise: usize,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TutorResponse {
-    pub reply: String,
-    pub feedback: Option<Feedback>,
+pub struct SessionRecap {
+    pub session: SpanishSession,
+    pub recap: core::policy::Recap,
+    pub counts: SessionCounts,
 }
 
 #[derive(Serialize)]
@@ -102,6 +123,8 @@ struct ProfileRow {
     level: String,
     variety: String,
     topics: String,
+    practicing: String,
+    allow_cloud: bool,
     created_at: String,
     updated_at: String,
 }
@@ -114,6 +137,8 @@ impl ProfileRow {
             level: self.level,
             variety: self.variety,
             topics: serde_json::from_str(&self.topics).unwrap_or_default(),
+            practicing: serde_json::from_str(&self.practicing).unwrap_or_default(),
+            allow_cloud: self.allow_cloud,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -147,11 +172,16 @@ impl SessionRow {
     }
 }
 
+const PROFILE_COLUMNS: &str =
+    "id, name, level, variety, topics, practicing, allow_cloud, created_at, updated_at";
+const SESSION_COLUMNS: &str =
+    "id, profile_id, situation, started_at, ended_at, turns, feedback, level_signal";
+
 #[tauri::command]
 pub async fn spanish_list_profiles(state: State<'_, AppState>) -> Result<Vec<SpanishProfile>, String> {
-    let rows = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, level, variety, topics, created_at, updated_at FROM spanish_profiles ORDER BY created_at ASC",
-    )
+    let rows = sqlx::query_as::<_, ProfileRow>(&format!(
+        "SELECT {PROFILE_COLUMNS} FROM spanish_profiles ORDER BY created_at ASC"
+    ))
     .fetch_all(state.db_manager.pool())
     .await
     .map_err(|e| format!("Failed to list Spanish profiles: {e}"))?;
@@ -176,25 +206,30 @@ pub async fn spanish_save_profile(
     };
     let topics_json = serde_json::to_string(&profile.topics).unwrap_or_else(|_| "[]".to_string());
 
+    // `practicing` is deliberately absent from the UPDATE SET below: the tutoring
+    // engine (spanish_tutor_turn) is the only writer of that column. A brand new
+    // profile starts with '[]'; an existing one keeps whatever the engine wrote.
     sqlx::query(
-        "INSERT INTO spanish_profiles (id, name, level, variety, topics, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) \
+        "INSERT INTO spanish_profiles (id, name, level, variety, topics, practicing, allow_cloud, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?) \
          ON CONFLICT(id) DO UPDATE SET name = excluded.name, level = excluded.level, variety = excluded.variety, \
-             topics = excluded.topics, updated_at = excluded.updated_at",
+             topics = excluded.topics, allow_cloud = excluded.allow_cloud, updated_at = excluded.updated_at",
     )
     .bind(&profile.id)
     .bind(&profile.name)
     .bind(&profile.level)
     .bind(&profile.variety)
     .bind(&topics_json)
+    .bind(profile.allow_cloud)
     .bind(&created_at)
     .bind(&now)
     .execute(state.db_manager.pool())
     .await
     .map_err(|e| format!("Failed to save Spanish profile: {e}"))?;
 
-    let row = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, level, variety, topics, created_at, updated_at FROM spanish_profiles WHERE id = ?",
-    )
+    let row = sqlx::query_as::<_, ProfileRow>(&format!(
+        "SELECT {PROFILE_COLUMNS} FROM spanish_profiles WHERE id = ?"
+    ))
     .bind(&profile.id)
     .fetch_one(state.db_manager.pool())
     .await
@@ -212,6 +247,153 @@ pub async fn spanish_delete_profile(state: State<'_, AppState>, id: String) -> R
     Ok(())
 }
 
+// ============================================================================
+// Sessions
+// ============================================================================
+
+#[tauri::command]
+pub async fn spanish_start_session(
+    state: State<'_, AppState>,
+    profile_id: String,
+    situation: Option<String>,
+) -> Result<SpanishSession, String> {
+    let pool = state.db_manager.pool();
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut tx = pool.begin().await.map_err(|e| format!("Cannot start a practice session: {e}"))?;
+    // Exactly one open session per profile: close any other first.
+    sqlx::query("UPDATE spanish_sessions SET ended_at = ? WHERE profile_id = ? AND ended_at IS NULL")
+        .bind(&now)
+        .bind(&profile_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to close the previous practice session: {e}"))?;
+    sqlx::query(
+        "INSERT INTO spanish_sessions (id, profile_id, situation, started_at, ended_at, turns, feedback, level_signal) \
+         VALUES (?, ?, ?, ?, NULL, '[]', '[]', NULL)",
+    )
+    .bind(&id)
+    .bind(&profile_id)
+    .bind(&situation)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("Failed to start a practice session: {e}"))?;
+    tx.commit().await.map_err(|e| format!("Failed to start a practice session: {e}"))?;
+    Ok(SpanishSession {
+        id,
+        profile_id,
+        situation,
+        started_at: now,
+        ended_at: None,
+        turns: Vec::new(),
+        feedback: Vec::new(),
+        level_signal: None,
+    })
+}
+
+/// Read the tutoring engine's own snapshot, if any, out of a session's stored
+/// `turns` blob. Mirrors `persistence::prepare_update`'s `spanishTutorState` field.
+fn session_engine_state(turns_json: &str) -> Option<core::SessionState> {
+    let value: serde_json::Value = serde_json::from_str(turns_json).ok()?;
+    value
+        .as_array()?
+        .iter()
+        .rev()
+        .find_map(|turn| turn.get("spanishTutorState")?.get("state"))
+        .and_then(|saved| serde_json::from_value(saved.clone()).ok())
+}
+
+/// The engine does not persist a `Level` per session, only its numeric `dial`.
+/// Using the profile's CURRENT level for historical sessions is a deliberate
+/// simplification: this only affects the level-bump suggestion's lookback.
+fn session_result(row: &SessionRow, level: core::Level) -> Option<core::policy::SessionResult> {
+    let s = session_engine_state(&row.turns)?;
+    Some(core::policy::SessionResult {
+        session_id: s.session_id,
+        level,
+        final_dial: s.dial,
+        assessed_turns: s.assessed_turns,
+        error_turns: s.error_turns,
+    })
+}
+
+fn empty_recap() -> core::policy::Recap {
+    core::policy::Recap {
+        focus_next_time: Vec::new(),
+        findings: Vec::new(),
+        mastered_phrases: Vec::new(),
+        suggest_level_bump: false,
+    }
+}
+
+fn count_session(session: &SpanishSession) -> SessionCounts {
+    SessionCounts {
+        learner_turns: session.turns.iter().filter(|t| t.role == "learner").count(),
+        corrections: session.feedback.iter().filter(|f| f.kind == "correction").count(),
+        praise: session.feedback.iter().filter(|f| f.kind == "praise").count(),
+    }
+}
+
+#[tauri::command]
+pub async fn spanish_end_session(
+    state: State<'_, AppState>,
+    session_id: String,
+    level_signal: Option<String>,
+) -> Result<SessionRecap, String> {
+    let pool = state.db_manager.pool();
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query("UPDATE spanish_sessions SET ended_at = ?, level_signal = COALESCE(?, level_signal) WHERE id = ?")
+        .bind(&now)
+        .bind(&level_signal)
+        .bind(&session_id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Failed to end the practice session: {e}"))?;
+
+    let row = sqlx::query_as::<_, SessionRow>(&format!("SELECT {SESSION_COLUMNS} FROM spanish_sessions WHERE id = ?"))
+        .bind(&session_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("Failed to load the practice session: {e}"))?
+        .ok_or("This practice session no longer exists.")?;
+
+    let profile_row = sqlx::query_as::<_, ProfileRow>(&format!(
+        "SELECT {PROFILE_COLUMNS} FROM spanish_profiles WHERE id = ?"
+    ))
+    .bind(&row.profile_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Failed to load the learner profile: {e}"))?
+    .ok_or("This learner no longer exists.")?;
+    let profile = profile_row.into_profile();
+    let learner_level = parse_level(&profile.level).unwrap_or_default();
+
+    let recap = match session_engine_state(&row.turns) {
+        None => empty_recap(),
+        Some(state) => {
+            let recent_rows = sqlx::query_as::<_, SessionRow>(&format!(
+                "SELECT {SESSION_COLUMNS} FROM spanish_sessions \
+                 WHERE profile_id = ? AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT 3"
+            ))
+            .bind(&row.profile_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| format!("Failed to load recent practice sessions: {e}"))?;
+            let recent: Vec<core::policy::SessionResult> = recent_rows
+                .iter()
+                .rev() // oldest first
+                .filter_map(|r| session_result(r, learner_level))
+                .collect();
+            let core_profile = core_profile(&profile).unwrap_or_default();
+            core::policy::recap(&state, &core_profile, &recent)
+        }
+    };
+    let session = row.into_session();
+    let counts = count_session(&session);
+    Ok(SessionRecap { session, recap, counts })
+}
+
 #[tauri::command]
 pub async fn spanish_list_sessions(
     state: State<'_, AppState>,
@@ -219,10 +401,9 @@ pub async fn spanish_list_sessions(
     limit: u32,
 ) -> Result<Vec<SpanishSession>, String> {
     let limit: i64 = if limit == 0 { i64::MAX } else { limit.into() };
-    let rows = sqlx::query_as::<_, SessionRow>(
-        "SELECT id, profile_id, situation, started_at, ended_at, turns, feedback, level_signal \
-         FROM spanish_sessions WHERE profile_id = ? ORDER BY started_at DESC LIMIT ?",
-    )
+    let rows = sqlx::query_as::<_, SessionRow>(&format!(
+        "SELECT {SESSION_COLUMNS} FROM spanish_sessions WHERE profile_id = ? ORDER BY started_at DESC LIMIT ?"
+    ))
     .bind(&profile_id)
     .bind(limit)
     .fetch_all(state.db_manager.pool())
@@ -231,31 +412,21 @@ pub async fn spanish_list_sessions(
     Ok(rows.into_iter().map(SessionRow::into_session).collect())
 }
 
+/// ponytail: kept only for backward compatibility with the pre-engine contract.
+/// The native engine (spanish_tutor_turn) is the sole writer of turns/feedback;
+/// this now shares spanish_end_session's narrow update (level_signal/ended_at only).
 #[tauri::command]
 pub async fn spanish_save_session(state: State<'_, AppState>, session: SpanishSession) -> Result<(), String> {
     if session.id.trim().is_empty() {
         return Err("session id cannot be empty".to_string());
     }
-    let turns_json = serde_json::to_string(&session.turns).unwrap_or_else(|_| "[]".to_string());
-    let feedback_json = serde_json::to_string(&session.feedback).unwrap_or_else(|_| "[]".to_string());
-    sqlx::query(
-        "INSERT INTO spanish_sessions (id, profile_id, situation, started_at, ended_at, turns, feedback, level_signal) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
-         ON CONFLICT(id) DO UPDATE SET profile_id = excluded.profile_id, situation = excluded.situation, \
-             started_at = excluded.started_at, ended_at = excluded.ended_at, turns = excluded.turns, \
-             feedback = excluded.feedback, level_signal = excluded.level_signal",
-    )
-    .bind(&session.id)
-    .bind(&session.profile_id)
-    .bind(&session.situation)
-    .bind(&session.started_at)
-    .bind(&session.ended_at)
-    .bind(&turns_json)
-    .bind(&feedback_json)
-    .bind(&session.level_signal)
-    .execute(state.db_manager.pool())
-    .await
-    .map_err(|e| format!("Failed to save Spanish session: {e}"))?;
+    sqlx::query("UPDATE spanish_sessions SET level_signal = COALESCE(?, level_signal), ended_at = COALESCE(?, ended_at) WHERE id = ?")
+        .bind(&session.level_signal)
+        .bind(&session.ended_at)
+        .bind(&session.id)
+        .execute(state.db_manager.pool())
+        .await
+        .map_err(|e| format!("Failed to save Spanish session: {e}"))?;
     Ok(())
 }
 
@@ -598,226 +769,359 @@ pub async fn spanish_stop_speaking() -> Result<(), String> {
 }
 
 // ============================================================================
-// LLM tutor turn
+// LLM tutor turn — delegates to the `spanish` tutoring engine
 // ============================================================================
 
 static TUTOR_HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 });
+/// Guards against two overlapping turns ever reaching the shared local model at once.
+static TUTOR_GATE: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
+/// Single global "latest request" slot: a new turn cancels whatever came before it,
+/// across all sessions. This mirrors the draft; per-session leases are additionally
+/// enforced inside TutorEngine itself.
+static CURRENT_TUTOR: Lazy<Mutex<Option<(String, CancellationToken)>>> = Lazy::new(|| Mutex::new(None));
 
-fn variety_label(variety: &str) -> &'static str {
-    if variety.trim() == "es_ES" {
-        "Castilian Spanish, informal tú"
-    } else {
-        "Mexican Spanish, informal tú"
-    }
-}
-
-fn build_tutor_system_prompt(profile: &SpanishProfile) -> String {
-    format!(
-        "You are a warm, patient Spanish conversation partner for a {level} learner named {name}. \
-Use {variety} Spanish. Keep the conversation going naturally. Rules: (1) 'reply' is ALWAYS in Spanish, \
-1-2 short sentences, and ends with a question that invites the learner to keep talking. Never switch to \
-English in 'reply'. Never say the learner was wrong inside 'reply'. Level guide: beginner = present tense, \
-very common words, short sentences; intermediate = past tenses, everyday vocabulary; advanced = natural \
-native pace, idioms. (2) 'feedback': if the learner's last sentence has ONE clear grammar or word-choice \
-error, return {{\"kind\": \"correction\", \"youSaid\": the learner's sentence, \"tryThis\": the corrected \
-full sentence, \"why\": ONE plain-English sentence explaining the rule}}. If it is correct and uses a \
-phrase worth highlighting, occasionally return {{\"kind\": \"praise\", \"youSaid\": sentence, \"tryThis\": \
-same sentence, \"why\": one English sentence on why it is good}}. Otherwise return null. Do not invent \
-corrections for minor accent marks or transcription artifacts. Output ONLY a JSON object: \
-{{\"reply\": string, \"feedback\": object|null}}.",
-        level = profile.level,
-        name = profile.name,
-        variety = variety_label(&profile.variety),
-    )
-}
-
-fn situation_line(situation: &Option<String>, topics: &[String]) -> String {
-    match situation.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(situation) => format!("Situation: {situation}."),
-        None => format!(
-            "Situation: free conversation about topics the learner likes: {}.",
-            topics.join(", ")
-        ),
-    }
-}
-
-fn conversation_so_far(history: &[Turn]) -> String {
-    let recent = if history.len() > 12 {
-        &history[history.len() - 12..]
-    } else {
-        history
-    };
-    recent
-        .iter()
-        .map(|turn| {
-            let speaker = if turn.role == "tutor" { "Tutor" } else { "Learner" };
-            format!("{speaker}: {}", turn.text)
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn build_tutor_user_prompt(request: &TutorRequest) -> Result<String, String> {
-    let situation = situation_line(&request.situation, &request.profile.topics);
-    match request.mode.as_str() {
-        "open" => Ok(format!(
-            "{situation} Start the conversation with your first line in Spanish. feedback must be null."
-        )),
-        "reply" => {
-            let learner_text = request
-                .learner_text
-                .as_deref()
-                .map(str::trim)
-                .filter(|text| !text.is_empty())
-                .ok_or_else(|| "learner_text is required for reply mode".to_string())?;
-            let conversation = conversation_so_far(&request.history);
-            Ok(format!(
-                "{situation}\nConversation so far:\n{conversation}\nLearner just said: \"{learner_text}\"\nRespond as JSON."
-            ))
-        }
-        "help" => {
-            let conversation = conversation_so_far(&request.history);
-            Ok(format!(
-                "{situation}\nConversation so far:\n{conversation}\nThe learner is stuck. In 'reply' give ONE \
-short example sentence in Spanish they could say next (at their level). feedback must be null."
-            ))
-        }
-        other => Err(format!("Unknown tutor mode: {other}")),
-    }
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct RawFeedback {
-    #[serde(default)]
-    kind: String,
-    #[serde(default)]
-    you_said: String,
-    #[serde(default)]
-    try_this: String,
-    #[serde(default)]
-    why: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct RawTutorOutput {
-    #[serde(default)]
-    reply: String,
-    #[serde(default)]
-    feedback: Option<RawFeedback>,
-}
-
-fn strip_think_blocks(input: &str) -> String {
-    let mut s = input.to_string();
-    loop {
-        let Some(start) = s.find("<think>") else { break };
-        match s[start..].find("</think>") {
-            Some(end_rel) => {
-                let end = start + end_rel + "</think>".len();
-                s.replace_range(start..end, "");
-            }
-            None => {
-                s.truncate(start);
-                break;
+struct TutorRegistration(String);
+impl Drop for TutorRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut active) = CURRENT_TUTOR.lock() {
+            if active.as_ref().is_some_and(|(id, _)| id == &self.0) {
+                active.take();
             }
         }
     }
-    s
 }
 
-fn strip_fences(input: &str) -> String {
-    input.replace("```json", "").replace("```JSON", "").replace("```", "")
+fn parse_level(level: &str) -> Result<core::Level, String> {
+    match level {
+        "beginner" => Ok(core::Level::Beginner),
+        "intermediate" => Ok(core::Level::Intermediate),
+        "advanced" => Ok(core::Level::Advanced),
+        _ => Err("Choose a supported learner level.".into()),
+    }
 }
 
-fn extract_json_slice(input: &str) -> Option<&str> {
-    let start = input.find('{')?;
-    let end = input.rfind('}')?;
-    if end < start {
+/// Frontend situation labels are exact strings (see the situation picker); anything
+/// else — including "Talking about your family", "At the doctor", a class-lesson
+/// brief's free text, or no situation at all — falls back to open conversation.
+/// First "Good questions to ask" prompt embedded by spanish_class::build_situation.
+fn lesson_opener(situation: Option<&str>) -> Option<String> {
+    let s = situation?;
+    if !s.starts_with("Reviewing the learner's Spanish class") {
         return None;
     }
-    Some(&input[start..=end])
+    let rest = s.split("Good questions to ask: ").nth(1)?;
+    let q = rest.split(" / ").next()?.trim().trim_end_matches('.').trim();
+    (!q.is_empty()).then(|| q.to_string())
 }
 
-const FALLBACK_REPLY: &str = "¿Puedes repetir eso, por favor?";
+fn scene_id(situation: Option<&str>) -> &'static str {
+    match situation.unwrap_or("").trim() {
+        "Ordering food" => "ordering_food",
+        "Meeting someone new" => "meeting_someone",
+        "Telling what happened at school" => "school_day",
+        "Planning the weekend" => "weekend_plans",
+        "Asking for directions" => "asking_directions",
+        "Shopping for clothes" => "shopping",
+        _ => "just_talk",
+    }
+}
 
-fn parse_tutor_output(raw: &str) -> TutorResponse {
-    let cleaned = strip_fences(&strip_think_blocks(raw));
-    let fallback = || {
-        let trimmed = cleaned.trim();
-        if trimmed.is_empty() {
-            FALLBACK_REPLY.to_string()
-        } else {
-            trimmed.chars().take(300).collect::<String>()
+fn core_profile(profile: &SpanishProfile) -> Result<core::SpanishProfile, String> {
+    Ok(core::SpanishProfile {
+        id: profile.id.clone(),
+        name: profile.name.clone(),
+        level: parse_level(&profile.level)?,
+        variety: profile.variety.clone(),
+        topics: profile.topics.clone(),
+        practicing: profile.practicing.clone(),
+    })
+}
+
+async fn load_profile(pool: &sqlx::SqlitePool, id: &str) -> Result<SpanishProfile, String> {
+    sqlx::query_as::<_, ProfileRow>(&format!("SELECT {PROFILE_COLUMNS} FROM spanish_profiles WHERE id = ?"))
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|_| "Cannot load this learner.".to_string())?
+        .map(ProfileRow::into_profile)
+        .ok_or_else(|| "This learner no longer exists.".into())
+}
+
+// Control-only turns never need provider configuration or external-text consent.
+enum SessionModel {
+    ControlOnly,
+    Configured(crate::spanish_provider::MeetOddsModel),
+}
+impl core::tutor::Model for SessionModel {
+    fn token_count(&self, text: &str) -> usize {
+        match self {
+            // ponytail: byte heuristic; no model is ever called for a control turn anyway.
+            Self::ControlOnly => text.len() / 3 + 1,
+            Self::Configured(model) => model.token_count(text),
         }
-    };
-
-    let Some(json_slice) = extract_json_slice(&cleaned) else {
-        return TutorResponse { reply: fallback(), feedback: None };
-    };
-    let Ok(parsed) = serde_json::from_str::<RawTutorOutput>(json_slice) else {
-        return TutorResponse { reply: fallback(), feedback: None };
-    };
-
-    let reply = {
-        let trimmed = parsed.reply.trim();
-        if trimmed.is_empty() {
-            FALLBACK_REPLY.to_string()
-        } else {
-            trimmed.to_string()
+    }
+    fn generate<'a>(&'a self, prompt: core::tutor::Prompt, cancel: CancellationToken) -> core::tutor::ModelFuture<'a> {
+        match self {
+            Self::ControlOnly => Box::pin(async { Err("No model should be called for this control turn.".into()) }),
+            Self::Configured(model) => model.generate(prompt, cancel),
         }
-    };
-    let feedback = parsed.feedback.and_then(|f| {
-        let kind = f.kind.trim().to_string();
-        if (kind == "correction" || kind == "praise") && !f.try_this.trim().is_empty() {
-            Some(Feedback {
-                kind,
-                you_said: f.you_said,
-                try_this: f.try_this,
-                why: f.why,
-            })
-        } else {
-            None
-        }
-    });
+    }
+}
 
-    TutorResponse { reply, feedback }
+struct JournalSink<R: Runtime> {
+    window: crate::spanish_provider::WindowSink<R>,
+    events: Arc<Mutex<Vec<core::tutor::TutorReplyEvent>>>,
+}
+impl<R: Runtime> core::tutor::EventSink for JournalSink<R> {
+    fn reply(&self, event: core::tutor::TutorReplyEvent) -> Result<(), String> {
+        self.window.reply(event.clone())?;
+        self.events.lock().map_err(|_| "Speech journal unavailable.")?.push(event);
+        Ok(())
+    }
+    fn diagnostic(&self, diagnostic: core::tutor::Diagnostic) {
+        self.window.diagnostic(diagnostic);
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TutorTurnRequest {
+    pub profile_id: String,
+    pub session_id: String,
+    pub mode: String,
+    #[serde(default)]
+    pub learner_text: Option<String>,
+    pub request_id: String,
 }
 
 #[tauri::command]
 pub async fn spanish_tutor_turn<R: Runtime>(
     app: AppHandle<R>,
+    window: WebviewWindow<R>,
     state: State<'_, AppState>,
-    request: TutorRequest,
-) -> Result<TutorResponse, String> {
-    let cfg = crate::live_translation::resolve_provider_config(state.db_manager.pool()).await?;
-    let system_prompt = build_tutor_system_prompt(&request.profile);
-    let user_prompt = build_tutor_user_prompt(&request)?;
-    let app_data_dir = app.path().app_data_dir().ok();
+    request: TutorTurnRequest,
+) -> Result<core::TutorResponse, String> {
+    if crate::audio::recording_commands::is_recording().await {
+        return Err("Stop the meeting recording before practicing.".into());
+    }
+    let mode = match request.mode.as_str() {
+        "open" => core::tutor::Mode::Open,
+        "reply" => core::tutor::Mode::Reply,
+        "help" => core::tutor::Mode::Help,
+        "stuck" => core::tutor::Mode::Stuck,
+        _ => return Err("Unsupported tutor mode.".into()),
+    };
+    if request.request_id.is_empty() || request.request_id.len() > 128 {
+        return Err("Invalid tutor request identifier.".into());
+    }
+    let request_id = request.request_id;
+    let cancel = CancellationToken::new();
+    {
+        let mut active = CURRENT_TUTOR.lock().map_err(|_| "Tutor cancellation unavailable.")?;
+        if let Some((_, previous)) = active.replace((request_id.clone(), cancel.clone())) {
+            previous.cancel();
+        }
+    }
+    let _registration = TutorRegistration(request_id.clone());
+    let _gate = tokio::select! { biased; _ = cancel.cancelled() => return Err("Practice turn cancelled".into()), gate = TUTOR_GATE.lock() => gate };
 
-    let raw = crate::summary::llm_client::generate_summary(
-        &TUTOR_HTTP_CLIENT,
-        &cfg.provider,
-        &cfg.model_name,
-        &cfg.api_key,
-        &system_prompt,
-        &user_prompt,
-        cfg.ollama_endpoint.as_deref(),
-        cfg.custom_openai_endpoint.as_deref(),
-        Some(350),
-        cfg.temperature,
-        cfg.top_p,
-        app_data_dir.as_ref(),
-        None,
-    )
-    .await?;
+    let pool = state.db_manager.pool();
+    let profile = load_profile(pool, &request.profile_id).await?;
+    let mut learner = core_profile(&profile)?;
 
-    Ok(parse_tutor_output(&raw))
+    let row = sqlx::query_as::<_, SessionRow>(&format!(
+        "SELECT {SESSION_COLUMNS} FROM spanish_sessions WHERE id = ? AND profile_id = ?"
+    ))
+    .bind(&request.session_id)
+    .bind(&profile.id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| "Cannot load the practice session.")?
+    .ok_or("This practice session does not belong to the selected learner.")?;
+    if row.ended_at.is_some() {
+        return Err("This practice session has ended.".into());
+    }
+    let scene = scene_id(row.situation.as_deref());
+    let mut tutoring =
+        core::persistence::restore(&row.turns, core::SessionState::new(&request.session_id, scene, learner.level))?;
+
+    if tutoring.opener_history.is_empty() && mode == core::tutor::Mode::Open {
+        let history: Vec<(String, String)> = sqlx::query_as(
+            "SELECT id, turns FROM spanish_sessions WHERE profile_id = ? AND id <> ? ORDER BY started_at DESC LIMIT 5",
+        )
+        .bind(&profile.id)
+        .bind(&request.session_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|_| "Cannot load practice history.")?;
+        for (id, turns) in history.into_iter().rev() {
+            if let Some(saved) = session_engine_state(&turns) {
+                if let Some(opener) = saved.opener_history.into_iter().find(|used| used.session_id == id) {
+                    tutoring.opener_history.push(opener);
+                }
+            }
+        }
+    }
+
+    let text = request.learner_text.unwrap_or_default();
+    let intent = core::text::classify(&text);
+    let learner_input =
+        mode == core::tutor::Mode::Reply && !matches!(intent, core::text::Intent::EmptyOrNoise | core::text::Intent::MetaRequest);
+    let needs_model =
+        mode == core::tutor::Mode::Help || (learner_input && !(intent == core::text::Intent::Minimal && tutoring.minimal_streak >= 1));
+    let model = if needs_model {
+        let cfg = crate::live_translation::resolve_provider_config(pool).await?;
+        SessionModel::Configured(crate::spanish_provider::MeetOddsModel::new(
+            TUTOR_HTTP_CLIENT.clone(),
+            crate::spanish_provider::ProviderConfig {
+                provider: cfg.provider,
+                model: cfg.model_name,
+                api_key: cfg.api_key,
+                app_data_dir: app.path().app_data_dir().map_err(|_| "App storage unavailable.")?,
+                ollama_endpoint: cfg.ollama_endpoint,
+                custom_endpoint: cfg.custom_openai_endpoint,
+                // The client never chooses this: it is the DB-persisted, explicit
+                // per-profile consent, not whatever the current request claims.
+                allow_external_text: profile.allow_cloud,
+                cloud_sampling_supported: false,
+            },
+        )?)
+    } else {
+        SessionModel::ControlOnly
+    };
+    let engine = core::tutor::TutorEngine::new(Arc::new(model));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = JournalSink {
+        window: crate::spanish_provider::WindowSink { window, sensitive_diagnostics: None },
+        events: events.clone(),
+    };
+    let before = tutoring.clone();
+    // ponytail: a class lesson opens with one of its own questions. The brief's
+    // prompts travel inside the situation text, so parse the first one back out.
+    if mode == core::tutor::Mode::Open && tutoring.last_reply.is_empty() {
+        if let Some(question) = lesson_opener(row.situation.as_deref()) {
+            tutoring.remember("tutor", &question);
+            tutoring.last_reply = question;
+        }
+    }
+    let outcome = engine
+        .spanish_tutor_turn(
+            core::tutor::TutorRequest {
+                mode,
+                text: text.clone(),
+                request_id,
+                now_ms: chrono::Utc::now().timestamp_millis().max(0) as u64,
+                // Lesson/free-text sessions (e.g. a class-lesson brief) carry their goal
+                // in `situation`; the engine only consumes it for the just_talk scene.
+                goal: row.situation.clone(),
+            },
+            &mut learner,
+            &mut tutoring,
+            &sink,
+            &cancel,
+        )
+        .await;
+    let journal = events.lock().map_err(|_| "Speech journal unavailable.")?.clone();
+    let audible: Vec<_> = journal.iter().filter(|event| !event.filler && !event.repeat).collect();
+    if outcome.is_err() && audible.is_empty() {
+        return Err(outcome.err().unwrap().to_string());
+    }
+    if outcome.is_err() {
+        // A new utterance may cancel the judge AFTER the prior reply was heard.
+        // Preserve that real conversation, without grading the cancelled turn.
+        tutoring = before.clone();
+        if learner_input {
+            tutoring.turn_index += 1;
+            tutoring.remember("learner", &text);
+            tutoring.previous_correction = None;
+            core::policy::observe(
+                &mut tutoring,
+                &learner,
+                core::Observation { tokens: core::text::words(&text).len(), error: None, english_mixed: intent == core::text::Intent::EnglishMixed },
+            );
+            core::scenes::advance(&mut tutoring, false);
+        }
+        for event in &audible {
+            tutoring.remember("tutor", &event.text);
+            tutoring.last_reply = event.text.clone();
+        }
+        tutoring.previous_turn_filler = journal.iter().any(|event| event.filler);
+    }
+
+    let mut turns: Vec<serde_json::Value> = serde_json::from_str(&row.turns).map_err(|_| "Invalid saved practice history.")?;
+    if tutoring.turn_index > before.turn_index && learner_input {
+        turns.push(serde_json::json!({"role":"learner","text":text}));
+    }
+    for event in &audible {
+        if mode != core::tutor::Mode::Open || before.last_reply.is_empty() {
+            turns.push(serde_json::json!({"role":"tutor","text":event.text}));
+        }
+    }
+    if !turns.is_empty() {
+        let update = core::persistence::prepare_update(
+            &serde_json::to_string(&turns).map_err(|_| "Cannot save conversation.")?,
+            &row.feedback,
+            &tutoring,
+            &learner,
+        )?;
+        let mut transaction = pool.begin().await.map_err(|_| "Cannot start practice save.")?;
+        let saved = sqlx::query(
+            "UPDATE spanish_sessions SET turns = ?, feedback = ? WHERE id = ? AND profile_id = ? AND ended_at IS NULL",
+        )
+        .bind(update.turns_json)
+        .bind(update.feedback_json)
+        .bind(&request.session_id)
+        .bind(&profile.id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| "Cannot save practice progress.")?;
+        if saved.rows_affected() != 1 {
+            return Err("The session changed before progress could be saved.".into());
+        }
+        sqlx::query("UPDATE spanish_profiles SET practicing = ?, updated_at = ? WHERE id = ?")
+            .bind(update.practicing_json)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(&profile.id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| "Cannot save learning phrases.")?;
+        transaction.commit().await.map_err(|_| "Cannot commit practice progress.")?;
+    }
+    outcome.map_err(|error| error.to_string())
+}
+
+// ============================================================================
+// Practice-it word-diff attempt
+// ============================================================================
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PracticeResult {
+    pub score: f32,
+    pub missed_word_indices: Vec<usize>,
+    pub message: String,
+    pub done: bool,
+    pub succeeded: bool,
+    pub attempts: u8,
+}
+
+#[tauri::command]
+pub fn spanish_practice_attempt(target: String, attempt: String, previous_attempts: u8) -> Result<PracticeResult, String> {
+    let result = core::text::practice_attempt(&target, &attempt, previous_attempts).map_err(|e| e.to_string())?;
+    Ok(PracticeResult {
+        score: result.diff.score,
+        missed_word_indices: result.diff.missed_word_indices,
+        message: result.message,
+        done: result.done,
+        succeeded: result.succeeded,
+        attempts: result.attempts,
+    })
 }
 
 #[cfg(test)]
@@ -825,42 +1129,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_clean_json() {
-        let raw = r#"{"reply": "Hola, ¿cómo estás?", "feedback": null}"#;
-        let out = parse_tutor_output(raw);
-        assert_eq!(out.reply, "Hola, ¿cómo estás?");
-        assert!(out.feedback.is_none());
+    fn lesson_opener_uses_the_first_class_prompt() {
+        let situation = "Reviewing the learner's Spanish class \"Clase 3\" about food. Good questions to ask: ¿Qué comiste hoy? / ¿Te gusta el pan?";
+        assert_eq!(lesson_opener(Some(situation)).as_deref(), Some("¿Qué comiste hoy?"));
+        assert_eq!(lesson_opener(Some("Ordering food")), None);
+        assert_eq!(lesson_opener(None), None);
     }
 
     #[test]
-    fn parses_fenced_json_with_think_block() {
-        let raw = "<think>reasoning the model should not show</think>```json\n{\"reply\": \"\u{00bf}Qu\u{00e9} tal?\", \"feedback\": {\"kind\": \"correction\", \"youSaid\": \"Yo tengo 20 anos\", \"tryThis\": \"Yo tengo 20 a\u{00f1}os\", \"why\": \"Use \u{00f1} for the tilde sound.\"}}\n```";
-        let out = parse_tutor_output(raw);
-        assert_eq!(out.reply, "¿Qué tal?");
-        let feedback = out.feedback.expect("feedback expected");
-        assert_eq!(feedback.kind, "correction");
-        assert_eq!(feedback.try_this, "Yo tengo 20 años");
-    }
-
-    #[test]
-    fn garbage_input_falls_back_to_cleaned_text() {
-        let raw = "lo siento, no puedo procesar esto ahora mismo";
-        let out = parse_tutor_output(raw);
-        assert_eq!(out.reply, raw);
-        assert!(out.feedback.is_none());
-    }
-
-    #[test]
-    fn unknown_feedback_kind_is_dropped() {
-        let raw = r#"{"reply": "Vale, sigamos.", "feedback": {"kind": "warning", "youSaid": "x", "tryThis": "y", "why": "z"}}"#;
-        let out = parse_tutor_output(raw);
-        assert_eq!(out.reply, "Vale, sigamos.");
-        assert!(out.feedback.is_none());
-    }
-
-    #[test]
-    fn empty_input_falls_back_to_prompt_question() {
-        let out = parse_tutor_output("");
-        assert_eq!(out.reply, FALLBACK_REPLY);
+    fn scene_id_maps_all_eight_frontend_situation_labels() {
+        assert_eq!(scene_id(Some("Ordering food")), "ordering_food");
+        assert_eq!(scene_id(Some("Meeting someone new")), "meeting_someone");
+        assert_eq!(scene_id(Some("Telling what happened at school")), "school_day");
+        assert_eq!(scene_id(Some("Planning the weekend")), "weekend_plans");
+        assert_eq!(scene_id(Some("Asking for directions")), "asking_directions");
+        assert_eq!(scene_id(Some("Talking about your family")), "just_talk");
+        assert_eq!(scene_id(Some("At the doctor")), "just_talk");
+        assert_eq!(scene_id(Some("Shopping for clothes")), "shopping");
+        assert_eq!(scene_id(None), "just_talk");
+        assert_eq!(
+            scene_id(Some("Reviewing the learner's Spanish class \"Clase 3\".")),
+            "just_talk"
+        );
     }
 }
