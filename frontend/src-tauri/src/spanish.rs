@@ -295,7 +295,32 @@ pub async fn spanish_check_readiness<R: Runtime>(
 
     let (llm_provider, llm_model, llm_ready, llm_message) =
         match crate::live_translation::resolve_provider_config(state.db_manager.pool()).await {
-            Ok(cfg) => (Some(cfg.provider_name), Some(cfg.model_name), true, None),
+            Ok(cfg) => {
+                // The built-in provider is "configured" as soon as a model is selected, even
+                // before its GGUF is downloaded, so check the file too.
+                let missing_builtin = cfg.provider == crate::summary::llm_client::LLMProvider::BuiltInAI
+                    && app
+                        .path()
+                        .app_data_dir()
+                        .ok()
+                        .and_then(|dir| {
+                            crate::summary::summary_engine::models::get_model_path(&dir, &cfg.model_name).ok()
+                        })
+                        .map_or(true, |path| !path.exists());
+                if missing_builtin {
+                    (
+                        Some(cfg.provider_name),
+                        Some(cfg.model_name.clone()),
+                        false,
+                        Some(format!(
+                            "The built-in summary model ({}) is not downloaded yet. Download it in Settings → Summary model.",
+                            cfg.model_name
+                        )),
+                    )
+                } else {
+                    (Some(cfg.provider_name), Some(cfg.model_name), true, None)
+                }
+            }
             Err(e) => (None, None, false, Some(e)),
         };
 
