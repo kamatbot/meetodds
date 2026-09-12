@@ -12,7 +12,7 @@ use crate::spanish as core;
 use crate::state::AppState;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow};
 use tokio::sync::mpsc;
@@ -525,6 +525,9 @@ static LISTEN_TOKEN: Lazy<Mutex<Option<CancellationToken>>> = Lazy::new(|| Mutex
 /// Set while `spanish_speak` is playing TTS so the listening loop drops the app's own voice
 /// instead of transcribing it back.
 static SPEAKING: AtomicBool = AtomicBool::new(false);
+/// Bumped by every speak/stop so a superseded `say` never un-mutes the mic
+/// or clears the pid of the utterance that replaced it.
+static SPEAK_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// Skip transcripts that are pure punctuation/brackets, e.g. "[Música]" noise tokens.
 fn is_noise_transcript(text: &str) -> bool {
@@ -711,6 +714,7 @@ fn kill_running_say() {
 pub async fn spanish_speak(text: String, variety: String, rate: u32) -> Result<(), String> {
     kill_running_say();
     let voice = if variety.trim() == "es_ES" { "Mónica" } else { "Paulina" };
+    let generation = SPEAK_GEN.fetch_add(1, Ordering::SeqCst) + 1;
 
     SPEAKING.store(true, Ordering::SeqCst);
     let spawned = tokio::process::Command::new("/usr/bin/say")
@@ -734,12 +738,16 @@ pub async fn spanish_speak(text: String, variety: String, rate: u32) -> Result<(
     }
 
     let wait_result = child.wait().await;
-    if let Ok(mut guard) = SAY_PID.lock() {
-        guard.take();
+    if SPEAK_GEN.load(Ordering::SeqCst) == generation {
+        if let Ok(mut guard) = SAY_PID.lock() {
+            guard.take();
+        }
+        // Let the room's echo tail settle before re-enabling the listening loop.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        if SPEAK_GEN.load(Ordering::SeqCst) == generation {
+            SPEAKING.store(false, Ordering::SeqCst);
+        }
     }
-    // Let the room's echo tail settle before re-enabling the listening loop.
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    SPEAKING.store(false, Ordering::SeqCst);
 
     match wait_result {
         Ok(status) if status.success() => Ok(()),
@@ -757,6 +765,7 @@ pub async fn spanish_speak(_text: String, _variety: String, _rate: u32) -> Resul
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn spanish_stop_speaking() -> Result<(), String> {
+    SPEAK_GEN.fetch_add(1, Ordering::SeqCst);
     kill_running_say();
     SPEAKING.store(false, Ordering::SeqCst);
     Ok(())
