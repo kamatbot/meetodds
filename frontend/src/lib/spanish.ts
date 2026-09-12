@@ -137,3 +137,17 @@ export function selfCheckSimilarity(): void {
 if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
   selfCheckSimilarity();
 }
+
+// --- Lessons built from recorded classes (meeting transcripts) ---
+export interface ClassMeeting { id: string; title: string; createdAt: string; segments: number }
+export interface LessonPhrase { es: string; en: string }
+export interface LessonBrief {
+  meetingId: string;
+  title: string;
+  topic: string;
+  phrases: LessonPhrase[];
+  grammar: string[];
+  prompts: string[];
+  /** Situation text handed to the tutor session. */
+  situation: string;
+}

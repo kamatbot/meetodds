@@ -22,7 +22,9 @@ import {
   X,
 } from 'lucide-react';
 import {
+  ClassMeeting,
   Feedback,
+  LessonBrief,
   LEVELS,
   Level,
   Readiness,
@@ -431,6 +433,37 @@ function StartScreen({
   const [showSituations, setShowSituations] = useState(false);
   const [speakingPhrase, setSpeakingPhrase] = useState<string | null>(null);
   const [speakError, setSpeakError] = useState<string | null>(null);
+  const [showClasses, setShowClasses] = useState(false);
+  const [classes, setClasses] = useState<ClassMeeting[] | null>(null);
+  const [classError, setClassError] = useState<string | null>(null);
+  const [buildingId, setBuildingId] = useState<string | null>(null);
+  const [lesson, setLesson] = useState<LessonBrief | null>(null);
+
+  const toggleClasses = async () => {
+    const next = !showClasses;
+    setShowClasses(next);
+    if (next && classes === null) {
+      try {
+        setClasses(await invoke<ClassMeeting[]>('spanish_list_class_meetings', { limit: 30 }));
+      } catch (e) {
+        setClassError(describeError(e));
+        setClasses([]);
+      }
+    }
+  };
+
+  const buildLesson = async (meeting: ClassMeeting) => {
+    setClassError(null);
+    setBuildingId(meeting.id);
+    setLesson(null);
+    try {
+      setLesson(await invoke<LessonBrief>('spanish_build_lesson', { meetingId: meeting.id }));
+    } catch (e) {
+      setClassError(describeError(e));
+    } finally {
+      setBuildingId(null);
+    }
+  };
 
   const lastSession = sessions[0] ?? null;
   const lastCorrections = lastSession ? lastSession.feedback.filter((f) => f.kind === 'correction').length : 0;
@@ -530,6 +563,74 @@ function StartScreen({
                 ))}
               </div>
             )}
+          </div>
+
+          <div className={cardBase}>
+            <button type="button" onClick={() => void toggleClasses()} className="flex w-full items-center justify-between">
+              <span className="text-left">
+                <span className="block text-[15px] font-semibold text-text">From a class recording</span>
+                <span className="mt-1 block text-[12.5px] text-2">Practice what was covered in a recorded Spanish class.</span>
+              </span>
+              <ChevronDown className={`h-4 w-4 shrink-0 text-2 transition-transform ${showClasses ? 'rotate-180' : ''}`} strokeWidth={1.8} />
+            </button>
+            {showClasses && !lesson && (
+              <div className="mt-3 grid gap-1.5">
+                {classes === null && <p className="text-[12.5px] text-2">Loading recordings…</p>}
+                {classes !== null && classes.length === 0 && (
+                  <p className="text-[12.5px] text-2">No recordings with a transcript yet. Record a class with MeetOdds first, then come back here.</p>
+                )}
+                {classes?.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    disabled={buildingId !== null}
+                    onClick={() => void buildLesson(m)}
+                    className="flex items-center justify-between gap-3 rounded-[10px] border border-border bg-panel-2 px-3 py-2.5 text-left hover:border-[color:var(--text-3)] disabled:opacity-60"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-medium text-text">{m.title}</span>
+                      <span className="block text-[11.5px] text-3">{new Date(m.createdAt).toLocaleDateString()} · {m.segments} lines</span>
+                    </span>
+                    {buildingId === m.id ? (
+                      <span className="inline-flex shrink-0 items-center gap-1.5 text-[11.5px] text-2"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Building lesson…</span>
+                    ) : (
+                      <span className="shrink-0 text-[11.5px] font-medium text-accent">Use this class</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+            {lesson && (
+              <div className="mt-3">
+                <p className="horizon-eyebrow mb-1">Lesson from “{lesson.title}”</p>
+                {lesson.topic && <p className="text-[17px] font-semibold text-text">{lesson.topic}</p>}
+                <ul className="mt-2 grid gap-1">
+                  {lesson.phrases.map((ph) => (
+                    <li key={ph.es} className="flex items-center justify-between gap-2 rounded-[10px] bg-panel-2 px-3 py-2">
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-medium text-text">{ph.es}</span>
+                        {ph.en && <span className="block text-[12px] text-2">{ph.en}</span>}
+                      </span>
+                      <button type="button" aria-label={`Hear "${ph.es}"`} onClick={() => void hearPhrase(ph.es)} className="shrink-0 text-2 hover:text-text">
+                        {speakingPhrase === ph.es ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" strokeWidth={1.8} />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {lesson.grammar.length > 0 && (
+                  <p className="mt-2 text-[12.5px] text-2"><span className="font-medium text-text">Grammar: </span>{lesson.grammar.join(' · ')}</p>
+                )}
+                <div className="mt-3 flex gap-2">
+                  <button type="button" onClick={() => onStart(lesson.situation)} className="rounded-[10px] bg-accent px-4 py-2 text-[13.5px] font-semibold text-accent-foreground">
+                    Start practicing
+                  </button>
+                  <button type="button" onClick={() => setLesson(null)} className="rounded-[10px] border border-border bg-panel px-3 py-2 text-[13.5px] font-medium text-text hover:bg-[var(--hover)]">
+                    Pick another class
+                  </button>
+                </div>
+              </div>
+            )}
+            {classError && <p className="mt-2 text-[12px] text-danger">{classError}</p>}
           </div>
 
           <button type="button" onClick={() => onStart(null)} className={cardBase}>

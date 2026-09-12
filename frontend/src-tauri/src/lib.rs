@@ -54,6 +54,7 @@ pub mod openai_codex;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod spanish;
+pub mod spanish_class;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -692,6 +693,8 @@ pub fn run() {
             spanish::spanish_speak,
             spanish::spanish_stop_speaking,
             spanish::spanish_tutor_turn,
+            spanish_class::spanish_list_class_meetings,
+            spanish_class::spanish_build_lesson,
             anthropic::anthropic::get_anthropic_models,
             groq::groq::get_groq_models,
             api::api_get_meetings,
