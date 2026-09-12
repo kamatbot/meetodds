@@ -53,6 +53,7 @@ pub mod openai;
 pub mod openai_codex;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod spanish;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -680,6 +681,17 @@ pub fn run() {
             live_translation::api_cancel_live_translation,
             live_translation::api_warm_live_translation,
             live_translation::api_prepare_live_translation,
+            spanish::spanish_list_profiles,
+            spanish::spanish_save_profile,
+            spanish::spanish_delete_profile,
+            spanish::spanish_list_sessions,
+            spanish::spanish_save_session,
+            spanish::spanish_check_readiness,
+            spanish::spanish_start_listening,
+            spanish::spanish_stop_listening,
+            spanish::spanish_speak,
+            spanish::spanish_stop_speaking,
+            spanish::spanish_tutor_turn,
             anthropic::anthropic::get_anthropic_models,
             groq::groq::get_groq_models,
             api::api_get_meetings,
