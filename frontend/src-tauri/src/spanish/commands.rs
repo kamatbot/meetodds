@@ -430,6 +430,52 @@ pub async fn spanish_save_session(state: State<'_, AppState>, session: SpanishSe
     Ok(())
 }
 
+
+// ============================================================================
+// Local-only model resolution for real-time tutoring
+// ============================================================================
+
+/// The tutor's reply and correction calls always run on a local model so the
+/// conversation feels real time and learner speech never leaves the Mac. Cloud
+/// providers are only used for offline work such as building class lessons.
+pub(crate) struct LocalLlm {
+    pub provider: crate::summary::llm_client::LLMProvider,
+    pub provider_name: &'static str,
+    pub model: String,
+    pub ollama_endpoint: Option<String>,
+    pub custom_endpoint: Option<String>,
+}
+
+pub(crate) async fn resolve_local_llm(
+    pool: &sqlx::SqlitePool,
+    app_data_dir: &std::path::PathBuf,
+) -> Result<LocalLlm, String> {
+    use crate::summary::llm_client::LLMProvider;
+    use crate::summary::summary_engine::models::{get_available_models, get_model_path};
+    let builtin_present = |name: &str| get_model_path(app_data_dir, name).map_or(false, |p| p.exists());
+    if let Ok(cfg) = crate::live_translation::resolve_provider_config(pool).await {
+        match cfg.provider {
+            LLMProvider::BuiltInAI if builtin_present(&cfg.model_name) => {
+                return Ok(LocalLlm { provider: LLMProvider::BuiltInAI, provider_name: "builtin-ai", model: cfg.model_name, ollama_endpoint: None, custom_endpoint: None });
+            }
+            LLMProvider::Ollama
+                if crate::spanish_provider::loopback(cfg.ollama_endpoint.as_deref().unwrap_or("http://localhost:11434")) =>
+            {
+                return Ok(LocalLlm { provider: LLMProvider::Ollama, provider_name: "ollama", model: cfg.model_name, ollama_endpoint: cfg.ollama_endpoint, custom_endpoint: None });
+            }
+            LLMProvider::CustomOpenAI if cfg.custom_openai_endpoint.as_deref().is_some_and(crate::spanish_provider::loopback) => {
+                return Ok(LocalLlm { provider: LLMProvider::CustomOpenAI, provider_name: "custom-openai", model: cfg.model_name, ollama_endpoint: None, custom_endpoint: cfg.custom_openai_endpoint });
+            }
+            _ => {}
+        }
+    }
+    // Fall back to any downloaded built-in model, best first (models.rs order).
+    if let Some(model) = get_available_models().into_iter().find(|m| builtin_present(&m.name)) {
+        return Ok(LocalLlm { provider: LLMProvider::BuiltInAI, provider_name: "builtin-ai", model: model.name, ollama_endpoint: None, custom_endpoint: None });
+    }
+    Err("Real-time practice runs on a local model. Download one in Settings → Summary model (Qwen 3.5 2B is a good start); cloud models are only used for lesson summaries.".to_string())
+}
+
 // ============================================================================
 // Readiness
 // ============================================================================
@@ -464,36 +510,13 @@ pub async fn spanish_check_readiness<R: Runtime>(
     let whisper_model = Some(format!("{prefix}:{model}"));
     let whisper_ready = is_multilingual_model(&model);
 
-    let (llm_provider, llm_model, llm_ready, llm_message) =
-        match crate::live_translation::resolve_provider_config(state.db_manager.pool()).await {
-            Ok(cfg) => {
-                // The built-in provider is "configured" as soon as a model is selected, even
-                // before its GGUF is downloaded, so check the file too.
-                let missing_builtin = cfg.provider == crate::summary::llm_client::LLMProvider::BuiltInAI
-                    && app
-                        .path()
-                        .app_data_dir()
-                        .ok()
-                        .and_then(|dir| {
-                            crate::summary::summary_engine::models::get_model_path(&dir, &cfg.model_name).ok()
-                        })
-                        .map_or(true, |path| !path.exists());
-                if missing_builtin {
-                    (
-                        Some(cfg.provider_name),
-                        Some(cfg.model_name.clone()),
-                        false,
-                        Some(format!(
-                            "The built-in summary model ({}) is not downloaded yet. Download it in Settings → Summary model.",
-                            cfg.model_name
-                        )),
-                    )
-                } else {
-                    (Some(cfg.provider_name), Some(cfg.model_name), true, None)
-                }
-            }
+    let (llm_provider, llm_model, llm_ready, llm_message) = match app.path().app_data_dir() {
+        Ok(dir) => match resolve_local_llm(state.db_manager.pool(), &dir).await {
+            Ok(llm) => (Some(llm.provider_name.to_string()), Some(llm.model), true, None),
             Err(e) => (None, None, false, Some(e)),
-        };
+        },
+        Err(_) => (None, None, false, Some("App storage unavailable.".to_string())),
+    };
 
     let message = if !whisper_ready {
         let base = format!(
@@ -985,19 +1008,19 @@ pub async fn spanish_tutor_turn<R: Runtime>(
     let needs_model =
         mode == core::tutor::Mode::Help || (learner_input && !(intent == core::text::Intent::Minimal && tutoring.minimal_streak >= 1));
     let model = if needs_model {
-        let cfg = crate::live_translation::resolve_provider_config(pool).await?;
+        let app_data_dir = app.path().app_data_dir().map_err(|_| "App storage unavailable.")?;
+        let llm = resolve_local_llm(pool, &app_data_dir).await?;
         SessionModel::Configured(crate::spanish_provider::MeetOddsModel::new(
             TUTOR_HTTP_CLIENT.clone(),
             crate::spanish_provider::ProviderConfig {
-                provider: cfg.provider,
-                model: cfg.model_name,
-                api_key: cfg.api_key,
-                app_data_dir: app.path().app_data_dir().map_err(|_| "App storage unavailable.")?,
-                ollama_endpoint: cfg.ollama_endpoint,
-                custom_endpoint: cfg.custom_openai_endpoint,
-                // The client never chooses this: it is the DB-persisted, explicit
-                // per-profile consent, not whatever the current request claims.
-                allow_external_text: profile.allow_cloud,
+                provider: llm.provider,
+                model: llm.model,
+                api_key: String::new(),
+                app_data_dir,
+                ollama_endpoint: llm.ollama_endpoint,
+                custom_endpoint: llm.custom_endpoint,
+                // resolve_local_llm only ever returns loopback/built-in providers.
+                allow_external_text: false,
                 cloud_sampling_supported: false,
             },
         )?)

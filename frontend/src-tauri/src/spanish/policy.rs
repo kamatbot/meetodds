@@ -45,7 +45,11 @@ pub fn validate(raw: &str, learner: &str, mixed: bool) -> Result<Option<JudgeFin
         return Err(Rejection::TooLong);
     }
     let clean = text::strip_thinking(raw);
-    let clean = clean.trim().trim_start_matches("json").trim();
+    // Cloud models often wrap the object in ```json fences; keep only the object.
+    let clean = match (clean.find('{'), clean.rfind('}')) {
+        (Some(a), Some(b)) if b > a => &clean[a..=b],
+        _ => clean.trim(),
+    };
     let mut f: JudgeFinding = serde_json::from_str(clean).map_err(|_| Rejection::InvalidJson)?;
     if !f.has_error && !f.notable && !mixed {
         return Ok(None);
@@ -448,6 +452,12 @@ pub fn recap(s: &SessionState, p: &SpanishProfile, recent: &[SessionResult]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fenced_judge_json_is_accepted() {
+        let raw = "```json\n{\"hasError\":true,\"category\":\"verb_tense\",\"severity\":\"core\",\"structure\":\"past\",\"youSaid\":\"Ayer voy al parque\",\"tryThis\":\"Ayer fui al parque\",\"why\":\"A completed action in the past needs a past tense.\",\"notable\":false,\"notableWhy\":\"\"}\n```";
+        let f = validate(raw, "Ayer voy al parque con mi hermano", false).unwrap().unwrap();
+        assert_eq!(f.try_this, "Ayer fui al parque");
+    }
     fn profile(level: Level) -> SpanishProfile {
         SpanishProfile {
             level,

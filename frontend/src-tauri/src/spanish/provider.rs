@@ -31,7 +31,7 @@ pub struct MeetOddsModel {
     config: ProviderConfig,
     token_counter: Option<Arc<dyn Fn(&str) -> usize + Send + Sync>>,
 }
-fn loopback(endpoint: &str) -> bool {
+pub(crate) fn loopback(endpoint: &str) -> bool {
     reqwest::Url::parse(endpoint).ok().is_some_and(|url| {
         matches!(url.scheme(), "http" | "https")
             && matches!(

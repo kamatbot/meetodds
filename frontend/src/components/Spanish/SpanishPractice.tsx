@@ -175,7 +175,6 @@ function ProfilesScreen({
   const [level, setLevel] = useState<Level>('beginner');
   const [variety, setVariety] = useState<Variety>('es_MX');
   const [topics, setTopics] = useState('');
-  const [allowCloud, setAllowCloud] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -185,7 +184,6 @@ function ProfilesScreen({
     setLevel('beginner');
     setVariety('es_MX');
     setTopics('');
-    setAllowCloud(false);
     setFormError(null);
     setShowForm(true);
   };
@@ -196,7 +194,6 @@ function ProfilesScreen({
     setLevel(profile.level);
     setVariety(profile.variety);
     setTopics(profile.topics.join(', '));
-    setAllowCloud(profile.allowCloud);
     setFormError(null);
     setShowForm(true);
   };
@@ -218,7 +215,6 @@ function ProfilesScreen({
           level,
           variety,
           topics: topicList,
-          allowCloud,
           // ponytail: practicing is native-owned; sending [] rather than omitting to
           // keep the payload shape uniform for add vs. edit.
           practicing: [],
@@ -395,26 +391,6 @@ function ProfilesScreen({
               className="h-9 w-full rounded-[10px] border border-border bg-bg px-3 text-[13.5px] text-text focus:outline-none"
               placeholder="fútbol, cocina, videojuegos"
             />
-
-            <div className="mt-4 flex items-start justify-between gap-3 rounded-[10px] border border-border bg-panel-2 px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-[12.5px] font-medium text-text">Allow the configured cloud AI for this learner</p>
-                <p className="mt-0.5 text-[11px] text-2">Only needed if MeetOdds is set to a cloud summary model. Local models never need this.</p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={allowCloud}
-                onClick={() => setAllowCloud((v) => !v)}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${allowCloud ? 'bg-accent' : 'bg-panel'} border border-border`}
-              >
-                <span
-                  className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition-transform ${
-                    allowCloud ? 'translate-x-[22px]' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
-            </div>
 
             {formError && <p className="mt-2 text-[12px] text-danger">{formError}</p>}
 
@@ -701,6 +677,7 @@ function SessionScreen({
   const pendingRef = useRef('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [livePartial, setLivePartial] = useState('');
   const micOnRef = useRef(true);
   const endedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
@@ -716,8 +693,10 @@ function SessionScreen({
     if (stuckTimerRef.current) { clearTimeout(stuckTimerRef.current); stuckTimerRef.current = null; }
   };
 
+  // Busy only while the tutor is talking. The judge may still be running; a new
+  // learner turn cancels it natively, and its card is dropped rather than the speech.
   const maybeClearBusy = () => {
-    if (speechDoneRef.current && commandDoneRef.current) {
+    if (speechDoneRef.current) {
       busyRef.current = false;
       setStatus(idleStatus());
     }
@@ -725,9 +704,6 @@ function SessionScreen({
 
   const tutorErrorMessage = (e: unknown): string => {
     const msg = describeError(e);
-    if (/enable external ai/i.test(msg)) {
-      return `${msg} — turn on "Allow the configured cloud AI" for ${profile.name} in their profile to use it.`;
-    }
     return msg;
   };
 
@@ -770,10 +746,12 @@ function SessionScreen({
     await callTutorTurn('stuck', null);
   }, [callTutorTurn]);
 
+  // Beginners need real time to formulate a sentence; only step in after a long silence.
+  const stuckMs = { beginner: 25000, intermediate: 18000, advanced: 12000 }[profile.level] ?? 18000;
   const armStuckTimer = () => {
     clearStuckTimer();
     if (stuckFiredRef.current || endedRef.current) return;
-    stuckTimerRef.current = setTimeout(() => void fireStuckRef.current(), 8000);
+    stuckTimerRef.current = setTimeout(() => void fireStuckRef.current(), stuckMs);
   };
 
   // Handles every spanish-tutor-reply event: speaks it (never the command's
@@ -786,6 +764,10 @@ function SessionScreen({
     }
     await invoke('spanish_stop_speaking').catch(() => undefined);
     setStatus('speaking');
+    const mode = tutorModeRef.current;
+    const isTurn = !event.repeat && (mode === 'open' || mode === 'reply' || mode === 'stuck');
+    // Text lands the moment the reply arrives; the voice follows it.
+    if (isTurn) addTurn('tutor', event.text);
     const rate = spanishReplyRate(event, 165);
     try {
       await invoke('spanish_speak', { text: event.text, variety: profile.variety, rate });
@@ -793,9 +775,7 @@ function SessionScreen({
       setError(describeError(e));
     }
     speechDoneRef.current = true;
-    const mode = tutorModeRef.current;
-    if (!event.repeat && (mode === 'open' || mode === 'reply' || mode === 'stuck')) {
-      addTurn('tutor', event.text);
+    if (isTurn) {
       armStuckTimer();
     } else if (mode === 'help') {
       setHelpText(event.text);
@@ -806,8 +786,14 @@ function SessionScreen({
 
   const finalizeReply = useCallback(async () => {
     const text = pendingRef.current.trim();
+    if (!text) return;
+    if (busyRef.current) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => void finalizeReplyRef.current(), 400);
+      return;
+    }
     pendingRef.current = '';
-    if (!text || busyRef.current) return;
+    setLivePartial('');
     addTurn('learner', text);
     await callTutorTurn('reply', text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -854,7 +840,7 @@ function SessionScreen({
   // How long to wait after the last transcribed phrase before treating the turn as
   // finished. New learners pause mid-sentence while they search for words, so the
   // wait scales with level. Measured from partial arrival, so STT latency adds to it.
-  const silenceMs = { beginner: 3200, intermediate: 2500, advanced: 1800 }[profile.level] ?? 2500;
+  const silenceMs = { beginner: 2800, intermediate: 2200, advanced: 1600 }[profile.level] ?? 2200;
   const handlePartial = (text: string) => {
     if (modeRef.current === 'practice') {
       pendingRef.current = `${pendingRef.current} ${text}`.trim();
@@ -864,8 +850,10 @@ function SessionScreen({
     }
     clearStuckTimer();
     stuckFiredRef.current = false;
-    if (busyRef.current) return; // ignore partials that arrive while busy
+    // Never drop what the learner said: while the tutor is still talking, keep
+    // accumulating and finalize once it is quiet.
     pendingRef.current = `${pendingRef.current} ${text}`.trim();
+    setLivePartial(pendingRef.current);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void finalizeReplyRef.current(), silenceMs);
   };
@@ -1049,6 +1037,11 @@ function SessionScreen({
                 </div>
               );
             })}
+            {livePartial && (
+              <div className="flex justify-end">
+                <div className="max-w-[80%] rounded-[16px] border border-dashed border-accent/50 bg-accent-soft px-4 py-3 text-body text-text">{livePartial}</div>
+              </div>
+            )}
           </div>
           <div ref={transcriptEndRef} />
         </div>

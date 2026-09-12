@@ -173,23 +173,23 @@ pub fn strip_thinking(input: &str) -> String {
 }
 pub fn clean_reply(input: &str, fallback: &str) -> (String, bool) {
     let clean = strip_thinking(input);
-    let next = clean.trim_end().ends_with("[[next]]");
-    let text = if next {
-        clean.trim_end().trim_end_matches("[[next]]").trim()
-    } else {
-        clean.trim()
-    };
-    // Reject malformed control output and English rather than trying to translate it.
+    let next = clean.contains("[[next]]");
+    let stripped = clean.replace("[[next]]", "");
+    let mut text = stripped.trim();
+    // Models sometimes label or quote their own line.
+    for label in ["Tutor:", "Tutora:", "Profesor:", "Profesora:", "Respuesta:"] {
+        if let Some(rest) = text.strip_prefix(label) {
+            text = rest.trim();
+        }
+    }
+    let text = text.trim_matches(|c| matches!(c, '"' | '\u{201c}' | '\u{201d}' | '\'')).trim();
+    // Reject only structural garbage or majority-English output. A reply that does
+    // not end in a question is still the model's real reply and beats a canned line.
     if text.is_empty()
-        || contains_english(text)
-        || text.contains(['{', '}', '[', ']', '<', '>'])
-        || !text.ends_with('?')
+        || text.contains(['{', '}', '<', '>', '`'])
+        || english_ratio(text) >= 0.5
         || words(text).len() > 65
     {
-        return (fallback.into(), false);
-    }
-    let sentences = text.matches(['.', '!', '?']).count();
-    if sentences > 2 {
         return (fallback.into(), false);
     }
     (text.to_string(), next)
@@ -340,6 +340,13 @@ mod tests {
             clean_reply("What do you want?", "¿Agua o leche?").0,
             "¿Agua o leche?"
         );
+        // Real replies survive even without a closing question or with 3 sentences.
+        assert_eq!(
+            clean_reply("Tutor: \"¡Qué bien! Fuiste al parque. ¿Con quién fuiste?\"", "x").0,
+            "¡Qué bien! Fuiste al parque. ¿Con quién fuiste?"
+        );
+        assert_eq!(clean_reply("Me gusta mucho el fútbol.", "x").0, "Me gusta mucho el fútbol.");
+        assert_eq!(clean_reply("{\"reply\": \"hola\"}", "x").0, "x");
     }
     #[test]
     fn diff_and_threshold() {
