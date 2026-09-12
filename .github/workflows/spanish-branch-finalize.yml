@@ -1,0 +1,33 @@
+name: Finalize Spanish implementation branch
+on:
+  push:
+    branches: [feat/spanish-tutoring-engine]
+    paths: ['tools/spanish-core-tests/finalize_branch.py']
+permissions:
+  contents: write
+jobs:
+  finalize:
+    if: github.repository == 'kamatbot/notes' && github.ref == 'refs/heads/feat/spanish-tutoring-engine'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/spanish-tutoring-engine
+      - name: Apply exact, guarded native integration edits
+        run: python3 tools/spanish-core-tests/finalize_branch.py
+      - name: Format only the new core and touched inference client
+        run: |
+          rustup component add rustfmt
+          rustfmt --edition 2021 frontend/src-tauri/src/spanish/mod.rs frontend/src-tauri/src/spanish/provider.rs frontend/src-tauri/src/summary/summary_engine/client.rs
+          cargo generate-lockfile --manifest-path tools/spanish-core-tests/Cargo.toml
+      - name: Save the implementation checkpoint on this branch only
+        run: |
+          git add frontend/src-tauri/src/spanish frontend/src-tauri/src/lib.rs frontend/src-tauri/src/summary/summary_engine/client.rs tools/spanish-core-tests/Cargo.lock
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'feat(spanish): integrate native sampling and format tested tutoring core'
+            git push origin HEAD:refs/heads/feat/spanish-tutoring-engine
+          fi
+          git rev-parse HEAD
+      - name: Run the model-free test suite
+        run: cargo test --manifest-path tools/spanish-core-tests/Cargo.toml --locked
