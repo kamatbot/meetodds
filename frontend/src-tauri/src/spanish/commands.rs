@@ -476,6 +476,44 @@ pub(crate) async fn resolve_local_llm(
     Err("Real-time practice runs on a local model. Download one in Settings → Summary model (Qwen 3.5 2B is a good start); cloud models are only used for lesson summaries.".to_string())
 }
 
+
+/// Beginner aid: an English gloss of one tutor line, on the local model only.
+#[tauri::command]
+pub async fn spanish_translate_line<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<String, String> {
+    let text = text.trim();
+    if text.is_empty() || text.len() > 600 {
+        return Err("Nothing to translate.".to_string());
+    }
+    let app_data_dir = app.path().app_data_dir().map_err(|_| "App storage unavailable.")?;
+    let llm = resolve_local_llm(state.db_manager.pool(), &app_data_dir).await?;
+    let raw = crate::summary::llm_client::generate_summary(
+        &TUTOR_HTTP_CLIENT,
+        &llm.provider,
+        &llm.model,
+        "",
+        "Translate the Spanish line into natural English. Output only the English sentence, nothing else. /no_think",
+        text,
+        llm.ollama_endpoint.as_deref(),
+        llm.custom_endpoint.as_deref(),
+        Some(120),
+        None,
+        None,
+        Some(&app_data_dir),
+        None,
+    )
+    .await?;
+    let cleaned = core::text::strip_thinking(&raw);
+    let line = cleaned.trim().trim_matches('"').trim();
+    if line.is_empty() {
+        return Err("The model returned no translation.".to_string());
+    }
+    Ok(line.to_string())
+}
+
 // ============================================================================
 // Readiness
 // ============================================================================
