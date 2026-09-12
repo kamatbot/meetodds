@@ -2,6 +2,9 @@
 //! The companion branch supplies its command shell and persists these values.
 pub mod policy;
 pub mod text;
+pub mod scenes;
+pub mod tutor;
+pub use tutor::{Mode, TutorEngine, TutorRequest, TutorResponse, TutorReplyEvent};
 
 use serde::{Deserialize, Serialize};
 
