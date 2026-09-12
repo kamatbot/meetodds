@@ -807,7 +807,7 @@ function SessionScreen({
       const res = await invoke<PracticeResult>('spanish_practice_attempt', {
         target: practice.target,
         attempt: text,
-        previousAttempts: practice.previousAttempts,
+        previousAttempts: practice.previousAttempts.length,
       });
       const nextAttempts = [...practice.previousAttempts, text];
       if (res.done) {
