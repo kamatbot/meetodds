@@ -129,6 +129,29 @@ fn get_cached_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<Pat
 ///
 /// # Returns
 /// Generated text
+/// Per-request overrides; model defaults and stop tokens remain unchanged.
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinSamplingOverride {
+    pub temperature: f32,
+    pub top_p: f32,
+    pub top_k: i32,
+}
+impl BuiltinSamplingOverride {
+    pub fn validated(self) -> Result<Self> {
+        if !self.temperature.is_finite()
+            || !(0.0..=2.0).contains(&self.temperature)
+            || !self.top_p.is_finite()
+            || self.top_p <= 0.0
+            || self.top_p > 1.0
+            || !(1..=256).contains(&self.top_k)
+        {
+            return Err(anyhow!("Invalid per-request sampling override"));
+        }
+        Ok(self)
+    }
+}
+
+/// Backwards-compatible entry point: existing summaries keep model defaults.
 pub async fn generate_with_builtin(
     app_data_dir: &PathBuf,
     model_name: &str,
@@ -137,6 +160,31 @@ pub async fn generate_with_builtin(
     max_tokens: Option<u32>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String> {
+    generate_with_builtin_with_sampling(
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        max_tokens,
+        cancellation_token,
+        None,
+    )
+    .await
+}
+
+/// The tutor judge uses near-greedy sampling without changing global settings.
+pub async fn generate_with_builtin_with_sampling(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    cancellation_token: Option<&CancellationToken>,
+    sampling_override: Option<BuiltinSamplingOverride>,
+) -> Result<String> {
+    let sampling_override = sampling_override
+        .map(BuiltinSamplingOverride::validated)
+        .transpose()?;
     // Check cancellation at start
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -178,7 +226,12 @@ pub async fn generate_with_builtin(
     }
 
     // Prepare generation request with model-specific sampling parameters
-    let sampling = model_def.sampling.sanitize_for_llama_helper();
+    let mut sampling = model_def.sampling.sanitize_for_llama_helper();
+    if let Some(overrides) = sampling_override {
+        sampling.temperature = overrides.temperature;
+        sampling.top_p = overrides.top_p;
+        sampling.top_k = overrides.top_k;
+    }
     let request = Request::Generate {
         prompt: formatted_prompt,
         max_tokens: Some(max_tokens.map_or(models::DEFAULT_MAX_TOKENS, |value| value as i32)),
