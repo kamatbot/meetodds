@@ -385,6 +385,14 @@ impl<M: Model> TutorEngine<M> {
             return Err(TutorError::Cancelled);
         }
         let (mut text, next) = text::clean_reply(&raw, scenes::fallback(s));
+        text = text::limit_sentences(
+            &text,
+            match s.dial {
+                0 => 1,
+                1 => 2,
+                _ => 3,
+            },
+        );
         if request.mode == Mode::Reply {
             if let Some(scene) = scenes::scene(&s.scene_id) {
                 if s.beat + 1 == scene.beats.len()
@@ -558,7 +566,11 @@ pub fn reply_prompt<M: Model>(
         kind: CallKind::Reply,
         system: REPLY_SYSTEM.into(),
         user,
-        max_tokens: 96,
+        max_tokens: match s.dial {
+            0 => 40,
+            1 => 64,
+            _ => 96,
+        },
         temperature: 0.65,
         top_p: 0.9,
     })

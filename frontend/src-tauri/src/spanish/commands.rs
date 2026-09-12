@@ -514,6 +514,56 @@ pub async fn spanish_translate_line<R: Runtime>(
     Ok(line.to_string())
 }
 
+/// Example answer for "Help me answer". Stateless and local so the frontend can
+/// prefetch it as soon as a tutor line arrives; it queues behind the judge on
+/// the single built-in model slot.
+#[tauri::command]
+pub async fn spanish_help_suggestion<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    profile_id: String,
+    question: String,
+) -> Result<String, String> {
+    let question = question.trim();
+    if question.is_empty() || question.len() > 600 {
+        return Err("Nothing to answer yet.".to_string());
+    }
+    let pool = state.db_manager.pool();
+    let profile = load_profile(pool, &profile_id).await?;
+    let (words, level) = match profile.level.as_str() {
+        "beginner" => (8, "principiante"),
+        "intermediate" => (14, "intermedio"),
+        _ => (20, "avanzado"),
+    };
+    let app_data_dir = app.path().app_data_dir().map_err(|_| "App storage unavailable.")?;
+    let llm = resolve_local_llm(pool, &app_data_dir).await?;
+    let system = format!(
+        "Eres un tutor de español. Da UNA frase corta de ejemplo (máximo {words} palabras, nivel {level}) que el alumno podría decir para responder a la pregunta. Solo la frase en español, sin comillas ni explicación. /no_think"
+    );
+    let raw = crate::summary::llm_client::generate_summary(
+        &TUTOR_HTTP_CLIENT,
+        &llm.provider,
+        &llm.model,
+        "",
+        &system,
+        question,
+        llm.ollama_endpoint.as_deref(),
+        llm.custom_endpoint.as_deref(),
+        Some(48),
+        None,
+        None,
+        Some(&app_data_dir),
+        None,
+    )
+    .await?;
+    let cleaned = core::text::strip_thinking(&raw);
+    let line = core::text::limit_sentences(cleaned.trim().trim_matches('"').trim(), 1);
+    if line.is_empty() || core::text::english_ratio(&line) >= 0.5 {
+        return Err("The model did not return a Spanish example.".to_string());
+    }
+    Ok(line)
+}
+
 // ============================================================================
 // Readiness
 // ============================================================================

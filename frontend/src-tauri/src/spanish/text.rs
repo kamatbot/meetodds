@@ -195,6 +195,38 @@ pub fn clean_reply(input: &str, fallback: &str) -> (String, bool) {
     (text.to_string(), next)
 }
 
+/// Keep at most `max` sentences. Small models ignore length instructions, so
+/// beginners get the closing question alone rather than a paragraph.
+pub fn limit_sentences(text: &str, max: usize) -> String {
+    let mut sentences: Vec<String> = vec![];
+    let mut current = String::new();
+    for c in text.chars() {
+        current.push(c);
+        if matches!(c, '.' | '!' | '?') {
+            let s = current.trim().to_string();
+            if !s.is_empty() {
+                sentences.push(s);
+            }
+            current.clear();
+        }
+    }
+    let tail = current.trim();
+    if !tail.is_empty() {
+        sentences.push(tail.to_string());
+    }
+    if sentences.len() <= max.max(1) {
+        return text.trim().to_string();
+    }
+    let keep = max.max(1);
+    let last_is_question = sentences.last().is_some_and(|s| s.ends_with('?'));
+    let chosen: Vec<String> = if last_is_question {
+        sentences[sentences.len() - keep..].to_vec()
+    } else {
+        sentences[..keep].to_vec()
+    };
+    chosen.join(" ")
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WordDiff {
@@ -347,6 +379,19 @@ mod tests {
         );
         assert_eq!(clean_reply("Me gusta mucho el fútbol.", "x").0, "Me gusta mucho el fútbol.");
         assert_eq!(clean_reply("{\"reply\": \"hola\"}", "x").0, "x");
+    }
+    #[test]
+    fn sentence_limit_keeps_the_question() {
+        assert_eq!(
+            limit_sentences("¡Qué bien! Me gusta el parque. ¿Qué hiciste allí?", 1),
+            "¿Qué hiciste allí?"
+        );
+        assert_eq!(
+            limit_sentences("¡Qué bien! Me gusta el parque. ¿Qué hiciste allí?", 2),
+            "Me gusta el parque. ¿Qué hiciste allí?"
+        );
+        assert_eq!(limit_sentences("Me gusta el pan. Es rico.", 1), "Me gusta el pan.");
+        assert_eq!(limit_sentences("¿Y tú?", 1), "¿Y tú?");
     }
     #[test]
     fn diff_and_threshold() {

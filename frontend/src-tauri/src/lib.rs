@@ -699,6 +699,7 @@ pub fn run() {
             spanish::commands::spanish_tutor_turn,
             spanish::commands::spanish_practice_attempt,
             spanish::commands::spanish_translate_line,
+            spanish::commands::spanish_help_suggestion,
             spanish_class::spanish_list_class_meetings,
             spanish_class::spanish_build_lesson,
             anthropic::anthropic::get_anthropic_models,

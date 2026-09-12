@@ -689,6 +689,21 @@ function SessionScreen({
   const [micOn, setMicOn] = useState(true);
   const [practice, setPractice] = useState<PracticeState | null>(null);
   const [helpText, setHelpText] = useState<string | null>(null);
+  // Help suggestions are prefetched per tutor line so the button feels instant.
+  const helpCacheRef = useRef<Map<string, string>>(new Map());
+  const helpPendingRef = useRef<Map<string, Promise<string>>>(new Map());
+  const prefetchHelp = (question: string): Promise<string> => {
+    const cached = helpCacheRef.current.get(question);
+    if (cached) return Promise.resolve(cached);
+    const pending = helpPendingRef.current.get(question);
+    if (pending) return pending;
+    const promise = invoke<string>('spanish_help_suggestion', { profileId: profile.id, question })
+      .then((text) => { helpCacheRef.current.set(question, text); return text; })
+      .finally(() => { helpPendingRef.current.delete(question); });
+    helpPendingRef.current.set(question, promise);
+    promise.catch(() => undefined);
+    return promise;
+  };
   const [sceneDone, setSceneDone] = useState(false);
   const [ending, setEnding] = useState(false);
   const [beat, setBeat] = useState<number | null>(null);
@@ -802,7 +817,10 @@ function SessionScreen({
     const mode = tutorModeRef.current;
     const isTurn = !event.repeat && (mode === 'open' || mode === 'reply' || mode === 'stuck');
     // Text lands the moment the reply arrives; the voice follows it.
-    if (isTurn) addTurn('tutor', event.text);
+    if (isTurn) {
+      addTurn('tutor', event.text);
+      void prefetchHelp(event.text);
+    }
     const rate = spanishReplyRate(event, 165);
     try {
       await invoke('spanish_speak', { text: event.text, variety: profile.variety, rate });
@@ -993,8 +1011,22 @@ function SessionScreen({
   };
 
   const doHelp = async () => {
-    if (busyRef.current) return;
-    await callTutorTurn('help', null);
+    if (busyRef.current || !lastTutorLine) return;
+    setError(null);
+    let text = helpCacheRef.current.get(lastTutorLine) ?? null;
+    if (!text) {
+      setStatus('thinking');
+      try {
+        text = await prefetchHelp(lastTutorLine);
+      } catch (e) {
+        setError(describeError(e));
+        setStatus(idleStatus());
+        return;
+      }
+      setStatus(idleStatus());
+    }
+    setHelpText(text);
+    void invoke('spanish_speak', { text, variety: profile.variety, rate: 150 }).catch(() => undefined);
   };
 
   const startPracticeIt = async (target: string) => {

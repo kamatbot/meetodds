@@ -352,8 +352,8 @@ pub fn advance(s: &mut SessionState, reported_met: bool) {
 }
 pub fn dial_instruction(dial: u8) -> &'static str {
     match dial {
-        0 => "Present tense; short, one-clause questions.",
-        1 => "Simple sentences; familiar vocabulary; one follow-up.",
+        0 => "UNA sola pregunta corta (máximo 10 palabras), en presente, una cláusula. Nada antes de la pregunta.",
+        1 => "Máximo dos frases cortas con vocabulario familiar; termina con una pregunta.",
         2 => "Natural sentences; invite reasons and past experiences.",
         _ => "Natural idioms and nuanced follow-up questions.",
     }
