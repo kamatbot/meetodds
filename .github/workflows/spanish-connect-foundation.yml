@@ -1,0 +1,60 @@
+name: Connect Spanish foundation
+on:
+  push:
+    branches: [feat/spanish-tutoring-engine]
+    paths: ['tools/spanish-core-tests/connect_foundation.py']
+permissions:
+  contents: write
+jobs:
+  connect:
+    if: github.repository == 'kamatbot/notes' && github.ref == 'refs/heads/feat/spanish-tutoring-engine'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      commit: ${{ steps.save.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/spanish-tutoring-engine
+          fetch-depth: 0
+      - name: Merge the reviewed, fixed companion snapshot without changing its branch
+        run: |
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' merge --no-commit --no-ff -X ours 123c35cf41c58804c183d5003c81f22312eaadc1
+          python3 tools/spanish-core-tests/connect_foundation.py
+          rustup component add rustfmt
+          rustfmt --edition 2021 frontend/src-tauri/src/spanish/mod.rs frontend/src-tauri/src/spanish/commands.rs
+      - name: Commit the integrated checkpoint to the requested branch
+        id: save
+        run: |
+          git add frontend/src-tauri frontend/src/components/Spanish frontend/src/lib/spanish.ts docs/SPANISH-TUTOR-HANDOFF.md tools/spanish-core-tests
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'feat(spanish): connect core tutoring to the published practice UI and persistence'
+          git push origin HEAD:refs/heads/feat/spanish-tutoring-engine
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Test core and integration fixtures
+        run: cargo test --manifest-path tools/spanish-core-tests/Cargo.toml --locked --all-targets
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Frontend TypeScript check
+        working-directory: frontend
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm exec tsc --noEmit --pretty false
+  native:
+    needs: connect
+    if: always() && needs.connect.outputs.commit != ''
+    runs-on: macos-14
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: '3'
+      CARGO_PROFILE_DEV_OPT_LEVEL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":[]}}'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.connect.outputs.commit }}
+          persist-credentials: false
+      - name: Compile actual commands and provider adapter
+        run: cargo check --manifest-path frontend/src-tauri/Cargo.toml --lib --locked
