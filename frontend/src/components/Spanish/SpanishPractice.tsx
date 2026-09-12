@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import {
   ArrowLeft,
   ChevronDown,
+  Keyboard,
   LoaderCircle,
   Mic,
   MicOff,
@@ -58,6 +59,31 @@ const segBtn = (active: boolean) =>
   `h-9 flex-1 rounded-[10px] border text-[12.5px] font-medium transition-colors ${
     active ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-panel text-2 hover:text-text'
   }`;
+
+// Situations the native side scripts into a fixed 4-beat scene; every other
+// situation (including "Just talk") is open conversation with no beat counter.
+const SCRIPTED_SITUATIONS = [
+  'Ordering food',
+  'Meeting someone new',
+  'Telling what happened at school',
+  'Planning the weekend',
+  'Asking for directions',
+  'Shopping for clothes',
+];
+
+const CLASS_REVIEW_RE = /^Reviewing the learner's Spanish class "(.+)"$/;
+
+function sessionTitle(situation: string | null): string {
+  if (!situation) return 'Just talking';
+  const m = situation.match(CLASS_REVIEW_RE);
+  return m ? `Class review: ${m[1]}` : situation;
+}
+
+function fmtElapsed(totalSec: number): string {
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 export default function SpanishPractice() {
   const router = useRouter();
@@ -665,6 +691,14 @@ function SessionScreen({
   const [helpText, setHelpText] = useState<string | null>(null);
   const [sceneDone, setSceneDone] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [beat, setBeat] = useState<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [typedOpen, setTypedOpen] = useState(false);
+  const [typedText, setTypedText] = useState('');
+  // ponytail: per-text cache so re-opening "Show in English" on a line already
+  // translated this session is free; forText gates display to the CURRENT last bubble.
+  const translationCacheRef = useRef<Map<string, string>>(new Map());
+  const [translation, setTranslation] = useState<{ forText: string; status: 'loading' | 'done' | 'error'; text?: string } | null>(null);
 
   const sessionIdRef = useRef('');
   const busyRef = useRef(true);
@@ -731,6 +765,7 @@ function SessionScreen({
         bump();
       }
       if (res.sceneDone) setSceneDone(true);
+      setBeat(res.beat);
     } catch (e) {
       setError(tutorErrorMessage(e));
     } finally {
@@ -914,6 +949,12 @@ function SessionScreen({
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [sessionRef.current.turns.length]);
 
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => setElapsedSec(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const lastTutorLine = [...sessionRef.current.turns].reverse().find((t) => t.role === 'tutor')?.text ?? null;
 
   const toggleMic = async () => {
@@ -966,6 +1007,45 @@ function SessionScreen({
     setStatus('practice');
   };
 
+  // Typed reply behaves exactly like a finalized spoken utterance: route through
+  // the same pendingRef + finalize path so busy handling stays identical.
+  const submitTyped = async () => {
+    const text = typedText.trim();
+    if (!text) return;
+    setTypedText('');
+    setTypedOpen(false);
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    pendingRef.current = text;
+    if (modeRef.current === 'practice') {
+      await finalizePracticeRef.current();
+    } else {
+      clearStuckTimer();
+      stuckFiredRef.current = false;
+      setLivePartial('');
+      await finalizeReplyRef.current();
+    }
+  };
+
+  const hearTutorLine = (text: string) => {
+    void invoke('spanish_speak', { text, variety: profile.variety, rate: 165 }).catch(() => undefined);
+  };
+
+  const showEnglish = async (text: string) => {
+    const cached = translationCacheRef.current.get(text);
+    if (cached !== undefined) {
+      setTranslation({ forText: text, status: 'done', text: cached });
+      return;
+    }
+    setTranslation({ forText: text, status: 'loading' });
+    try {
+      const en = await invoke<string>('spanish_translate_line', { text });
+      translationCacheRef.current.set(text, en);
+      setTranslation({ forText: text, status: 'done', text: en });
+    } catch (e) {
+      setTranslation({ forText: text, status: 'error', text: describeError(e) });
+    }
+  };
+
   const endSession = async () => {
     if (ending) return;
     setEnding(true);
@@ -999,18 +1079,37 @@ function SessionScreen({
     if (kind === 'praise') return 'Nice phrase';
     if (kind === 'practiced') return "You used a phrase you're practicing";
     if (kind === 'translation') return 'In Spanish you could say';
-    return 'A small correction';
+    return 'A small adjustment';
   };
 
   const targetWords = practice?.target.split(' ') ?? [];
+  const isScriptedScene = situation !== null && SCRIPTED_SITUATIONS.includes(situation);
+  const step = beat !== null ? Math.min(Math.max(beat + 1, 1), 4) : 1;
+  const corrections = sessionRef.current.feedback.filter((f) => f.kind === 'correction' || f.kind === 'translation').length;
+  const turnsSpoken = sessionRef.current.turns.filter((t) => t.role === 'learner').length;
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-text">
-      <div data-tauri-drag-region className="flex h-[52px] shrink-0 items-center justify-between px-5">
-        <div className="min-w-0">
-          <p className="truncate text-[13.5px] font-semibold text-text">{profile.name}</p>
-          <p className="truncate text-[11px] text-3">{situation ?? 'Just talking'}</p>
+      <div data-tauri-drag-region className="flex h-[64px] shrink-0 items-center justify-between gap-3 px-5">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[14px] font-semibold text-text">{sessionTitle(situation)}</p>
+          <p className="truncate text-[11px] text-3">
+            {profile.name} · {LEVELS.find((l) => l.value === profile.level)?.label ?? profile.level}
+          </p>
+          <p className="mt-0.5 font-mono text-[10.5px] text-3">
+            {fmtElapsed(elapsedSec)} · {corrections} correction{corrections === 1 ? '' : 's'} · {turnsSpoken} turn{turnsSpoken === 1 ? '' : 's'}
+          </p>
         </div>
+        {isScriptedScene && (
+          <div className="no-drag flex shrink-0 flex-col items-end gap-1">
+            <p className="text-[11px] font-medium text-2">Step {step} of 4</p>
+            <div className="flex gap-1">
+              {[0, 1, 2, 3].map((i) => (
+                <span key={i} className={`h-1.5 w-6 rounded-full ${i < step ? 'bg-accent' : 'border border-border bg-panel-2'}`} />
+              ))}
+            </div>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => void endSession()}
@@ -1025,14 +1124,54 @@ function SessionScreen({
           <div className="grid gap-3">
             {sessionRef.current.turns.map((turn, i) => {
               const isLastTutor = turn.role === 'tutor' && turn.text === lastTutorLine && i === sessionRef.current.turns.length - 1;
+              const showGloss = isLastTutor && profile.level !== 'advanced';
+              const glossHere = translation && translation.forText === turn.text ? translation : null;
+              if (turn.role === 'learner') {
+                return (
+                  <div key={i} className="flex items-end justify-end gap-2">
+                    <div className="max-w-[80%] rounded-[16px] bg-accent px-4 py-3 text-body text-accent-foreground">{turn.text}</div>
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent-soft text-[10.5px] font-semibold text-accent">
+                      {profile.name.slice(0, 1).toUpperCase()}
+                    </span>
+                  </div>
+                );
+              }
               return (
-                <div key={i} className={`flex ${turn.role === 'learner' ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`max-w-[80%] rounded-[16px] px-4 py-3 ${
-                      turn.role === 'learner' ? 'bg-accent text-accent-foreground' : 'border border-border bg-panel text-text'
-                    } ${isLastTutor ? 'text-[23px] font-medium leading-[30px]' : 'text-body'}`}
-                  >
-                    {turn.text}
+                <div key={i} className="flex justify-start">
+                  <div className="max-w-[80%]">
+                    <div className="flex items-start gap-2">
+                      <div
+                        className={`rounded-[16px] border border-border bg-panel px-4 py-3 text-text ${
+                          isLastTutor ? 'text-[23px] font-medium leading-[30px]' : 'text-body'
+                        }`}
+                      >
+                        {turn.text}
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Hear this line"
+                        onClick={() => hearTutorLine(turn.text)}
+                        className="mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-2 hover:bg-[var(--hover)] hover:text-text"
+                      >
+                        <Volume2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      </button>
+                    </div>
+                    {showGloss && (
+                      <div className="mt-1 pl-1">
+                        {!glossHere && (
+                          <button
+                            type="button"
+                            onClick={() => void showEnglish(turn.text)}
+                            className="text-[11.5px] font-medium text-2 underline decoration-dotted hover:text-text"
+                          >
+                            Show in English
+                          </button>
+                        )}
+                        {glossHere?.status === 'loading' && <p className="text-[11.5px] text-3">Translating…</p>}
+                        {glossHere?.status === 'done' && <p className="text-[11.5px] text-2">{glossHere.text}</p>}
+                        {glossHere?.status === 'error' && <p className="text-[11.5px] text-danger">{glossHere.text}</p>}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -1062,14 +1201,6 @@ function SessionScreen({
             </div>
           )}
 
-          {status && (
-            <div className="flex items-center gap-2 py-1.5 text-[12px] font-medium text-2">
-              {status === 'listening' && <span className="h-2 w-2 animate-pulse rounded-full bg-success" />}
-              {status === 'thinking' && <LoaderCircle className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />}
-              <span>{statusLabel[status]}</span>
-            </div>
-          )}
-
           {error && <p className="pb-1.5 text-[12px] text-danger">{error}</p>}
 
           {helpText && (
@@ -1088,15 +1219,21 @@ function SessionScreen({
           {feedbackCard && !practice && (
             <div className={`horizon-card mb-3 p-5 ${feedbackCard.kind === 'praise' || feedbackCard.kind === 'practiced' ? 'border-success/40' : ''}`}>
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className={`text-[15px] font-semibold ${feedbackCard.kind === 'praise' || feedbackCard.kind === 'practiced' ? 'text-success' : 'text-text'}`}>
-                    {cardTitle(feedbackCard.kind)}
-                  </h3>
-                  <p className="mt-0.5 text-[11px] text-3">{CATEGORY_LABELS[feedbackCard.category] ?? feedbackCard.category}</p>
+                <h3 className={`min-w-0 text-[15px] font-semibold ${feedbackCard.kind === 'praise' || feedbackCard.kind === 'practiced' ? 'text-success' : 'text-text'}`}>
+                  {cardTitle(feedbackCard.kind)}
+                </h3>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={`rounded-[6px] px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide ${
+                      feedbackCard.kind === 'praise' || feedbackCard.kind === 'practiced' ? 'bg-success/10 text-success' : 'bg-accent-soft text-accent'
+                    }`}
+                  >
+                    {CATEGORY_LABELS[feedbackCard.category] ?? feedbackCard.category}
+                  </span>
+                  <button type="button" aria-label="Dismiss feedback" onClick={() => setFeedbackCard(null)} className="text-2 hover:text-text">
+                    <X className="h-4 w-4" strokeWidth={1.8} />
+                  </button>
                 </div>
-                <button type="button" aria-label="Dismiss feedback" onClick={() => setFeedbackCard(null)} className="shrink-0 text-2 hover:text-text">
-                  <X className="h-4 w-4" strokeWidth={1.8} />
-                </button>
               </div>
 
               {feedbackCard.kind === 'correction' || feedbackCard.kind === 'translation' ? (
@@ -1161,7 +1298,7 @@ function SessionScreen({
             </div>
           )}
 
-          <div className="flex items-center gap-2 pb-4">
+          <div className="flex items-center gap-2 pb-3">
             <button
               type="button"
               onClick={() => void doSlower()}
@@ -1183,16 +1320,67 @@ function SessionScreen({
             >
               Help me answer
             </button>
+          </div>
+
+          {typedOpen && (
+            <div className="flex items-center gap-2 pb-3">
+              <input
+                autoFocus
+                value={typedText}
+                onChange={(e) => setTypedText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); void submitTyped(); }
+                  else if (e.key === 'Escape') { setTypedOpen(false); setTypedText(''); }
+                }}
+                placeholder="Type your reply…"
+                className="h-9 flex-1 rounded-[10px] border border-border bg-bg px-3 text-[13.5px] text-text focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => void submitTyped()}
+                className="h-9 shrink-0 rounded-[10px] bg-accent px-3.5 text-[12.5px] font-semibold text-accent-foreground"
+              >
+                Send
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-4 pb-4">
             <button
               type="button"
-              aria-label={micOn ? 'Pause microphone' : 'Resume microphone'}
-              onClick={() => void toggleMic()}
-              className={`ml-auto grid h-9 w-9 place-items-center rounded-[10px] border ${
-                micOn ? 'border-border bg-panel text-text' : 'border-danger/40 bg-danger/10 text-danger'
+              aria-label="Type instead"
+              onClick={() => setTypedOpen((v) => !v)}
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border ${
+                typedOpen ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-panel text-2 hover:text-text'
               }`}
             >
-              {micOn ? <Mic className="h-4 w-4" strokeWidth={1.8} /> : <MicOff className="h-4 w-4" strokeWidth={1.8} />}
+              <Keyboard className="h-4 w-4" strokeWidth={1.8} />
             </button>
+
+            <div className="flex flex-col items-center gap-2">
+              <button
+                type="button"
+                aria-label={micOn ? 'Pause microphone' : 'Resume microphone'}
+                onClick={() => void toggleMic()}
+                className={`relative grid h-16 w-16 place-items-center rounded-full ${
+                  micOn ? 'bg-accent text-accent-foreground' : 'border border-danger/40 bg-danger/10 text-danger'
+                }`}
+              >
+                {micOn && status === 'listening' && (
+                  <span className="absolute inset-0 -z-10 animate-ping rounded-full bg-accent/20" aria-hidden="true" />
+                )}
+                {micOn ? <Mic className="h-6 w-6" strokeWidth={1.8} /> : <MicOff className="h-6 w-6" strokeWidth={1.8} />}
+              </button>
+              {status && (
+                <div className="flex items-center gap-2 text-[12px] font-medium text-2">
+                  {status === 'listening' && <span className="h-2 w-2 animate-pulse rounded-full bg-success" />}
+                  {status === 'thinking' && <LoaderCircle className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />}
+                  <span>{statusLabel[status]}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="h-9 w-9 shrink-0" aria-hidden="true" />
           </div>
         </div>
       </div>
