@@ -1,0 +1,58 @@
+name: Spanish tutoring core
+on:
+  push:
+    branches: [feat/spanish-tutoring-engine]
+    paths:
+      - 'frontend/src-tauri/src/spanish/**'
+      - 'frontend/src/types/spanishTutor.ts'
+      - 'tools/spanish-core-tests/**'
+      - '.github/workflows/spanish-tutoring-core.yml'
+  pull_request:
+    paths:
+      - 'frontend/src-tauri/src/spanish/**'
+      - 'frontend/src/types/spanishTutor.ts'
+      - 'tools/spanish-core-tests/**'
+      - '.github/workflows/spanish-tutoring-core.yml'
+permissions:
+  contents: read
+concurrency:
+  group: spanish-core-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  pure-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Unit, deterministic async, and manual-runner compile checks
+        run: cargo +stable test --manifest-path tools/spanish-core-tests/Cargo.toml --locked --all-targets
+      - name: Check golden corpus and additive migration
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sqlite3
+          root = pathlib.Path('frontend/src-tauri/src/spanish')
+          rows = [json.loads(line) for line in (root/'golden.jsonl').read_text().splitlines() if line.strip()]
+          assert len(rows) >= 40
+          assert len({r['id'] for r in rows}) == len(rows)
+          assert all('expected' in r and 'category' in r['expected'] and 'severity' in r['expected'] for r in rows)
+          db = sqlite3.connect(':memory:')
+          db.executescript("CREATE TABLE spanish_profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL); INSERT INTO spanish_profiles VALUES ('existing','Learner');")
+          migration = (root/'migrations/001_practicing.sql').read_text()
+          for _ in range(2):
+              # Exercise the exact same PRAGMA guard as the native adapter.
+              if 'practicing' not in [col[1] for col in db.execute('PRAGMA table_info(spanish_profiles)')]:
+                  db.executescript(migration)
+          assert db.execute('SELECT id,name,practicing FROM spanish_profiles').fetchall() == [('existing','Learner','[]')]
+          assert len(db.execute('PRAGMA table_info(spanish_profiles)').fetchall()) == 3
+          try:
+              db.execute("UPDATE spanish_profiles SET practicing=NULL")
+          except sqlite3.IntegrityError:
+              pass
+          else:
+              raise AssertionError('practicing must be NOT NULL')
+          print(f'{len(rows)} golden cases valid; migration preserves existing data and guarded retries are idempotent')
+          PY

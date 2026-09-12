@@ -57,6 +57,9 @@ pub mod spanish;
 pub mod spanish_class;
 pub mod state;
 pub mod summary;
+pub mod spanish;
+#[path = "spanish/provider.rs"]
+pub mod spanish_provider;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
