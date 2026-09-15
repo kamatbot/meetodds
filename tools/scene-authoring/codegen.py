@@ -2,9 +2,9 @@
 """Generate frontend/src-tauri/src/languages/scenes.rs from authored JSON."""
 import json, pathlib, sys
 
-ORDER = ["nb", "en", "fr", "de", "it", "pt", "zh"]
+ORDER = ["nb", "en", "fr", "de", "it", "pt", "zh", "hi"]
 NAMES = {"nb":"NORWEGIAN","en":"ENGLISH","fr":"FRENCH","de":"GERMAN",
-         "it":"ITALIAN","pt":"PORTUGUESE","zh":"MANDARIN"}
+         "it":"ITALIAN","pt":"PORTUGUESE","zh":"MANDARIN","hi":"HINDI"}
 
 def rs(s: str) -> str:
     """Rust string literal. Content is prose; escape only what Rust requires."""
@@ -105,7 +105,7 @@ pub fn scenes_for(language_id: &str) -> Option<&'static [Scene; 8]> {{
 }}
 
 /// Language ids this module carries scenes for.
-pub static SCENE_LANGUAGES: [&str; 7] = [{", ".join(f'"{l}"' for l in ORDER)}];
+pub static SCENE_LANGUAGES: [&str; {len(ORDER)}] = [{", ".join(f'"{l}"' for l in ORDER)}];
 ''')
     out.append(TESTS)
     pathlib.Path(out_path).write_text("\n".join(out), encoding="utf-8")
@@ -268,6 +268,72 @@ mod tests {
         let scene = &scenes[0];
         assert_eq!(scene.beat(0).goal, scene.beats[0].goal);
         assert_eq!(scene.beat(99).goal, scene.beats[3].goal);
+    }
+
+    /// Hindi is taught in Roman script by design (docs/SCENE-AUTHORING.md):
+    /// learners speak it and never read Devanagari, so no learner-facing
+    /// string may contain a Devanagari codepoint (U+0900..=U+097F) or an IAST
+    /// diacritic. Plain ASCII letters only.
+    #[test]
+    fn hindi_content_is_roman_script_only() {
+        let hi = scenes_for("hi").unwrap();
+        for scene in hi.iter() {
+            let mut texts = vec![scene.filler];
+            for beat in scene.beats.iter() {
+                texts.push(beat.opener);
+                texts.push(beat.options);
+            }
+            for row in &scene.target_structures[..2] {
+                texts.extend(row.iter().copied());
+            }
+            for text in texts {
+                assert!(
+                    !text.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)),
+                    "Hindi {} contains Devanagari: {text}",
+                    scene.id
+                );
+                assert!(
+                    text.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_ascii()),
+                    "Hindi {} contains a non-ASCII letter (IAST diacritic?): {text}",
+                    scene.id
+                );
+            }
+        }
+    }
+
+    /// Service scenes address the learner as aap, peer scenes as tum, and no
+    /// scene mixes the two. tu is never modelled.
+    #[test]
+    fn hindi_register_is_split_by_scene_and_never_mixed() {
+        let hi = scenes_for("hi").unwrap();
+        let service = ["ordering_food", "shopping", "hotel_checkin", "asking_directions"];
+        let aap = ["aap", "aapko", "aapka", "aapki", "aapke", "aapne"];
+        let tum = ["tum", "tumhe", "tumhara", "tumhari", "tumhare", "tumne"];
+        let words = |text: &str| -> Vec<String> {
+            text.split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .map(|w| w.to_lowercase())
+                .collect()
+        };
+        for scene in hi.iter() {
+            let mut has_aap = false;
+            let mut has_tum = false;
+            for beat in scene.beats.iter() {
+                for text in [beat.opener, beat.options] {
+                    for w in words(text) {
+                        assert_ne!(w, "tu", "Hindi {} models tu: {text}", scene.id);
+                        has_aap |= aap.contains(&w.as_str());
+                        has_tum |= tum.contains(&w.as_str());
+                    }
+                }
+            }
+            assert!(!(has_aap && has_tum), "Hindi {} mixes aap and tum", scene.id);
+            if service.contains(&scene.id) {
+                assert!(has_aap && !has_tum, "Hindi service scene {} should use aap", scene.id);
+            } else {
+                assert!(has_tum && !has_aap, "Hindi peer scene {} should use tum", scene.id);
+            }
+        }
     }
 }
 '''

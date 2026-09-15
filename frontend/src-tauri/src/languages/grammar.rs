@@ -139,6 +139,11 @@ pub enum Category {
     Countability,
     /// English: do/be/have support in questions, negatives and progressives.
     AuxiliaryVerb,
+    /// Hindi: the ergative `ne` on the subject of a perfective transitive verb,
+    /// with the verb agreeing with the object.
+    Ergative,
+    /// Hindi: aap/tum agreement on verbs and imperatives (hain/-iye vs ho/-o).
+    Honorific,
 }
 
 impl Default for Category {
@@ -149,7 +154,7 @@ impl Default for Category {
 
 /// The single source of truth for wire strings. Serde reads and writes through
 /// this table, so the persisted form and `wire()`/`from_wire()` cannot drift.
-const WIRE: [(Category, &str); 24] = [
+const WIRE: [(Category, &str); 26] = [
     (Category::VerbTense, "verb_tense"),
     (Category::VerbConjugation, "verb_conjugation"),
     (Category::SerEstar, "ser_estar"),
@@ -174,10 +179,12 @@ const WIRE: [(Category, &str); 24] = [
     (Category::Pronoun, "pronoun"),
     (Category::Countability, "countability"),
     (Category::AuxiliaryVerb, "auxiliary_verb"),
+    (Category::Ergative, "ergative"),
+    (Category::Honorific, "honorific"),
 ];
 
-const WIRE_NAMES: [&str; 24] = {
-    let mut names = [""; 24];
+const WIRE_NAMES: [&str; 26] = {
+    let mut names = [""; 26];
     let mut i = 0;
     while i < WIRE.len() {
         names[i] = WIRE[i].1;
@@ -188,8 +195,8 @@ const WIRE_NAMES: [&str; 24] = {
 
 impl Category {
     /// Every category, in declaration order.
-    pub const ALL: [Category; 24] = {
-        let mut all = [Category::Other; 24];
+    pub const ALL: [Category; 26] = {
+        let mut all = [Category::Other; 26];
         let mut i = 0;
         while i < WIRE.len() {
             all[i] = WIRE[i].0;
@@ -295,6 +302,12 @@ impl Category {
             Self::AuxiliaryVerb => {
                 "This question or negative form needs a helping verb."
             }
+            Self::Ergative => {
+                "The subject of a completed transitive action takes an ergative marker and the verb agrees with the object."
+            }
+            Self::Honorific => {
+                "The verb form needs to match the level of respect used for the person addressed."
+            }
         }
     }
 
@@ -325,6 +338,8 @@ impl Category {
             Self::Pronoun => "Pronouns",
             Self::Countability => "Countable and uncountable nouns",
             Self::AuxiliaryVerb => "Helping verbs",
+            Self::Ergative => "Ergative marking",
+            Self::Honorific => "Levels of respect",
         }
     }
 }
@@ -712,6 +727,47 @@ const MANDARIN_LEVELS: LevelTable = LevelTable {
     above_intermediate: &[C::BaBei],
 };
 
+/// Hindi (Roman script; every example below is Roman, never Devanagari).
+/// Gender agreement runs through verbs and adjectives, not just nouns, and is
+/// band 1 together with postpositions (`Preposition`, labelled Postpositions)
+/// and aap/tum agreement (`Honorific`). No articles. The oblique form before a
+/// postposition (`Case`), pronoun forms, and the ergative `ne` with perfective
+/// transitives arrive at band 2, so they are intermediate corrections and
+/// praiseworthy for a beginner. Verb-final word order is band 1.
+const HINDI_SET: &[Category] = &[
+    C::VerbTense,
+    C::VerbConjugation,
+    C::GenderAgreement,
+    C::NumberAgreement,
+    C::Honorific,
+    C::Case,
+    C::Pronoun,
+    C::Ergative,
+    C::Negation,
+    C::Preposition,
+    C::WordChoice,
+    C::WordOrder,
+    C::MissingWord,
+    C::EnglishMixed,
+    C::Other,
+];
+const HINDI_LEVELS: LevelTable = LevelTable {
+    beginner: &[
+        C::GenderAgreement,
+        C::NumberAgreement,
+        C::Honorific,
+        C::Preposition,
+        C::MissingWord,
+        C::WordOrder,
+        C::EnglishMixed,
+    ],
+    beginner_present_only: &[C::VerbConjugation, C::Negation],
+    intermediate_needs_structure: &[C::VerbConjugation, C::VerbTense],
+    advanced_only: &[],
+    above_beginner: &[C::WordChoice, C::Case, C::Pronoun, C::Ergative],
+    above_intermediate: &[],
+};
+
 /// The neutral core used for an unknown language id.
 const NEUTRAL_LEVELS: LevelTable = LevelTable {
     beginner: &[C::MissingWord, C::WordOrder, C::EnglishMixed],
@@ -740,11 +796,12 @@ pub enum Taxonomy {
     Italian,
     Portuguese,
     Mandarin,
+    Hindi,
 }
 
 impl Taxonomy {
     /// Every real language's taxonomy, in registry order.
-    pub const LANGUAGES: [Taxonomy; 8] = [
+    pub const LANGUAGES: [Taxonomy; 9] = [
         Taxonomy::Norwegian,
         Taxonomy::Spanish,
         Taxonomy::English,
@@ -753,6 +810,7 @@ impl Taxonomy {
         Taxonomy::Italian,
         Taxonomy::Portuguese,
         Taxonomy::Mandarin,
+        Taxonomy::Hindi,
     ];
 
     /// Resolve a language id (`nb`, `es`, ...). Anything else, including an
@@ -769,6 +827,7 @@ impl Taxonomy {
             "it" => Self::Italian,
             "pt" => Self::Portuguese,
             "zh" => Self::Mandarin,
+            "hi" => Self::Hindi,
             _ => Self::Neutral,
         }
     }
@@ -790,6 +849,7 @@ impl Taxonomy {
             Self::Italian => Some("it"),
             Self::Portuguese => Some("pt"),
             Self::Mandarin => Some("zh"),
+            Self::Hindi => Some("hi"),
         }
     }
 
@@ -807,6 +867,7 @@ impl Taxonomy {
             Self::Italian => ITALIAN_SET,
             Self::Portuguese => PORTUGUESE_SET,
             Self::Mandarin => MANDARIN_SET,
+            Self::Hindi => HINDI_SET,
         }
     }
 
@@ -846,6 +907,7 @@ impl Taxonomy {
             Self::Italian => &ITALIAN_LEVELS,
             Self::Portuguese => &PORTUGUESE_LEVELS,
             Self::Mandarin => &MANDARIN_LEVELS,
+            Self::Hindi => &HINDI_LEVELS,
         }
     }
 
@@ -866,6 +928,7 @@ impl Taxonomy {
             (Self::Italian, C::Preposition) => "This relationship between words needs a different preposition in Italian.",
             (Self::Portuguese, C::Preposition) => "This relationship between words needs a different preposition in Portuguese.",
             (Self::Mandarin, C::Preposition) => "This relationship between words needs a different preposition in Mandarin.",
+            (Self::Hindi, C::Preposition) => "This relationship between words needs a different postposition in Hindi, such as mein, pe, ko or se.",
 
             (Self::Norwegian, C::WordChoice) => "A different Norwegian word expresses your intended meaning more clearly here.",
             (Self::Spanish, C::WordChoice) => "A different Spanish word expresses your intended meaning more clearly here.",
@@ -875,6 +938,7 @@ impl Taxonomy {
             (Self::Italian, C::WordChoice) => "A different Italian word expresses your intended meaning more clearly here.",
             (Self::Portuguese, C::WordChoice) => "A different Portuguese word expresses your intended meaning more clearly here.",
             (Self::Mandarin, C::WordChoice) => "A different Mandarin word expresses your intended meaning more clearly here.",
+            (Self::Hindi, C::WordChoice) => "A different Hindi word expresses your intended meaning more clearly here.",
 
             (Self::Norwegian, C::WordOrder) => "The order of these words needs to fit the structure of this Norwegian sentence.",
             (Self::Spanish, C::WordOrder) => "The order of these words needs to fit the structure of this Spanish sentence.",
@@ -884,6 +948,7 @@ impl Taxonomy {
             (Self::Italian, C::WordOrder) => "The order of these words needs to fit the structure of this Italian sentence.",
             (Self::Portuguese, C::WordOrder) => "The order of these words needs to fit the structure of this Portuguese sentence.",
             (Self::Mandarin, C::WordOrder) => "The order of these words needs to fit the structure of this Mandarin sentence.",
+            (Self::Hindi, C::WordOrder) => "The order of these words needs to fit the structure of this Hindi sentence, with the verb at the end.",
 
             (Self::Norwegian, C::MissingWord) => "This Norwegian sentence needs another word to express the complete idea.",
             (Self::Spanish, C::MissingWord) => "This Spanish sentence needs another word to express the complete idea.",
@@ -893,6 +958,7 @@ impl Taxonomy {
             (Self::Italian, C::MissingWord) => "This Italian sentence needs another word to express the complete idea.",
             (Self::Portuguese, C::MissingWord) => "This Portuguese sentence needs another word to express the complete idea.",
             (Self::Mandarin, C::MissingWord) => "This Mandarin sentence needs another word to express the complete idea.",
+            (Self::Hindi, C::MissingWord) => "This Hindi sentence needs another word to express the complete idea.",
 
             (Self::Norwegian, C::EnglishMixed) => "This Norwegian phrase expresses the idea you asked about in English.",
             (Self::Spanish, C::EnglishMixed) => "This Spanish phrase expresses the idea you asked about in English.",
@@ -902,6 +968,7 @@ impl Taxonomy {
             (Self::Italian, C::EnglishMixed) => "This Italian phrase expresses the idea you asked about in English.",
             (Self::Portuguese, C::EnglishMixed) => "This Portuguese phrase expresses the idea you asked about in English.",
             (Self::Mandarin, C::EnglishMixed) => "This Mandarin phrase expresses the idea you asked about in English.",
+            (Self::Hindi, C::EnglishMixed) => "This Hindi phrase expresses the idea you asked about in English.",
 
             // Language-specific extensions.
             (Self::Spanish, C::SerEstar) => "Spanish uses different verbs for identity and for states or location.",
@@ -925,6 +992,13 @@ impl Taxonomy {
             (Self::Mandarin, C::Particle) => "This sentence needs a different particle, such as 的, 吗 or 呢, to work in Mandarin.",
             (Self::Mandarin, C::BaBei) => "The 把 and 被 constructions put the object before the verb and need their own word order.",
             (Self::Mandarin, C::Negation) => "Mandarin uses 不 for general or future negation and 没 for actions that did not happen.",
+            (Self::Hindi, C::VerbConjugation) => "The verb ending needs to agree with the subject's person, number and gender, for example main hoon, tum ho, aap hain.",
+            (Self::Hindi, C::GenderAgreement) => "In Hindi the verb and adjective need to match the gender of the noun or speaker, for example achha ladka but achhi ladki.",
+            (Self::Hindi, C::Honorific) => "The verb form needs to match the level of respect: aap takes hain and -iye, tum takes ho and -o.",
+            (Self::Hindi, C::Case) => "The noun or pronoun needs its oblique form before a postposition, for example ladke ko rather than ladka ko.",
+            (Self::Hindi, C::Pronoun) => "The pronoun needs the form that fits its postposition and role, for example mujhe, mujhse or mera.",
+            (Self::Hindi, C::Ergative) => "With a transitive verb in the perfective past the subject takes ne and the verb agrees with the object, for example maine chai pi.",
+            (Self::Hindi, C::Negation) => "Hindi uses nahi in statements, mat for commands and na for gentle suggestions.",
 
             // Shared wording for everything else.
             (_, c) => c.neutral_explanation(),
@@ -944,6 +1018,12 @@ impl Taxonomy {
             (Self::Italian, C::EnglishMixed) => "Useful Italian phrases",
             (Self::Portuguese, C::EnglishMixed) => "Useful Portuguese phrases",
             (Self::Mandarin, C::EnglishMixed) => "Useful Mandarin phrases",
+            (Self::Hindi, C::EnglishMixed) => "Useful Hindi phrases",
+            (Self::Hindi, C::Preposition) => "Postpositions",
+            (Self::Hindi, C::Case) => "Oblique forms",
+            (Self::Hindi, C::Honorific) => "Aap and tum",
+            (Self::Hindi, C::Ergative) => "The ne construction",
+            (Self::Hindi, C::Negation) => "nahi, mat and na",
             (Self::Norwegian, C::Article) => "Definite and indefinite forms",
             (Self::Mandarin, C::Negation) => "不 and 没",
             (_, c) => c.neutral_name(),
@@ -1469,7 +1549,7 @@ mod tests {
 
     #[test]
     fn nothing_panics_over_the_full_input_space() {
-        let ids = ["nb", "es", "en", "fr", "de", "it", "pt", "zh", "", "??"];
+        let ids = ["nb", "es", "en", "fr", "de", "it", "pt", "zh", "hi", "", "??"];
         for id in ids {
             let t = Taxonomy::for_id(id);
             for c in Category::ALL {
@@ -1636,6 +1716,60 @@ mod tests {
         ));
         assert_eq!(de.category_name(C::Case), "Grammatical case");
         assert!(de.explanation(C::SubordinateClause).contains("end"));
+    }
+
+    #[test]
+    fn hindi_differs_from_spanish_and_stays_in_roman_script() {
+        let hi = Taxonomy::Hindi;
+        assert_eq!(Taxonomy::for_id("hi"), hi);
+        assert_eq!(hi.language_id(), Some("hi"));
+        for c in [C::Ergative, C::Honorific, C::Case, C::Pronoun, C::Negation] {
+            assert!(hi.accepts(c), "{c}");
+            assert!(!Taxonomy::Spanish.accepts(c), "{c}");
+        }
+        for c in [C::Article, C::SerEstar, C::MeasureWord, C::VerbSecond, C::SeparableVerb] {
+            assert!(!hi.accepts(c), "{c}");
+        }
+        assert_eq!(C::Ergative.wire(), "ergative");
+        assert_eq!(C::Honorific.wire(), "honorific");
+        assert_eq!(hi.parse("ergative"), Some(C::Ergative));
+        assert_eq!(Taxonomy::Spanish.parse("ergative"), None);
+        // Gender agreement, postpositions and aap/tum are beginner corrections.
+        assert!(hi.at_level(C::GenderAgreement, Structure::General, Level::Beginner));
+        assert!(hi.at_level(C::Preposition, Structure::General, Level::Beginner));
+        assert!(hi.at_level(C::Honorific, Structure::General, Level::Beginner));
+        assert!(hi.at_level(C::WordOrder, Structure::General, Level::Beginner));
+        assert!(!Taxonomy::Spanish.at_level(C::Preposition, Structure::General, Level::Beginner));
+        // nahi in the present is beginner; a past negation waits for intermediate.
+        assert!(hi.at_level(C::Negation, Structure::Present, Level::Beginner));
+        assert!(!hi.at_level(C::Negation, Structure::Past, Level::Beginner));
+        // Ergative ne and the oblique are intermediate, praiseworthy for a beginner.
+        assert!(!hi.at_level(C::Ergative, Structure::Past, Level::Beginner));
+        assert!(hi.at_level(C::Ergative, Structure::Past, Level::Intermediate));
+        assert!(hi.demonstrably_above_level(C::Ergative, Structure::General, Level::Beginner));
+        assert!(!hi.at_level(C::Case, Structure::General, Level::Beginner));
+        assert!(hi.at_level(C::Case, Structure::General, Level::Intermediate));
+        // Honorific register labelled as such is advanced, like every language.
+        assert!(!hi.at_level(C::Honorific, Structure::Register, Level::Intermediate));
+        assert_eq!(hi.category_name(C::Preposition), "Postpositions");
+        assert_eq!(hi.category_name(C::Honorific), "Aap and tum");
+        assert_eq!(hi.category_name(C::EnglishMixed), "Useful Hindi phrases");
+        assert!(hi.explanation(C::Ergative).contains("maine chai pi"));
+        assert!(hi.explanation(C::GenderAgreement).contains("verb and adjective"));
+        // Every rule sentence and label is Roman script: no Devanagari, no IAST.
+        for c in Category::ALL {
+            for text in [hi.explanation(c), hi.category_name(c)] {
+                assert!(!text.chars().any(|ch| ('\u{0900}'..='\u{097F}').contains(&ch)), "{text}");
+                assert!(text.chars().filter(|ch| ch.is_alphabetic()).all(|ch| ch.is_ascii()), "{text}");
+            }
+        }
+        // The new variants degrade to Other for every other language.
+        for t in Taxonomy::LANGUAGES.iter().chain([&Taxonomy::Neutral]) {
+            if *t != hi {
+                assert_eq!(t.explanation(C::Ergative), t.explanation(C::Other), "{t:?}");
+                assert!(!t.at_level(C::Honorific, Structure::Present, Level::Intermediate), "{t:?}");
+            }
+        }
     }
 
     #[test]

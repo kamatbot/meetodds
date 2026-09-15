@@ -33,14 +33,15 @@ use super::{module_or_default, tutor_guidance, LanguageModule};
 /// language fits; language policy lines are appended only while they fit.
 pub const REPLY_SYSTEM_BUDGET: usize = 250;
 
-/// Documented ceiling, in bytes, for [`judge_system`] output across all eight
+/// Documented ceiling, in bytes, for [`judge_system`] output across all nine
 /// languages with the Spanish reference grammar (12 categories, 7 structures,
 /// two examples). Not enforced at runtime: the judge call is not gated by
 /// `reply_prompt`'s 250-token check. Measured: Norwegian ~2.5 KB, Spanish
 /// ~2.7 KB (legacy 1.55 KB plus the policy block), English/Italian/German/
 /// French ~3.0-3.1 KB, Portuguese ~3.2 KB, Mandarin ~3.5 KB (CJK is 3 bytes a
-/// character, so the byte count overstates its tokens). The tests hold every
-/// language and dial under this ceiling.
+/// character, so the byte count overstates its tokens), Hindi ~3.8 KB (its
+/// Roman-script policy has the most to say and is plain ASCII, so bytes are
+/// characters). The tests hold every language and dial under this ceiling.
 pub const JUDGE_SYSTEM_BUDGET: usize = 3800;
 
 /// One few-shot example in the judge prompt. `learner` is the text after
@@ -98,8 +99,10 @@ pub mod spanish_reference {
 /// Spanish keeps its legacy line verbatim. Mandarin transcripts carry no tone
 /// marks and no accents, so its line makes no "ignore accents" claim and
 /// forbids pinyin in the reply (the app renders pinyin separately). German
-/// tolerates ß/ss and the ae/oe/ue umlaut spellings. Unknown ids get a generic
-/// line that claims nothing language-specific.
+/// tolerates ß/ss and the ae/oe/ue umlaut spellings. Hindi is taught in Roman
+/// script, so its line forgives romanization variants and forbids Devanagari
+/// in the quoted text. Unknown ids get a generic line that claims nothing
+/// language-specific.
 pub fn asr_tolerance(module: &LanguageModule) -> &'static str {
     match module.id {
         "es" => "Ignore accents, punctuation, capitalization, ¿¡, and b/v, ll/y, s/z confusions caused by speech recognition.",
@@ -110,6 +113,7 @@ pub fn asr_tolerance(module: &LanguageModule) -> &'static str {
         "it" => "Ignore accents, punctuation, capitalization, apostrophes and single/double consonant spellings caused by speech recognition.",
         "pt" => "Ignore accents, punctuation, capitalization, and ã/a, ç/c, s/z spellings caused by speech recognition.",
         "zh" => "The transcript is characters only: do not judge tones or pronunciation from it, treat homophone characters and Simplified/Traditional variants as recognition noise, and write youSaid and tryThis in characters with no pinyin.",
+        "hi" => "The transcript is Roman-script Hindi with no fixed spelling: treat variants such as hai/hain, nahi/nahin, kya/kyaa, mein/me, w/v, z/j, ch/chh and single or doubled vowels as recognition noise, never as errors, and never judge retroflex, aspiration or vowel length from it. Write youSaid and tryThis in Roman script as the learner spells, never in Devanagari.",
         _ => "Ignore punctuation and capitalization differences caused by speech recognition.",
     }
 }
@@ -423,6 +427,34 @@ Example learner: bamos a la casa
         for m in LANGUAGES.iter() {
             assert!(!asr_tolerance(m).is_empty(), "{}", m.id);
         }
+    }
+
+    /// Hindi is taught in Roman script: the judge must forgive romanization
+    /// variants, quote the learner in Roman script, and nothing in the Hindi
+    /// prompts may carry Devanagari or IAST.
+    #[test]
+    fn hindi_prompts_stay_in_roman_script() {
+        let grammar = spanish_grammar();
+        let hi = module("hi").expect("hi");
+        let line = asr_tolerance(hi);
+        assert!(line.contains("Roman-script Hindi"));
+        assert!(line.contains("never as errors"));
+        assert!(line.contains("never in Devanagari"));
+        assert!(!line.contains("Ignore accents"));
+        let is_deva = |c: char| ('\u{0900}'..='\u{097F}').contains(&c);
+        for dial in 0..3u8 {
+            let judge = judge_system(hi, dial, &grammar);
+            let reply = reply_system(hi, dial, 4000);
+            for text in [judge.as_str(), reply.as_str(), help_task(hi).as_str()] {
+                assert!(!text.chars().any(is_deva), "dial {dial}: Devanagari in prompt");
+                assert!(text.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_ascii()), "dial {dial}: non-ASCII letter in prompt");
+            }
+            assert!(judge.starts_with("You review Hindi learner speech"));
+            assert!(judge.contains("Roman alphabet only"));
+            assert!(judge.len() <= JUDGE_SYSTEM_BUDGET, "hindi judge at dial {dial} is {} bytes", judge.len());
+        }
+        assert_eq!(reply_system(hi, 0, REPLY_SYSTEM_BUDGET), reply_core(hi));
+        assert!(reply_core(hi).starts_with("Reply only in Hindi"));
     }
 
     #[test]

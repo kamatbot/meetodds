@@ -63,6 +63,21 @@ def check(path):
         if not re.search(r"[一-鿿]", blob): errs.append("no Chinese characters")
     elif re.search(r"[一-鿿]", blob):
         errs.append(f"unexpected CJK in {lang}")
+    if lang == "hi":
+        # Roman script by design: no Devanagari, no IAST diacritics, peer register.
+        deva = sorted({c for c in blob if "\u0900" <= c <= "\u097f"})
+        if deva: errs.append(f"Hindi learner text contains Devanagari: {deva[:8]}")
+        nonascii = sorted({c for c in blob if c.isalpha() and not c.isascii()})
+        if nonascii: errs.append(f"Hindi learner text has non-ASCII letters: {nonascii}")
+        banned = re.findall(r"\b(nahin|kyaa|chaahiye|hein|tumhein|voh|vahan|acha|accha|thik)\b", blob, re.I)
+        if banned: errs.append(f"Hindi non-canonical spelling: {sorted(set(w.lower() for w in banned))}")
+        if re.search(r"\baap(ko|ka|ki|ke|ne)?\b", blob, re.I):
+            errs.append("Hindi free talk is peer register (tum), found aap")
+        if re.search(r"\btu\b", blob, re.I):
+            errs.append("Hindi content models tu")
+        for i, s in enumerate(di):
+            if any("\u0900" <= c <= "\u097f" for c in (s or "")):
+                errs.append(f"dial_instructions[{i}] contains Devanagari")
     # duplicate openers
     vals = [s for n, s in learner_strings if "/" in n]
     dup = {v for v in vals if vals.count(v) > 1}

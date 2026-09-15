@@ -12,7 +12,7 @@ mod tests {
 
     #[test]
     fn every_language_is_complete() {
-        assert_eq!(TALK_LANGUAGES.len(), 8);
+        assert_eq!(TALK_LANGUAGES.len(), 9);
         for t in all() {
             assert!(!t.closing.trim().is_empty(), "{}", t.language_id);
             assert!(!t.talk_fallback.trim().is_empty(), "{}", t.language_id);
@@ -136,6 +136,41 @@ mod tests {
                 let latin = d.chars().filter(|c| c.is_ascii_alphabetic()).count();
                 assert!(latin >= 20, "{} dial instruction not English: {d}", t.language_id);
             }
+        }
+    }
+
+    /// Hindi is taught in Roman script by design (docs/SCENE-AUTHORING.md):
+    /// no learner-facing string may carry a Devanagari codepoint
+    /// (U+0900..=U+097F) or an IAST diacritic, and the register is tum.
+    #[test]
+    fn hindi_learner_text_is_roman_script_only_and_peer_register() {
+        let hi = talk_for("hi").expect("hindi present");
+        let mut texts = vec![hi.closing, hi.talk_fallback, hi.scaffold_fallback];
+        for topic in hi.topics.iter() {
+            for row in topic.openers.iter() {
+                texts.extend(row.iter().copied());
+            }
+        }
+        let mut has_tum = false;
+        for text in texts {
+            assert!(
+                !text.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)),
+                "Hindi learner text contains Devanagari: {text}"
+            );
+            assert!(
+                text.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_ascii()),
+                "Hindi learner text contains a non-ASCII letter: {text}"
+            );
+            for w in text.split(|c: char| !c.is_alphanumeric()).map(str::to_lowercase) {
+                assert!(!w.starts_with("aap"), "Hindi free talk is peer register, not aap: {text}");
+                assert_ne!(w, "tu", "Hindi never models tu: {text}");
+                has_tum |= w.starts_with("tum");
+            }
+        }
+        assert!(has_tum);
+        // Pacing instructions name Hindi structures but stay in Roman script too.
+        for d in hi.dial_instructions.iter() {
+            assert!(!d.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)), "{d}");
         }
     }
 }

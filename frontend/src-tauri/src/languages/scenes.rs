@@ -1085,6 +1085,153 @@ pub static MANDARIN_SCENES: [Scene; 8] = [
     },
 ];
 
+pub static HINDI_SCENES: [Scene; 8] = [
+    Scene {
+        id: "ordering_food",
+        tutor_role: "waiter",
+        learner_role: "customer",
+        goal: "order food and a drink, then ask for the bill",
+        filler: "Hmm, ek minute…",
+        beats: [
+            beat("greet and choose a drink", "Namaste! Aap kya peena chahenge?", "Paani ya chai?"),
+            beat("order food; offer a dish", "Aaj hamare paas dal, paneer aur biryani hai. Aap kya khaana chahenge?", "Paneer ya biryani?"),
+            beat("ask how the food tastes", "Khaana kaisa laga aapko?", "Bahut achha ya bas theek-theek?"),
+            beat("ask for the bill and finish", "Kuch aur chahiye, ya bill le aaun?", "Kuch aur ya bill?"),
+        ],
+        target_structures: [
+            ["mujhe … chahiye", "kya aapke paas … hai?"],
+            ["main … lena chahunga / chahungi", "kya aap … la sakte hain?"],
+            ["conditional politeness", "complaining politely"],
+        ],
+    },
+    Scene {
+        id: "meeting_someone",
+        tutor_role: "new acquaintance",
+        learner_role: "new acquaintance",
+        goal: "introduce yourself and find a shared interest",
+        filler: "Ek minute…",
+        beats: [
+            beat("exchange names", "Hello! Tumhara naam kya hai?", "Tumhara naam Priya hai ya kuch aur?"),
+            beat("say where you live", "Aur tum kahan se ho?", "Dilli se ya kahin aur se?"),
+            beat("find a shared interest", "Tumhe khaali waqt mein kya karna pasand hai?", "Cricket ya gaane?"),
+            beat("suggest another conversation", "Phir kabhi milke baat karein?", "Kal ya weekend pe?"),
+        ],
+        target_structures: [
+            ["mera naam … hai", "mujhe … pasand hai"],
+            ["main … se hoon", "mujhe … mein dilchaspi hai"],
+            ["shared interests", "polite invitations"],
+        ],
+    },
+    Scene {
+        id: "school_day",
+        tutor_role: "classmate",
+        learner_role: "student",
+        goal: "talk about subjects, a class project and after-school activities",
+        filler: "Sochne do…",
+        beats: [
+            beat("name a favorite subject", "Tumhara favourite subject kaun sa hai?", "Maths ya Hindi?"),
+            beat("describe a class", "Aaj ki class kaisi thi?", "Mazedaar ya boring?"),
+            beat("describe a project or activity", "Class mein abhi tum log kya kar rahe ho?", "Koi project ya presentation?"),
+            beat("arrange an after-school activity", "School ke baad kuch saath karein?", "Padhai ya cricket?"),
+        ],
+        target_structures: [
+            ["mujhe … pasand hai", "… kaisa hai / kaisi hai?"],
+            ["mujhe lagta hai ki …", "hum … kar rahe hain"],
+            ["explain an opinion", "compare learning experiences"],
+        ],
+    },
+    Scene {
+        id: "weekend_plans",
+        tutor_role: "friend",
+        learner_role: "friend",
+        goal: "agree an activity, place and time",
+        filler: "Hmm, ek minute…",
+        beats: [
+            beat("choose an activity", "Weekend pe kya karein?", "Film ya ghoomna?"),
+            beat("choose a place", "Aur kahan milein?", "Mere ghar pe ya bazaar mein?"),
+            beat("agree a time", "Tumhe kitne baje theek rahega?", "Teen baje ya paanch baje?"),
+            beat("confirm the plan", "Toh pakka, Shanivaar ko bazaar mein milte hain?", "Pakka, ya thoda der se?"),
+        ],
+        target_structures: [
+            ["chalo … karein?", "Shanivaar ko / teen baje"],
+            ["main … karna chahunga / chahungi", "kya tumhe … achha lagega?"],
+            ["negotiate alternatives", "hypothetical plans"],
+        ],
+    },
+    Scene {
+        id: "shopping",
+        tutor_role: "shop assistant",
+        learner_role: "customer",
+        goal: "choose an item, compare options and buy it",
+        filler: "Ek minute…",
+        beats: [
+            beat("identify an item", "Namaste! Boliye, aapko kya chahiye?", "Kurta ya T-shirt?"),
+            beat("choose size and color", "Aapko kaun sa size aur kaun sa rang chahiye?", "Neela medium ya kaala large?"),
+            beat("compare an alternative", "Yeh ek aur design hai. Aapko kaun sa zyada pasand aaya?", "Pehla ya doosra?"),
+            beat("ask price and decide", "Yeh hamara sabse popular design hai. Aap kuch aur poochna chahenge?", "Daam ke baare mein ya size ke baare mein?"),
+        ],
+        target_structures: [
+            ["mujhe … chahiye", "yeh kitne ka hai?"],
+            ["mujhe … size mein chahiye", "yeh mujhe … se zyada pasand hai"],
+            ["compare value", "negotiate politely"],
+        ],
+    },
+    Scene {
+        id: "asking_directions",
+        tutor_role: "helpful pedestrian",
+        learner_role: "visitor",
+        goal: "find a destination and check the route",
+        filler: "Hmm, ek minute…",
+        beats: [
+            beat("ask for a destination", "Namaste, koi madad chahiye? Aapko kahan jaana hai?", "Station ya museum?"),
+            beat("establish a landmark", "Aap yahan kuch pehchaante hain, jaise mandir ya bazaar?", "Mandir ya bazaar?"),
+            beat("explain and confirm a route", "Seedha mandir tak jaaiye, phir baayen mud jaaiye. Aap paidal jaayenge ya bus se?", "Paidal ya bus se?"),
+            beat("check understanding and finish", "Toh ab aap kaise jaayenge?", "Pehle seedha ya pehle baayen?"),
+        ],
+        target_structures: [
+            ["… kahan hai?", "main … kaise jaaun?"],
+            ["kya aap bata sakte hain ki … kahan hai?", "mujhe … mudna hoga"],
+            ["clarify ambiguous directions", "compare routes"],
+        ],
+    },
+    Scene {
+        id: "hotel_checkin",
+        tutor_role: "hotel receptionist",
+        learner_role: "guest",
+        goal: "check in, ask about facilities and agree checkout",
+        filler: "Ek minute…",
+        beats: [
+            beat("greet and confirm reservation", "Namaste! Kya aapki booking hai?", "Booking hai ya nahi?"),
+            beat("choose a room", "Aapko kaisa kamra chahiye?", "Single ya double?"),
+            beat("ask about facilities", "Hotel ke baare mein kuch aur poochna hai?", "Naashta ya wifi?"),
+            beat("agree checkout and finish", "Aur aap kab tak rukenge?", "Ravivaar tak ya Somvaar tak?"),
+        ],
+        target_structures: [
+            ["meri booking … ke naam se hai", "kya yahan … hai?"],
+            ["mujhe … waala kamra chahiye", "checkout kab tak karna hoga?"],
+            ["request an accommodation", "resolve a reservation problem"],
+        ],
+    },
+    Scene {
+        id: "planning_party",
+        tutor_role: "friend helping organize",
+        learner_role: "party organizer",
+        goal: "plan guests, food, activities and timing",
+        filler: "Sochne do…",
+        beats: [
+            beat("decide who is invited", "Tumhare hisaab se kis kis ko bulayein?", "Sirf dost ya parivaar bhi?"),
+            beat("choose food", "Aur khaane mein kya rakhein?", "Pizza ya samose?"),
+            beat("choose an activity", "Party mein kya karenge?", "Gaane ya khel?"),
+            beat("confirm when and finish", "Party kab rakhein?", "Shukravaar ya Shanivaar?"),
+        ],
+        target_structures: [
+            ["hum … ko bulayenge", "khaane mein … hoga"],
+            ["hum … kar sakte hain", "chalo … karte hain"],
+            ["coordinate preferences", "negotiate constraints"],
+        ],
+    },
+];
+
 /// Scenes for a language id. Spanish (`"es"`) is served by
 /// `crate::spanish::scenes` and returns `None` here.
 pub fn scenes_for(language_id: &str) -> Option<&'static [Scene; 8]> {
@@ -1096,12 +1243,13 @@ pub fn scenes_for(language_id: &str) -> Option<&'static [Scene; 8]> {
         "it" => Some(&ITALIAN_SCENES),
         "pt" => Some(&PORTUGUESE_SCENES),
         "zh" => Some(&MANDARIN_SCENES),
+        "hi" => Some(&HINDI_SCENES),
         _ => None,
     }
 }
 
 /// Language ids this module carries scenes for.
-pub static SCENE_LANGUAGES: [&str; 7] = ["nb", "en", "fr", "de", "it", "pt", "zh"];
+pub static SCENE_LANGUAGES: [&str; 8] = ["nb", "en", "fr", "de", "it", "pt", "zh", "hi"];
 
 
 #[cfg(test)]
@@ -1259,5 +1407,71 @@ mod tests {
         let scene = &scenes[0];
         assert_eq!(scene.beat(0).goal, scene.beats[0].goal);
         assert_eq!(scene.beat(99).goal, scene.beats[3].goal);
+    }
+
+    /// Hindi is taught in Roman script by design (docs/SCENE-AUTHORING.md):
+    /// learners speak it and never read Devanagari, so no learner-facing
+    /// string may contain a Devanagari codepoint (U+0900..=U+097F) or an IAST
+    /// diacritic. Plain ASCII letters only.
+    #[test]
+    fn hindi_content_is_roman_script_only() {
+        let hi = scenes_for("hi").unwrap();
+        for scene in hi.iter() {
+            let mut texts = vec![scene.filler];
+            for beat in scene.beats.iter() {
+                texts.push(beat.opener);
+                texts.push(beat.options);
+            }
+            for row in &scene.target_structures[..2] {
+                texts.extend(row.iter().copied());
+            }
+            for text in texts {
+                assert!(
+                    !text.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)),
+                    "Hindi {} contains Devanagari: {text}",
+                    scene.id
+                );
+                assert!(
+                    text.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_ascii()),
+                    "Hindi {} contains a non-ASCII letter (IAST diacritic?): {text}",
+                    scene.id
+                );
+            }
+        }
+    }
+
+    /// Service scenes address the learner as aap, peer scenes as tum, and no
+    /// scene mixes the two. tu is never modelled.
+    #[test]
+    fn hindi_register_is_split_by_scene_and_never_mixed() {
+        let hi = scenes_for("hi").unwrap();
+        let service = ["ordering_food", "shopping", "hotel_checkin", "asking_directions"];
+        let aap = ["aap", "aapko", "aapka", "aapki", "aapke", "aapne"];
+        let tum = ["tum", "tumhe", "tumhara", "tumhari", "tumhare", "tumne"];
+        let words = |text: &str| -> Vec<String> {
+            text.split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .map(|w| w.to_lowercase())
+                .collect()
+        };
+        for scene in hi.iter() {
+            let mut has_aap = false;
+            let mut has_tum = false;
+            for beat in scene.beats.iter() {
+                for text in [beat.opener, beat.options] {
+                    for w in words(text) {
+                        assert_ne!(w, "tu", "Hindi {} models tu: {text}", scene.id);
+                        has_aap |= aap.contains(&w.as_str());
+                        has_tum |= tum.contains(&w.as_str());
+                    }
+                }
+            }
+            assert!(!(has_aap && has_tum), "Hindi {} mixes aap and tum", scene.id);
+            if service.contains(&scene.id) {
+                assert!(has_aap && !has_tum, "Hindi service scene {} should use aap", scene.id);
+            } else {
+                assert!(has_tum && !has_aap, "Hindi peer scene {} should use tum", scene.id);
+            }
+        }
     }
 }

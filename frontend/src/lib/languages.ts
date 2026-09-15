@@ -5,7 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 /** Stable storage keys. Never rename: profiles persist these. */
-export type LanguageId = 'nb' | 'es' | 'en' | 'fr' | 'de' | 'it' | 'pt' | 'zh';
+export type LanguageId = 'nb' | 'es' | 'en' | 'fr' | 'de' | 'it' | 'pt' | 'zh' | 'hi';
 
 export interface LanguageSummary {
   id: LanguageId;

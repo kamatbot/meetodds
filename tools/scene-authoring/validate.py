@@ -147,6 +147,35 @@ def check(path):
             if re.search(r"\bDe\b|\bDem\b", txt):
                 warns.append(f"[{s.get('id')}] archaic formal 'De' — Norwegian uses du")
 
+    if lang == "hi":
+        # Hindi is taught in Roman script by design (docs/SCENE-AUTHORING.md):
+        # learners speak it and never read Devanagari. No Devanagari codepoint
+        # and no IAST diacritic may reach a learner.
+        deva = sorted({c for c in blob if "\u0900" <= c <= "\u097f"})
+        if deva:
+            errs.append(f"Hindi content contains Devanagari: {deva[:8]}")
+        nonascii = sorted({c for c in blob if c.isalpha() and not c.isascii()})
+        if nonascii:
+            errs.append(f"Hindi content contains non-ASCII letters (IAST diacritics?): {nonascii}")
+        # One spelling per word: the decided forms are in languages/text_policy.rs.
+        banned = re.findall(r"\b(nahin|kyaa|chaahiye|hein|tumhein|voh|vahan|acha|accha|thik)\b", blob, re.I)
+        if banned:
+            errs.append(f"Hindi content uses a non-canonical spelling: {sorted(set(w.lower() for w in banned))}")
+        # aap in service scenes, tum in peer scenes, never mixed, never tu.
+        service = {"ordering_food", "shopping", "hotel_checkin", "asking_directions"}
+        for s in scenes:
+            txt = " ".join(b.get("opener","")+" "+b.get("options","") for b in s.get("beats",[]))
+            aap = re.search(r"\baap(ko|ka|ki|ke|ne)?\b", txt, re.I)
+            tum = re.search(r"\btum(he|hara|hari|hare|ne)?\b", txt, re.I)
+            if re.search(r"\btu\b", txt, re.I):
+                errs.append(f"[{s.get('id')}] models tu to the learner")
+            if aap and tum:
+                errs.append(f"[{s.get('id')}] mixes aap and tum")
+            elif s.get("id") in service and not aap:
+                errs.append(f"[{s.get('id')}] service scene should address the learner as aap")
+            elif s.get("id") not in service and not tum:
+                errs.append(f"[{s.get('id')}] peer scene should address the learner as tum")
+
     # duplicate openers across scenes suggest padding
     openers = [b.get("opener","") for s in scenes for b in s.get("beats",[])]
     dupes = {o for o in openers if openers.count(o) > 1 and o}

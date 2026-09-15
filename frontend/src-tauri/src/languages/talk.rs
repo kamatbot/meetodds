@@ -556,6 +556,69 @@ pub static MANDARIN_TALK: TalkContent = TalkContent {
     ],
 };
 
+pub static HINDI_TALK: TalkContent = TalkContent {
+    language_id: "hi",
+    closing: "Bahut badhiya, ho gaya! Phir se practice karein ya kisi aur topic pe baat karein?",
+    talk_fallback: "Tumhe khaali waqt mein kya karna achha lagta hai?",
+    scaffold_fallback: "Khaane ke baare mein baat karein ya khel ke baare mein?",
+    dial_instructions: [
+        "ONE short question only (max 10 words), in the simple present (hai/hain, karte ho), a single clause: either a kya yes/no question or one question word (kya, kaun, kahan, kab). No ki-clauses. Nothing before the question.",
+        "At most two short sentences with familiar vocabulary; simple present or simple past (tha/thi/the, or the perfective with ne); no ki or agar clauses; end with a question.",
+        "Natural sentences; use the perfective past with ne, the habitual past (karta tha / karti thi) and ki, kyunki and agar clauses; invite reasons and past experiences.",
+        "Natural idioms and discourse particles (toh, hi, bhi, na), the subjunctive and counterfactual (agar … hota toh), the presumptive (hoga) and nuanced follow-up questions.",
+    ],
+    topics: [
+        Topic {
+            id: "family",
+            openers: [
+                ["Tumhe apne parivaar ke saath kya karna pasand hai?", "Ghar pe tum sabse zyada kisse baat karte ho?", "Weekend pe tum sab saath mein kya karte ho?"],
+                ["Pichhle weekend tumne parivaar ke saath kya kiya?", "Tumhare parivaar ki kaun si parampara tumhe sabse achhi lagti hai?", "Waqt ke saath tumhara parivaar kaise badla hai?"],
+                ["Parivaar ki kaun si aadat tum hamesha ke liye rakhna chahoge?", "Ghar pe koi matbhed ho toh tum use kaise suljhaoge?", "Tumne apne parivaar mein kisi se kya seekha hai?"],
+            ],
+        },
+        Topic {
+            id: "school",
+            openers: [
+                ["Tumhe kaun sa subject sabse zyada pasand hai?", "Tum break mein kya karte ho?", "Tumhari class kaisi hai?"],
+                ["Is hafte tumne kya naya seekha?", "Apne timetable mein tum kya badalna chahoge?", "Tum kisi project ki taiyaari kaise karte ho?"],
+                ["Ek class ko mazedaar kya banata hai?", "Tumhara ideal school kaisa hota?", "Zyada zaroori kya hai: ratna ya samajhna?"],
+            ],
+        },
+        Topic {
+            id: "sports",
+            openers: [
+                ["Tumhe kaun sa khel pasand hai?", "Tum khud khelna pasand karte ho ya dekhna?", "Tum khel kahan khelte ho?"],
+                ["Tumne yeh khel kab shuru kiya?", "Tumne jo aakhri match dekha, woh kaisa tha?", "Tum kaun sa naya khel try karna chahoge?"],
+                ["Team mein tumhare liye sabse zaroori kya hai?", "Apne pasandeeda khel ke niyam tum kaise badloge?", "Khel tumhari zindagi pe kaisa asar daalta hai?"],
+            ],
+        },
+        Topic {
+            id: "food",
+            openers: [
+                ["Tumhara pasandeeda khaana kya hai?", "Tum naashte mein aam taur pe kya khaate ho?", "Tumhe meetha zyada pasand hai ya namkeen?"],
+                ["Kal tumne kya banaya ya khaaya?", "Tum kaun si dish banaana seekhna chahoge?", "Haal mein tumne pehli baar kya chakha?"],
+                ["Kaun sa khaana tumhe kisi jagah ki sabse zyada yaad dilata hai?", "Saalon mein tumhara swaad kaise badla hai?", "Kisi khaane ko yaadgaar kya banata hai?"],
+            ],
+        },
+        Topic {
+            id: "travel",
+            openers: [
+                ["Tum kahan ghoomne jaana chahte ho?", "Tumhe samundar zyada pasand hai ya pahaad?", "Tumhare bag mein kya kya hai?"],
+                ["Tumhari pichhli chhutti kaisi thi?", "Kis jagah ne tumhe sabse zyada hairaan kiya?", "Tum ek chhoti trip kaise plan karoge?"],
+                ["Safar mein tumne aisa kya seekha jiski ummeed nahi thi?", "Aaram aur adventure mein se tum kaise chunoge?", "Kisi nayi jagah pe tumhe ghar jaisa ehsaas kya deta hai?"],
+            ],
+        },
+        Topic {
+            id: "games",
+            openers: [
+                ["Tumhara pasandeeda game kaun sa hai?", "Tum kiske saath khelna pasand karte ho?", "Tumhe board game zyada pasand hai ya video game?"],
+                ["Tumne apna pasandeeda game kaise seekha?", "Tumhare pichhle game mein kya hua?", "Tum kisi dost ko kaun sa game suggest karoge?"],
+                ["Koi game lambe waqt tak mazedaar kaise rehta hai?", "Tum ek saath milke khelne waala game kaise banaoge?", "Apne pasandeeda game mein tum kya badloge, aur kyun?"],
+            ],
+        },
+    ],
+};
+
 /// Free-talk content for a language id, or `None` if it is not a known id.
 pub fn talk_for(language_id: &str) -> Option<&'static TalkContent> {
     match language_id {
@@ -567,12 +630,13 @@ pub fn talk_for(language_id: &str) -> Option<&'static TalkContent> {
         "it" => Some(&ITALIAN_TALK),
         "pt" => Some(&PORTUGUESE_TALK),
         "zh" => Some(&MANDARIN_TALK),
+        "hi" => Some(&HINDI_TALK),
         _ => None,
     }
 }
 
 /// Every language this module carries free-talk content for.
-pub static TALK_LANGUAGES: [&str; 8] = ["nb", "es", "en", "fr", "de", "it", "pt", "zh"];
+pub static TALK_LANGUAGES: [&str; 9] = ["nb", "es", "en", "fr", "de", "it", "pt", "zh", "hi"];
 
 
 #[cfg(test)]
@@ -588,7 +652,7 @@ mod tests {
 
     #[test]
     fn every_language_is_complete() {
-        assert_eq!(TALK_LANGUAGES.len(), 8);
+        assert_eq!(TALK_LANGUAGES.len(), 9);
         for t in all() {
             assert!(!t.closing.trim().is_empty(), "{}", t.language_id);
             assert!(!t.talk_fallback.trim().is_empty(), "{}", t.language_id);
@@ -712,6 +776,41 @@ mod tests {
                 let latin = d.chars().filter(|c| c.is_ascii_alphabetic()).count();
                 assert!(latin >= 20, "{} dial instruction not English: {d}", t.language_id);
             }
+        }
+    }
+
+    /// Hindi is taught in Roman script by design (docs/SCENE-AUTHORING.md):
+    /// no learner-facing string may carry a Devanagari codepoint
+    /// (U+0900..=U+097F) or an IAST diacritic, and the register is tum.
+    #[test]
+    fn hindi_learner_text_is_roman_script_only_and_peer_register() {
+        let hi = talk_for("hi").expect("hindi present");
+        let mut texts = vec![hi.closing, hi.talk_fallback, hi.scaffold_fallback];
+        for topic in hi.topics.iter() {
+            for row in topic.openers.iter() {
+                texts.extend(row.iter().copied());
+            }
+        }
+        let mut has_tum = false;
+        for text in texts {
+            assert!(
+                !text.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)),
+                "Hindi learner text contains Devanagari: {text}"
+            );
+            assert!(
+                text.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_ascii()),
+                "Hindi learner text contains a non-ASCII letter: {text}"
+            );
+            for w in text.split(|c: char| !c.is_alphanumeric()).map(str::to_lowercase) {
+                assert!(!w.starts_with("aap"), "Hindi free talk is peer register, not aap: {text}");
+                assert_ne!(w, "tu", "Hindi never models tu: {text}");
+                has_tum |= w.starts_with("tum");
+            }
+        }
+        assert!(has_tum);
+        // Pacing instructions name Hindi structures but stay in Roman script too.
+        for d in hi.dial_instructions.iter() {
+            assert!(!d.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)), "{d}");
         }
     }
 }

@@ -26,6 +26,11 @@ pub enum At {
     /// The length gate keeps short function words (fr `les`, `chez`, en
     /// `our`, `hour`) out of rules meant for open-class words.
     WordEnd { min_len: usize },
+    /// Only when the whole token equals `from`. For languages with no fixed
+    /// spelling (Roman Hindi `nahi`/`nahin`, `kya`/`kyaa`) a variant is a
+    /// property of the word, not of a letter sequence: `Anywhere` rules would
+    /// fold substrings of unrelated words.
+    Word,
 }
 
 /// One ASR confusion the tutor forgives: `from` and `to` sound the same in the
@@ -46,6 +51,9 @@ const fn word_start(from: &'static str, to: &'static str) -> Equivalence {
 }
 const fn word_end(from: &'static str, to: &'static str, min_len: usize) -> Equivalence {
     Equivalence { from, to, at: At::WordEnd { min_len } }
+}
+const fn word(from: &'static str, to: &'static str) -> Equivalence {
+    Equivalence { from, to, at: At::Word }
 }
 
 /// What the learner's utterance is, before the model sees it. Mirrors
@@ -263,6 +271,11 @@ impl TextPolicy {
                     })
                     .collect::<Vec<_>>()
                     .join(" "),
+                At::Word => key
+                    .split(' ')
+                    .map(|w| if w == rule.from { rule.to.to_string() } else { w.to_string() })
+                    .collect::<Vec<_>>()
+                    .join(" "),
             };
         }
         key
@@ -467,6 +480,27 @@ fn fold_norwegian(c: char) -> Option<&'static str> {
         'æ' => None,
         other => fold_latin(other),
     }
+}
+
+/// Roman Hindi: learner-facing content is plain ASCII by design, but a model
+/// or keyboard can still produce IAST (`ā ī ū ṭ ḍ ṇ ṃ ś ṣ ṛ`). Those marks
+/// carry information a Roman-Hindi learner never sees, so they fold to the
+/// everyday spelling (`ā`→`a`, `ṭ`→`t`, `ś`/`ṣ`→`sh`, `ṛ`→`ri`). Ordinary Latin
+/// accents fold like the generic table.
+fn fold_roman_hindi(c: char) -> Option<&'static str> {
+    Some(match c {
+        'ā' => "a",
+        'ī' => "i",
+        'ū' => "u",
+        'ṭ' => "t",
+        'ḍ' => "d",
+        'ṇ' | 'ṅ' | 'ṃ' | 'ṁ' | 'ñ' => "n",
+        'ś' | 'ṣ' => "sh",
+        'ṛ' => "ri",
+        'ḷ' => "l",
+        'ḥ' => "h",
+        other => return fold_latin(other),
+    })
 }
 
 /// Mandarin: nothing is folded and every codepoint is kept. Tones are not in
@@ -786,6 +820,145 @@ pub static MANDARIN_TEXT: TextPolicy = TextPolicy {
     noise_words: &["silence", "inaudible", "music", "unintelligible", "音乐", "沉默"],
 };
 
+/// Hindi in ROMAN SCRIPT. Learners speak Hindi and never read Devanagari, so
+/// every string here is plain ASCII (see `languages::HINDI` and
+/// docs/SCENE-AUTHORING.md).
+///
+/// Romanisation decisions, fixed once and used across all Hindi content
+/// (scenes, free talk, guidance, grammar wording) so the tutor is internally
+/// consistent even though learners and ASR will not be:
+///   hai / hain (not he, hein)     nahi (not nahin, nahee)    kya (not kyaa)
+///   chahiye (not chaahiye)        mein = in, main = I         toh = then/so
+///   aap, aapko, aapka; tum, tumhe, tumhara (tu is never modelled)
+///   yeh / woh, yahan / wahan / kahan (w, not v)   kyun, kaun sa, kaise
+///   achha (not acha, accha)       theek (not thik)           bahut (not bohot)
+///   zyada, zaroori (z, not j)     phir, pehle (ph)           kuch, chhoti (chh)
+///   long a as aa in the stressed stem: khaana, jaana, paani, naam, saath, baat
+///   -ein for the subjunctive (karein, milein), -enge/-oge for the future.
+///
+/// Roman Hindi collides head-on with English function words: `main` (I),
+/// `to`/`toh` (then), `is` (this, oblique), `do` (two), `the` (were), `in`
+/// (these), `so` (sleep), `or` (and), `are` (hey), `me` (in), `hum` (we),
+/// `bad` (after), `sun` (listen). `main`, `me`, `hum`, `bad` and `sun` are not
+/// in the shared English evidence list, so they need nothing; of the rest,
+/// `the is do to so or` are subtracted as homographs so
+/// a correct Hindi sentence such as "main to bas yahi keh raha tha" is never
+/// read as the learner giving up, and a judge suggestion such as "hum bazaar
+/// gaye the" is never rejected as English (`the` is otherwise a STRONG token).
+/// `in` and `are` stay as evidence: they are rare in learner Hindi, and every
+/// homograph removed also weakens detection of a genuine English fallback.
+/// Everyday English loanwords (bus, time, phone, class) are ordinary Hindi and
+/// are neither evidence of mixing nor errors.
+pub static HINDI_TEXT: TextPolicy = TextPolicy {
+    id: "hi",
+    native_id: "en",
+    whitespace_segmented: true,
+    keep_combining_marks: false,
+    native_letters: &[],
+    fold: fold_roman_hindi,
+    // Spelling variance is the norm in Roman Hindi, so `speech_equivalent`
+    // forgives the common variants of the most frequent words as WHOLE WORDS
+    // (raw spellings, before the letter rules below run), then `-ay` for `-e`
+    // (mujhay, kaisay, aisay), then letter pairs Hindi does not contrast:
+    // w/v, z/j, ph/f, q/k and chh/cch/ch. Vowel length is deliberately NOT
+    // folded (`kaam` work / `kam` less, `din` day / `deen` faith) and nasals
+    // are folded only in listed words (`kaha` said / `kahan` where).
+    equivalences: &[
+        word("hain", "hai"),
+        word("he", "hai"),
+        word("hein", "hai"),
+        word("hay", "hai"),
+        word("nahin", "nahi"),
+        word("nahee", "nahi"),
+        word("nhi", "nahi"),
+        word("nai", "nahi"),
+        word("kyaa", "kya"),
+        word("mujhay", "mujhe"),
+        word("mujhey", "mujhe"),
+        word("ap", "aap"),
+        word("apko", "aapko"),
+        word("apka", "aapka"),
+        word("apki", "aapki"),
+        word("apke", "aapke"),
+        word("kaisay", "kaise"),
+        word("kese", "kaise"),
+        word("kesa", "kaisa"),
+        word("kesi", "kaisi"),
+        word("toh", "to"),
+        word("me", "mein"),
+        word("mei", "mein"),
+        word("mai", "main"),
+        word("hun", "hoon"),
+        word("hu", "hoon"),
+        word("kyu", "kyun"),
+        word("kyon", "kyun"),
+        word("kyoon", "kyun"),
+        word("wo", "woh"),
+        word("vo", "woh"),
+        word("ye", "yeh"),
+        word("yaha", "yahan"),
+        word("yahaan", "yahan"),
+        word("waha", "wahan"),
+        word("wahaan", "wahan"),
+        word("vaha", "wahan"),
+        word("vahaan", "wahan"),
+        word("vahan", "wahan"),
+        word("thik", "theek"),
+        word("teek", "theek"),
+        word("bohot", "bahut"),
+        word("bahot", "bahut"),
+        word("bohut", "bahut"),
+        word("chaiye", "chahiye"),
+        word("chahie", "chahiye"),
+        word("chaahiye", "chahiye"),
+        word("or", "aur"),
+        word("koyi", "koi"),
+        word("haa", "haan"),
+        word("han", "haan"),
+        word("ha", "haan"),
+        word_end("ay", "e", 4),
+        anywhere("w", "v"),
+        anywhere("z", "j"),
+        anywhere("ph", "f"),
+        anywhere("q", "k"),
+        anywhere("cch", "ch"),
+        anywhere("chh", "ch"),
+    ],
+    native_homographs: &["the", "is", "do", "to", "so", "or"],
+    native_question_prefixes: &["what is the hindi", "what is the word"],
+    explanation_rejects: &["aap ", "tum ", "yahan ", "yeh ", "isko ", "iska ", "hindi mein "],
+    meta_words: &[
+        "repeat",
+        "repeat please",
+        "slower",
+        "again",
+        "phir se",
+        "phir se bolo",
+        "phir se boliye",
+        "dobara",
+        "dobara bolo",
+        "dobara boliye",
+        "ek baar aur",
+        "dheere",
+        "dheere bolo",
+        "dheere boliye",
+        "thoda dheere",
+        "samajh nahi aaya",
+        "mujhe samajh nahi aaya",
+        "samjha nahi",
+        "main samjha nahi",
+        "kya",
+        "kya bola",
+        "kya kaha",
+    ],
+    minimal_words: &[
+        "haan", "ha", "han", "ji", "ji haan", "ji nahi", "nahi", "nahin", "ok", "okay", "theek hai",
+        "thik hai", "theek", "achha", "accha", "acha", "pata nahi", "mujhe nahi pata", "shayad",
+        "bilkul", "sahi hai",
+    ],
+    noise_words: &["silence", "inaudible", "music", "unintelligible", "sangeet", "khamoshi"],
+};
+
 /// Safe fallback for an unknown or missing language id: generic Latin folding,
 /// no speech-equivalence (forgive nothing rather than the wrong thing), native
 /// mixing detection on (an unknown target cannot be English, which is
@@ -807,7 +980,7 @@ pub static DEFAULT_TEXT_POLICY: TextPolicy = TextPolicy {
 };
 
 /// Registry order matches `languages::LANGUAGES`.
-pub static TEXT_POLICIES: [&TextPolicy; 8] = [
+pub static TEXT_POLICIES: [&TextPolicy; 9] = [
     &NORWEGIAN_TEXT,
     &SPANISH_TEXT,
     &ENGLISH_TEXT,
@@ -816,6 +989,7 @@ pub static TEXT_POLICIES: [&TextPolicy; 8] = [
     &ITALIAN_TEXT,
     &PORTUGUESE_TEXT,
     &MANDARIN_TEXT,
+    &HINDI_TEXT,
 ];
 
 /// The text policy for a language id, or [`DEFAULT_TEXT_POLICY`] for an
@@ -1066,6 +1240,122 @@ mod tests {
         assert_eq!(nb.classify("jeg forstår ikke"), Intent::MetaRequest);
     }
 
+    // -- Hindi (Roman script) --------------------------------------------------
+
+    /// The case from the product brief: every token is Hindi, and `main`,
+    /// `to`, `the`, `is`, `do` look like English. Without homographs the mixing
+    /// detector would read correct Hindi as the learner giving up.
+    #[test]
+    fn hindi_roman_homographs_are_not_english_evidence() {
+        let hi = text_policy("hi");
+        let brief = "main to bas yahi keh raha tha";
+        assert!(!hi.is_native_mixed(brief));
+        assert!(!hi.contains_native(brief));
+        assert_eq!(hi.native_ratio(brief), 0.0);
+        assert_eq!(hi.classify(brief), Intent::TargetAttempt);
+        assert_eq!(hi.classify("Main toh bas yahi keh raha tha."), Intent::TargetAttempt);
+        assert!(!hi.is_native_mixed("woh log kal aaye the, is baar do din ke liye"));
+        assert!(!hi.contains_native("woh log kal aaye the"));
+        assert!(!hi.contains_native("hum bazaar gaye the"));
+        assert!(!hi.is_native_mixed("Tum so jao, main in sab ko dekh lunga"));
+        // Real English is still caught, including with the homographs removed.
+        assert!(hi.is_native_mixed("I want to order food"));
+        assert!(hi.is_native_mixed("What do you want?"));
+        assert!(hi.native_question("what is the Hindi for water"));
+        assert!(hi.native_question("how do you say thank you"));
+        assert!(hi.contains_native("mujhe please paani chahiye"));
+        // Loanwords are ordinary Hindi, not evidence of mixing.
+        assert!(!hi.is_native_mixed("main bus se office jaata hoon, phone ghar pe hai"));
+    }
+
+    #[test]
+    fn hindi_forgives_romanisation_variants_but_not_real_words() {
+        let hi = text_policy("hi");
+        let same = [
+            ("Aap kaise hain?", "ap kaisay hai"),
+            ("mujhe nahi chahiye", "mujhay nahin chaahiye"),
+            ("kya woh yahan hai", "kyaa vo yaha he"),
+            ("main toh bas yahi keh raha tha", "mai to bas yahi keh raha tha"),
+            ("bahut achha", "bohot accha"),
+            ("bahut achha", "bahut acha"),
+            ("zyada zaroori", "jyada jaroori"),
+            ("phir se boliye", "fir se boliye"),
+            ("theek hai", "thik he"),
+            ("ghar mein", "ghar me"),
+            ("main hoon", "mai hun"),
+            ("kyun nahi", "kyon nhi"),
+            ("haan, wahan", "han, vahan"),
+            ("aapko kya chahiye", "apko kya chaiye"),
+        ];
+        for (a, b) in same {
+            assert!(hi.speech_equivalent(a, b), "{a:?} vs {b:?}");
+        }
+        let different = [
+            ("kaam", "kam"),
+            ("kaha", "kahan"),
+            ("apne", "aapne"),
+            ("din", "deen"),
+            ("pakka", "paka"),
+            ("baat", "bat"),
+            ("hai", "ho"),
+            ("mujhe", "tumhe"),
+            ("aap kaise hain", "tum kaise ho"),
+        ];
+        for (a, b) in different {
+            assert!(!hi.speech_equivalent(a, b), "{a:?} vs {b:?}");
+        }
+        // IAST from a model or keyboard folds to the everyday spelling.
+        assert_eq!(hi.normalize("Āp kyā pīnā chāhenge?"), "ap kya pina chahenge");
+        assert_eq!(hi.normalize("ṭhīk hai, śukriyā"), "thik hai shukriya");
+        assert!(hi.speech_equivalent("Āp kyā chāhenge?", "aap kya chahenge"));
+        assert!(hi.speech_equivalent("ṭhīk hai", "theek hai"));
+        // IAST marks every long vowel while everyday spelling marks only some
+        // (pīnā / peena), so the fold is best-effort, not a guarantee.
+        assert!(!hi.speech_equivalent("pīnā", "peena"));
+        // A whole-word rule never touches a longer word that merely contains it.
+        assert!(!hi.speech_equivalent("apne", "aapne"));
+        assert!(!hi.speech_equivalent("mehnat", "mainhnat"));
+    }
+
+    #[test]
+    fn hindi_control_words_and_script_are_roman() {
+        let hi = text_policy("hi");
+        for s in ["haan", "Theek hai", "ji haan", "nahi", "pata nahi", "achha"] {
+            assert_eq!(hi.classify(s), Intent::Minimal, "{s}");
+        }
+        for s in ["phir se", "Dheere boliye", "kya?", "samajh nahi aaya", "repeat"] {
+            assert_eq!(hi.classify(s), Intent::MetaRequest, "{s}");
+        }
+        assert_eq!(hi.classify("[music]"), Intent::EmptyOrNoise);
+        assert_eq!(hi.classify("sangeet"), Intent::EmptyOrNoise);
+        assert_eq!(hi.classify("Aap kya peena chahenge?"), Intent::TargetAttempt);
+        assert!(hi.contains_phrase("Mujhe ek chai chahiye", "chai chahiye"));
+        assert!(!hi.contains_phrase("Mujhe chaiwala chahiye", "chai chahiye"));
+        // Judge explanations must be English, not Roman Hindi. Note `the` and
+        // `is` are Hindi homographs, so they no longer count as English here.
+        assert!(hi.native_explanation("Use ne because the verb is transitive and in the past."));
+        assert!(hi.native_explanation("The verb must agree with the subject."));
+        assert!(!hi.native_explanation("Aap yahan ne lagaiye."));
+        assert!(!hi.native_explanation("Yeh galat hai, tum ne bolo."));
+        // Every string in the policy is plain ASCII: no Devanagari, no IAST.
+        let all = hi
+            .meta_words
+            .iter()
+            .chain(hi.minimal_words)
+            .chain(hi.noise_words)
+            .chain(hi.native_homographs)
+            .chain(hi.native_question_prefixes)
+            .chain(hi.explanation_rejects)
+            .copied()
+            .chain(hi.equivalences.iter().flat_map(|e| [e.from, e.to]));
+        for w in all {
+            assert!(w.is_ascii(), "{w:?} is not plain ASCII");
+        }
+        // Devanagari input never panics and never matches Roman content.
+        assert!(!hi.speech_equivalent("नमस्ते", "namaste"));
+        assert!(!hi.contains_phrase("नमस्ते", "namaste"));
+    }
+
     // -- Registry and robustness -----------------------------------------------
 
     #[test]
@@ -1083,7 +1373,7 @@ mod tests {
         }
         assert_eq!(
             TEXT_POLICIES.iter().map(|p| p.id).collect::<Vec<_>>(),
-            ["nb", "es", "en", "fr", "de", "it", "pt", "zh"]
+            ["nb", "es", "en", "fr", "de", "it", "pt", "zh", "hi"]
         );
     }
 

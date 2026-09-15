@@ -1,0 +1,149 @@
+{
+  "language_id": "hi",
+  "scenes": [
+    {
+      "id": "ordering_food",
+      "tutor_role": "waiter",
+      "learner_role": "customer",
+      "goal": "order food and a drink, then ask for the bill",
+      "filler": "Hmm, ek minute…",
+      "beats": [
+        {"goal": "greet and choose a drink", "opener": "Namaste! Aap kya peena chahenge?", "options": "Paani ya chai?"},
+        {"goal": "order food; offer a dish", "opener": "Aaj hamare paas dal, paneer aur biryani hai. Aap kya khaana chahenge?", "options": "Paneer ya biryani?"},
+        {"goal": "ask how the food tastes", "opener": "Khaana kaisa laga aapko?", "options": "Bahut achha ya bas theek-theek?"},
+        {"goal": "ask for the bill and finish", "opener": "Kuch aur chahiye, ya bill le aaun?", "options": "Kuch aur ya bill?"}
+      ],
+      "target_structures": [
+        ["mujhe … chahiye", "kya aapke paas … hai?"],
+        ["main … lena chahunga / chahungi", "kya aap … la sakte hain?"],
+        ["conditional politeness", "complaining politely"]
+      ]
+    },
+    {
+      "id": "meeting_someone",
+      "tutor_role": "new acquaintance",
+      "learner_role": "new acquaintance",
+      "goal": "introduce yourself and find a shared interest",
+      "filler": "Ek minute…",
+      "beats": [
+        {"goal": "exchange names", "opener": "Hello! Tumhara naam kya hai?", "options": "Tumhara naam Priya hai ya kuch aur?"},
+        {"goal": "say where you live", "opener": "Aur tum kahan se ho?", "options": "Dilli se ya kahin aur se?"},
+        {"goal": "find a shared interest", "opener": "Tumhe khaali waqt mein kya karna pasand hai?", "options": "Cricket ya gaane?"},
+        {"goal": "suggest another conversation", "opener": "Phir kabhi milke baat karein?", "options": "Kal ya weekend pe?"}
+      ],
+      "target_structures": [
+        ["mera naam … hai", "mujhe … pasand hai"],
+        ["main … se hoon", "mujhe … mein dilchaspi hai"],
+        ["shared interests", "polite invitations"]
+      ]
+    },
+    {
+      "id": "school_day",
+      "tutor_role": "classmate",
+      "learner_role": "student",
+      "goal": "talk about subjects, a class project and after-school activities",
+      "filler": "Sochne do…",
+      "beats": [
+        {"goal": "name a favorite subject", "opener": "Tumhara favourite subject kaun sa hai?", "options": "Maths ya Hindi?"},
+        {"goal": "describe a class", "opener": "Aaj ki class kaisi thi?", "options": "Mazedaar ya boring?"},
+        {"goal": "describe a project or activity", "opener": "Class mein abhi tum log kya kar rahe ho?", "options": "Koi project ya presentation?"},
+        {"goal": "arrange an after-school activity", "opener": "School ke baad kuch saath karein?", "options": "Padhai ya cricket?"}
+      ],
+      "target_structures": [
+        ["mujhe … pasand hai", "… kaisa hai / kaisi hai?"],
+        ["mujhe lagta hai ki …", "hum … kar rahe hain"],
+        ["explain an opinion", "compare learning experiences"]
+      ]
+    },
+    {
+      "id": "weekend_plans",
+      "tutor_role": "friend",
+      "learner_role": "friend",
+      "goal": "agree an activity, place and time",
+      "filler": "Hmm, ek minute…",
+      "beats": [
+        {"goal": "choose an activity", "opener": "Weekend pe kya karein?", "options": "Film ya ghoomna?"},
+        {"goal": "choose a place", "opener": "Aur kahan milein?", "options": "Mere ghar pe ya bazaar mein?"},
+        {"goal": "agree a time", "opener": "Tumhe kitne baje theek rahega?", "options": "Teen baje ya paanch baje?"},
+        {"goal": "confirm the plan", "opener": "Toh pakka, Shanivaar ko bazaar mein milte hain?", "options": "Pakka, ya thoda der se?"}
+      ],
+      "target_structures": [
+        ["chalo … karein?", "Shanivaar ko / teen baje"],
+        ["main … karna chahunga / chahungi", "kya tumhe … achha lagega?"],
+        ["negotiate alternatives", "hypothetical plans"]
+      ]
+    },
+    {
+      "id": "shopping",
+      "tutor_role": "shop assistant",
+      "learner_role": "customer",
+      "goal": "choose an item, compare options and buy it",
+      "filler": "Ek minute…",
+      "beats": [
+        {"goal": "identify an item", "opener": "Namaste! Boliye, aapko kya chahiye?", "options": "Kurta ya T-shirt?"},
+        {"goal": "choose size and color", "opener": "Aapko kaun sa size aur kaun sa rang chahiye?", "options": "Neela medium ya kaala large?"},
+        {"goal": "compare an alternative", "opener": "Yeh ek aur design hai. Aapko kaun sa zyada pasand aaya?", "options": "Pehla ya doosra?"},
+        {"goal": "ask price and decide", "opener": "Yeh hamara sabse popular design hai. Aap kuch aur poochna chahenge?", "options": "Daam ke baare mein ya size ke baare mein?"}
+      ],
+      "target_structures": [
+        ["mujhe … chahiye", "yeh kitne ka hai?"],
+        ["mujhe … size mein chahiye", "yeh mujhe … se zyada pasand hai"],
+        ["compare value", "negotiate politely"]
+      ]
+    },
+    {
+      "id": "asking_directions",
+      "tutor_role": "helpful pedestrian",
+      "learner_role": "visitor",
+      "goal": "find a destination and check the route",
+      "filler": "Hmm, ek minute…",
+      "beats": [
+        {"goal": "ask for a destination", "opener": "Namaste, koi madad chahiye? Aapko kahan jaana hai?", "options": "Station ya museum?"},
+        {"goal": "establish a landmark", "opener": "Aap yahan kuch pehchaante hain, jaise mandir ya bazaar?", "options": "Mandir ya bazaar?"},
+        {"goal": "explain and confirm a route", "opener": "Seedha mandir tak jaaiye, phir baayen mud jaaiye. Aap paidal jaayenge ya bus se?", "options": "Paidal ya bus se?"},
+        {"goal": "check understanding and finish", "opener": "Toh ab aap kaise jaayenge?", "options": "Pehle seedha ya pehle baayen?"}
+      ],
+      "target_structures": [
+        ["… kahan hai?", "main … kaise jaaun?"],
+        ["kya aap bata sakte hain ki … kahan hai?", "mujhe … mudna hoga"],
+        ["clarify ambiguous directions", "compare routes"]
+      ]
+    },
+    {
+      "id": "hotel_checkin",
+      "tutor_role": "hotel receptionist",
+      "learner_role": "guest",
+      "goal": "check in, ask about facilities and agree checkout",
+      "filler": "Ek minute…",
+      "beats": [
+        {"goal": "greet and confirm reservation", "opener": "Namaste! Kya aapki booking hai?", "options": "Booking hai ya nahi?"},
+        {"goal": "choose a room", "opener": "Aapko kaisa kamra chahiye?", "options": "Single ya double?"},
+        {"goal": "ask about facilities", "opener": "Hotel ke baare mein kuch aur poochna hai?", "options": "Naashta ya wifi?"},
+        {"goal": "agree checkout and finish", "opener": "Aur aap kab tak rukenge?", "options": "Ravivaar tak ya Somvaar tak?"}
+      ],
+      "target_structures": [
+        ["meri booking … ke naam se hai", "kya yahan … hai?"],
+        ["mujhe … waala kamra chahiye", "checkout kab tak karna hoga?"],
+        ["request an accommodation", "resolve a reservation problem"]
+      ]
+    },
+    {
+      "id": "planning_party",
+      "tutor_role": "friend helping organize",
+      "learner_role": "party organizer",
+      "goal": "plan guests, food, activities and timing",
+      "filler": "Sochne do…",
+      "beats": [
+        {"goal": "decide who is invited", "opener": "Tumhare hisaab se kis kis ko bulayein?", "options": "Sirf dost ya parivaar bhi?"},
+        {"goal": "choose food", "opener": "Aur khaane mein kya rakhein?", "options": "Pizza ya samose?"},
+        {"goal": "choose an activity", "opener": "Party mein kya karenge?", "options": "Gaane ya khel?"},
+        {"goal": "confirm when and finish", "opener": "Party kab rakhein?", "options": "Shukravaar ya Shanivaar?"}
+      ],
+      "target_structures": [
+        ["hum … ko bulayenge", "khaane mein … hoga"],
+        ["hum … kar sakte hain", "chalo … karte hain"],
+        ["coordinate preferences", "negotiate constraints"]
+      ]
+    }
+  ]
+}

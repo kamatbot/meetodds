@@ -1,9 +1,9 @@
 """Generate languages/talk.rs from authored free-talk JSON."""
 import json, pathlib, sys
 
-ORDER = ["nb", "es", "en", "fr", "de", "it", "pt", "zh"]
+ORDER = ["nb", "es", "en", "fr", "de", "it", "pt", "zh", "hi"]
 NAMES = {"nb":"NORWEGIAN","es":"SPANISH","en":"ENGLISH","fr":"FRENCH",
-         "de":"GERMAN","it":"ITALIAN","pt":"PORTUGUESE","zh":"MANDARIN"}
+         "de":"GERMAN","it":"ITALIAN","pt":"PORTUGUESE","zh":"MANDARIN","hi":"HINDI"}
 TOPIC_IDS = ["family","school","sports","food","travel","games"]
 
 def rs(s): return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'

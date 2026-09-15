@@ -53,6 +53,46 @@ tests survive regeneration.
 - Brazilian Portuguese: no European Portuguese forms
 - No duplicate openers within or across languages
 
+## Hindi is taught in Roman script, by design
+
+Hindi (`hi`) is the one language whose learner-facing content is deliberately
+**not** in its native script. The product decision: learners **speak** Hindi and
+build a spoken vocabulary; they are explicitly not learning to read or write
+Devanagari. So Devanagari must not appear anywhere a learner can see it, and a
+learner who cannot read it should not meet it even in the language picker
+(`native_name` is "Hindi", not the Devanagari spelling).
+
+What that means for content:
+
+- Everything is written in **everyday Roman Hindi** — the register of texting,
+  Bollywood subtitles and Hinglish: "Aap kya peena chahenge?", never
+  Devanagari.
+- **No IAST diacritics** (no ā ī ū ṭ ṃ). A learner cannot type or skim them;
+  plain ASCII letters only.
+- Roman Hindi has no fixed spelling, so the content fixes **one spelling per
+  word** and uses it everywhere. The decided forms (hai/hain, nahi, kya,
+  chahiye, mein = in, main = I, toh, yeh/woh, achha, theek, bahut, ...) are
+  listed in the `HINDI_TEXT` comment in
+  `frontend/src-tauri/src/languages/text_policy.rs`; `validate.py` and
+  `validate_talk.py` reject the common alternatives.
+- Register: **aap** in the four service scenes (ordering_food, shopping,
+  hotel_checkin, asking_directions), **tum** in the four peer scenes and in free
+  talk, never mixed within a scene, and **tu** is never modelled.
+- Everyday English loanwords (bus, time, phone, class, weekend) are ordinary
+  Hindi. They are neither errors nor evidence that the learner has fallen back
+  to English.
+- Questions end with the ASCII `?` (the danda ends statements, and the content
+  is not in Devanagari anyway).
+
+The invariant is pinned: tests in `languages/{mod,text_policy,grammar,prompts,
+scenes,talk}.rs` assert that no Devanagari codepoint (U+0900–U+097F) and no
+non-ASCII letter appears in any Hindi learner-facing string, module field,
+grammar wording or prompt. The text policy forgives romanisation variants
+(hai/hain/he, nahi/nahin, kya/kyaa, w/v, z/j, ...) as speech-recognition noise
+and subtracts the Roman-Hindi words that collide with English function words
+(`the`, `is`, `do`, `to`, `so`, `or`) from the English-mixing evidence, so
+"main to bas yahi keh raha tha" is read as Hindi, not as giving up.
+
 ## Content status — read before making teaching claims
 
 The non-Spanish content is **machine-authored**. It has been checked for

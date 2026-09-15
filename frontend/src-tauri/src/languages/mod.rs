@@ -141,9 +141,10 @@ impl LanguageModule {
 /// Language id used when a profile has none stored.
 pub const DEFAULT_LANGUAGE_ID: &str = "nb";
 
-/// Registry order is the order Mural offers the languages in.
-pub static LANGUAGES: [LanguageModule; 8] = [
-    NORWEGIAN, SPANISH, ENGLISH, FRENCH, GERMAN, ITALIAN, PORTUGUESE, MANDARIN,
+/// Registry order is the order Mural offers the languages in. Hindi was
+/// added on the MeetOdds side and is appended so no stored index shifts.
+pub static LANGUAGES: [LanguageModule; 9] = [
+    NORWEGIAN, SPANISH, ENGLISH, FRENCH, GERMAN, ITALIAN, PORTUGUESE, MANDARIN, HINDI,
 ];
 
 /// Looks up a module by its stable id. Unknown ids return `None` rather than
@@ -384,6 +385,41 @@ pub static MANDARIN: LanguageModule = LanguageModule {
     ],
 };
 
+/// Hindi, taught in ROMAN SCRIPT by design. Learners speak Hindi and build a
+/// spoken vocabulary; they are explicitly not learning to read or write
+/// Devanagari, so no learner-facing string here (or in the Hindi scenes, free
+/// talk, grammar wording or prompts) may contain a Devanagari codepoint
+/// (U+0900..=U+097F) or an IAST diacritic. `native_name` is "Hindi" in Latin
+/// letters for the same reason: a learner who cannot read Devanagari should not
+/// meet it in the language picker. See docs/SCENE-AUTHORING.md.
+///
+/// Not a Mural port: authored for MeetOdds against the same policy shape, with
+/// the same fluent-speaker-review caveat as the generated scene content.
+pub static HINDI: LanguageModule = LanguageModule {
+    id: "hi", name: "Hindi", native_name: "Hindi", variety: "India", locale: "hi-IN",
+    greeting: "Namaste!", greeting_word: "namaste",
+    speech_guidance: "Use clear, natural everyday Hindi as spoken in India, not formal or Sanskritised. Use aap with strangers and in service situations and tum between friends; never model tu. Roman spelling gives few cues, so model dental versus retroflex t and d, aspiration, vowel length and nasal vowels clearly. Match verb and adjective gender to the learner once known. Never mark a learner wrong for how a word was romanised or infer a pronunciation error from a transcript alone.",
+    writing_guidance: "Write Hindi in the Roman alphabet only, in the everyday spelling of texting and Hinglish, for example Aap kya peena chahenge? Never write Devanagari and never use IAST or any diacritics: plain ASCII letters only. Keep one romanisation within your reply (hai/hain, nahi, kya, chahiye, mein for in, main for I) and accept any reasonable learner spelling. Everyday English loanwords such as bus, time and phone are normal Hindi, not errors. End questions with ?.",
+    lemma_guidance: "Give lemmas in Roman script only, never Devanagari, as the spoken word a learner would say and could look up: nouns in the singular with gender noted, for example kitaab (f) and ghar (m), and verbs in the -na infinitive, for example jaana and khaana. Keep compound verbs such as le jaana and pasand karna together. A romanisation variant is the same word, not a new lemma.",
+    teaching_focus: [
+        "Greetings, introductions and short everyday chunks such as mera naam and mujhe chahiye.",
+        "Simple questions with kya and question words, hai/hain, aap and tum, postpositions such as mein, pe and ko, and noun gender.",
+        "Connected stories, the past with tha/thi/the and ne, gender and number agreement on verbs and adjectives, and familiar situations.",
+        "Reasons and opinions, ki and kyunki clauses, compound verbs, the subjunctive with agar, and polite requests.",
+        "Nuance, register and honorifics, particles such as toh, hi and bhi, the presumptive and counterfactual, and idiomatic phrasing.",
+        "Flexible advanced conversation with precise, natural Hindi and appropriate tone.",
+    ],
+    topic_placeholder: "Food, films, cricket, life in India…",
+    lookup_unavailable_reply: "Abhi yeh check nahi ho paaya. Chaho toh hum is baare mein aam taur pe baat kar sakte hain.",
+    theme_overrides: &[
+        theme("coffee", "Ek chai?", "Something warm, please", "cup.and.saucer", "Everyday", "Meet at a neighbourhood chai stall or café in India. Order a drink and chat. Use aap with the staff and follow the learner's interests.", 0),
+        theme("groceries", "Sabzi mandi", "A little of everything", "basket", "Everyday", "Shop at a local vegetable market in India. Practise quantities, prices and polite requests, accepting regional names for foods.", 2),
+        theme("travel", "Agla station", "A ticket to somewhere", "tram", "Everyday", "Plan a train trip in India. Discuss routes and tickets without inventing current schedules.", 1),
+        theme("cabin", "A weekend away", "A change of scene", "mountain.2", "Local life", "Plan an imagined weekend away in India. Choose hills, coast or a city together and discuss practical plans.", 2),
+        theme("traditions", "Chai pe baatein", "Small customs, big stories", "flag", "Local life", "Talk over chai about daily routines, festivals and local customs in India. Compare the learner's experiences without treating Hindi-speaking communities as uniform.", 2),
+    ],
+};
+
 // ---------------------------------------------------------------------------
 // Tutor integration
 // ---------------------------------------------------------------------------
@@ -420,7 +456,66 @@ mod tests {
     #[test]
     fn registry_carries_every_mural_language() {
         let ids: Vec<_> = LANGUAGES.iter().map(|m| m.id).collect();
-        assert_eq!(ids, ["nb", "es", "en", "fr", "de", "it", "pt", "zh"]);
+        assert_eq!(ids, ["nb", "es", "en", "fr", "de", "it", "pt", "zh", "hi"]);
+    }
+
+    #[test]
+    fn hindi_is_registered_and_complete() {
+        let hi = module("hi").expect("Hindi registered");
+        assert_eq!((hi.name, hi.native_name, hi.variety, hi.locale), ("Hindi", "Hindi", "India", "hi-IN"));
+        assert_eq!((hi.greeting, hi.greeting_word), ("Namaste!", "namaste"));
+        assert!(hi.teaching_focus.iter().all(|f| !f.is_empty()));
+        assert!(!hi.lookup_unavailable_reply.is_empty());
+        assert_eq!(hi.settings_title(), "Hindi · India");
+        // Existing entries keep their positions: Hindi is appended, not inserted.
+        assert_eq!(LANGUAGES[8].id, "hi");
+        assert_eq!(LANGUAGES[7].id, "zh");
+        assert_eq!(module_or_default("hi").id, "hi");
+    }
+
+    /// The defining Hindi requirement: learners speak Hindi and never read
+    /// Devanagari, so no module field may carry a Devanagari codepoint
+    /// (U+0900..=U+097F), and learner-facing text uses plain ASCII letters
+    /// (no IAST diacritics such as ā, ṭ or ṃ).
+    #[test]
+    fn hindi_module_carries_no_devanagari_anywhere() {
+        let hi = module("hi").unwrap();
+        let is_deva = |c: char| ('\u{0900}'..='\u{097F}').contains(&c);
+        let mut fields: Vec<(&str, &str)> = vec![
+            ("name", hi.name),
+            ("native_name", hi.native_name),
+            ("variety", hi.variety),
+            ("locale", hi.locale),
+            ("greeting", hi.greeting),
+            ("greeting_word", hi.greeting_word),
+            ("speech_guidance", hi.speech_guidance),
+            ("writing_guidance", hi.writing_guidance),
+            ("lemma_guidance", hi.lemma_guidance),
+            ("topic_placeholder", hi.topic_placeholder),
+            ("lookup_unavailable_reply", hi.lookup_unavailable_reply),
+        ];
+        fields.extend(hi.teaching_focus.iter().map(|f| ("teaching_focus", *f)));
+        for t in hi.themes() {
+            fields.extend([("theme.title", t.title), ("theme.subtitle", t.subtitle), ("theme.situation", t.situation)]);
+        }
+        for (name, text) in &fields {
+            assert!(!text.chars().any(is_deva), "{name} contains Devanagari: {text}");
+        }
+        // Learner-facing strings are plain ASCII letters; ellipsis and · are punctuation, not letters.
+        for text in [hi.native_name, hi.greeting, hi.greeting_word, hi.lookup_unavailable_reply] {
+            assert!(text.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_ascii()), "{text}");
+        }
+        for t in hi.theme_overrides {
+            assert!(t.title.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_ascii()), "{}", t.title);
+        }
+        // The guidance says the load-bearing things out loud.
+        assert!(hi.writing_guidance.contains("Roman alphabet only"));
+        assert!(hi.writing_guidance.contains("Never write Devanagari"));
+        assert!(hi.writing_guidance.contains("loanwords") && hi.writing_guidance.contains("not errors"));
+        assert!(hi.lemma_guidance.contains("Roman script only"));
+        assert!(hi.speech_guidance.contains("never model tu"));
+        assert!(hi.speech_guidance.contains("romanised"));
+        assert!(tutor_guidance(hi, 0).contains("Hindi (Hindi, India)"));
     }
 
     #[test]
