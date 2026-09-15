@@ -13,6 +13,8 @@
 #[cfg(feature = "tauri-commands")]
 pub mod commands;
 
+pub mod scenes;
+
 use serde::Serialize;
 
 /// A conversation situation. `color_index` and `symbol` are presentation hints
