@@ -1,0 +1,134 @@
+{
+  "language_id": "fr",
+  "closing": "Très bien, on s'arrête là ! Tu veux t'entraîner encore ou parler d'autre chose ?",
+  "talk_fallback": "Qu'est-ce que tu aimes faire pendant ton temps libre ?",
+  "scaffold_fallback": "Tu veux parler de cuisine ou de jeux ?",
+  "dial_instructions": [
+    "ONE short question only (max 10 words), present tense, one clause. Use everyday spoken question forms (intonation or 'c'est quoi, ton… ?', 'tu aimes quoi ?'), never inversion. Nothing before the question.",
+    "At most two short sentences with familiar vocabulary; passé composé and 'je vais + infinitive' are fine. End with a question in 'est-ce que' or intonation form, no inversion.",
+    "Natural sentences; invite reasons ('pourquoi', 'parce que') and past experiences in passé composé and imparfait; use the conditional ('tu aimerais', 'tu ferais') to open hypotheticals.",
+    "Natural idiom and everyday spoken French (dropped 'ne', 'on' for 'nous', connectors like 'du coup', 'en fait'); nuanced follow-ups using 'si + imparfait' hypotheticals, the subjunctive after 'bien que' / 'ce qui compte, c'est que', and comparisons ('plutôt que', 'par rapport à')."
+  ],
+  "topics": [
+    {
+      "id": "family",
+      "openers": [
+        [
+          "Qu'est-ce que tu aimes faire avec ta famille ?",
+          "Avec qui tu parles le plus à la maison ?",
+          "Vous faites quoi ensemble le week-end ?"
+        ],
+        [
+          "Qu'est-ce que tu as fait avec ta famille le week-end dernier ?",
+          "Quelle tradition familiale tu préfères ?",
+          "Comment ta famille a changé avec le temps ?"
+        ],
+        [
+          "Quelle habitude familiale tu voudrais garder toute ta vie ?",
+          "Comment tu réglerais un désaccord à la maison ?",
+          "Qu'est-ce que tu as appris de quelqu'un de ta famille ?"
+        ]
+      ]
+    },
+    {
+      "id": "school",
+      "openers": [
+        [
+          "Quelle matière tu préfères ?",
+          "Tu fais quoi pendant la récré ?",
+          "Elle est comment, ta classe ?"
+        ],
+        [
+          "Qu'est-ce que tu as appris cette semaine ?",
+          "Qu'est-ce que tu changerais dans ton emploi du temps ?",
+          "Comment tu te prépares pour un projet ?"
+        ],
+        [
+          "Qu'est-ce qui rend un cours intéressant ?",
+          "Comment tu imaginerais ton école idéale ?",
+          "C'est plus important de mémoriser ou de comprendre ?"
+        ]
+      ]
+    },
+    {
+      "id": "sports",
+      "openers": [
+        [
+          "Quel sport tu aimes ?",
+          "Tu préfères jouer ou regarder les matchs ?",
+          "Où est-ce que tu fais du sport ?"
+        ],
+        [
+          "Quand est-ce que tu as commencé ce sport ?",
+          "Il était comment, le dernier match que tu as vu ?",
+          "Quel sport tu aimerais essayer ?"
+        ],
+        [
+          "Qu'est-ce que tu apprécies le plus dans une équipe ?",
+          "Qu'est-ce que tu changerais aux règles de ton sport préféré ?",
+          "Quelle place le sport prend dans ta vie ?"
+        ]
+      ]
+    },
+    {
+      "id": "food",
+      "openers": [
+        [
+          "C'est quoi, ton plat préféré ?",
+          "Tu manges quoi au petit-déjeuner, d'habitude ?",
+          "Tu préfères le sucré ou le salé ?"
+        ],
+        [
+          "Qu'est-ce que tu as cuisiné ou mangé hier ?",
+          "Quel plat tu aimerais apprendre à préparer ?",
+          "Quel plat tu as goûté pour la première fois récemment ?"
+        ],
+        [
+          "Quel plat représente le mieux un endroit que tu connais ?",
+          "Comment tes goûts ont changé avec les années ?",
+          "Qu'est-ce qui rend un repas mémorable ?"
+        ]
+      ]
+    },
+    {
+      "id": "travel",
+      "openers": [
+        [
+          "Où est-ce que tu veux voyager ?",
+          "Tu préfères la plage ou la montagne ?",
+          "Qu'est-ce que tu mets dans ton sac à dos ?"
+        ],
+        [
+          "Elles étaient comment, tes dernières vacances ?",
+          "Quel endroit t'a le plus surpris ?",
+          "Comment tu préparerais un petit voyage ?"
+        ],
+        [
+          "Qu'est-ce que tu as appris en voyageant, sans t'y attendre ?",
+          "Comment tu choisirais entre confort et aventure ?",
+          "Qu'est-ce qui fait que tu te sens chez toi ailleurs ?"
+        ]
+      ]
+    },
+    {
+      "id": "games",
+      "openers": [
+        [
+          "C'est quoi, ton jeu préféré ?",
+          "Avec qui tu aimes jouer ?",
+          "Tu préfères les jeux de société ou les jeux vidéo ?"
+        ],
+        [
+          "Comment tu as appris à jouer à ton jeu préféré ?",
+          "Qu'est-ce qui s'est passé dans ta dernière partie ?",
+          "Quel jeu tu conseillerais à un ami ?"
+        ],
+        [
+          "Qu'est-ce qui fait qu'un jeu reste intéressant ?",
+          "Comment tu concevrais un jeu coopératif ?",
+          "Qu'est-ce que tu changerais dans ton jeu préféré, et pourquoi ?"
+        ]
+      ]
+    }
+  ]
+}

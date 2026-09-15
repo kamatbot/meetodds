@@ -1,0 +1,134 @@
+{
+  "language_id": "es",
+  "closing": "¡Muy bien, terminamos! ¿Quieres practicar otra vez o hablar de otro tema?",
+  "talk_fallback": "¿Qué te gusta hacer en tu tiempo libre?",
+  "scaffold_fallback": "¿Quieres hablar de comida o de juegos?",
+  "dial_instructions": [
+    "UNA sola pregunta corta (máximo 10 palabras), en presente, una cláusula. Nada antes de la pregunta.",
+    "Máximo dos frases cortas con vocabulario familiar; termina con una pregunta.",
+    "Natural sentences; invite reasons and past experiences.",
+    "Natural idioms and nuanced follow-up questions."
+  ],
+  "topics": [
+    {
+      "id": "family",
+      "openers": [
+        [
+          "¿Qué te gusta hacer con tu familia?",
+          "¿Con quién hablas más en casa?",
+          "¿Qué hacéis juntos los fines de semana?"
+        ],
+        [
+          "¿Qué hiciste con tu familia el fin de semana pasado?",
+          "¿Qué tradición familiar te gusta más?",
+          "¿Cómo ha cambiado tu familia con el tiempo?"
+        ],
+        [
+          "¿Qué costumbre familiar te gustaría conservar siempre?",
+          "¿Cómo resolverías una diferencia de opinión en casa?",
+          "¿Qué has aprendido de alguien de tu familia?"
+        ]
+      ]
+    },
+    {
+      "id": "school",
+      "openers": [
+        [
+          "¿Qué asignatura te gusta más?",
+          "¿Qué haces durante el recreo?",
+          "¿Cómo es tu clase?"
+        ],
+        [
+          "¿Qué aprendiste esta semana?",
+          "¿Qué cambiarías de tu horario?",
+          "¿Cómo te preparas para un proyecto?"
+        ],
+        [
+          "¿Qué hace que una clase sea interesante?",
+          "¿Cómo diseñarías tu escuela ideal?",
+          "¿Es más importante memorizar o comprender?"
+        ]
+      ]
+    },
+    {
+      "id": "sports",
+      "openers": [
+        [
+          "¿Qué deporte te gusta?",
+          "¿Prefieres jugar o ver partidos?",
+          "¿Dónde haces ejercicio?"
+        ],
+        [
+          "¿Cuándo empezaste a practicar ese deporte?",
+          "¿Cómo fue el último partido que viste?",
+          "¿Qué deporte te gustaría probar?"
+        ],
+        [
+          "¿Qué valoras más en un equipo?",
+          "¿Qué cambiarías de las reglas de tu deporte favorito?",
+          "¿Cómo influye el deporte en tu vida?"
+        ]
+      ]
+    },
+    {
+      "id": "food",
+      "openers": [
+        [
+          "¿Cuál es tu comida favorita?",
+          "¿Qué desayunas normalmente?",
+          "¿Prefieres dulce o salado?"
+        ],
+        [
+          "¿Qué cocinaste o comiste ayer?",
+          "¿Qué plato te gustaría aprender a preparar?",
+          "¿Qué comida probaste por primera vez recientemente?"
+        ],
+        [
+          "¿Qué plato representa mejor un lugar que conoces?",
+          "¿Cómo han cambiado tus gustos con los años?",
+          "¿Qué hace que una comida sea memorable?"
+        ]
+      ]
+    },
+    {
+      "id": "travel",
+      "openers": [
+        [
+          "¿Adónde quieres viajar?",
+          "¿Prefieres la playa o la montaña?",
+          "¿Qué llevas en tu mochila?"
+        ],
+        [
+          "¿Cómo fueron tus últimas vacaciones?",
+          "¿Qué lugar te sorprendió más?",
+          "¿Cómo prepararías un viaje corto?"
+        ],
+        [
+          "¿Qué aprendiste viajando que no esperabas?",
+          "¿Cómo elegirías entre comodidad y aventura?",
+          "¿Qué hace que te sientas en casa en otro lugar?"
+        ]
+      ]
+    },
+    {
+      "id": "games",
+      "openers": [
+        [
+          "¿Cuál es tu juego favorito?",
+          "¿Con quién te gusta jugar?",
+          "¿Prefieres juegos de mesa o videojuegos?"
+        ],
+        [
+          "¿Cómo aprendiste a jugar a tu juego favorito?",
+          "¿Qué pasó en tu última partida?",
+          "¿Qué juego recomendarías a un amigo?"
+        ],
+        [
+          "¿Qué hace que un juego siga siendo interesante?",
+          "¿Cómo diseñarías un juego cooperativo?",
+          "¿Qué cambiarías de tu juego favorito y por qué?"
+        ]
+      ]
+    }
+  ]
+}
