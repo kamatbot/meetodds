@@ -2,6 +2,8 @@
 // Kept in one file (ponytail: no separate types/ + utils/ split for ~10 helpers).
 // Tutor-turn event/reply types folded in from types/spanishTutor.ts (single home for types).
 
+import type { LanguageId } from './languages';
+
 export type Level = 'beginner' | 'intermediate' | 'advanced';
 export type Variety = 'es_MX' | 'es_ES';
 
@@ -36,6 +38,9 @@ export interface SpanishProfile {
   id: string;
   name: string;
   level: Level;
+  /** Target language id from lib/languages.ts. Absent on profiles saved before
+   *  language selection existed; the native side reads those as Spanish. */
+  language?: LanguageId;
   variety: Variety;
   topics: string[];
   practicing: PracticingPhrase[];

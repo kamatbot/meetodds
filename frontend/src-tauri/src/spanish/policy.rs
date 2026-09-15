@@ -1,9 +1,10 @@
 //! Pure teaching policy, validation, memory and recap. No model or UI calls.
 use super::text;
 use super::{
-    Category, CategoryShown, Feedback, FeedbackKind, Level, Observation, PracticingPhrase,
-    SessionState, Severity, SpanishProfile, Structure,
+    language_module, resolve_language_id, Category, CategoryShown, Feedback, FeedbackKind, Level,
+    Observation, PracticingPhrase, SessionState, Severity, SpanishProfile, Structure,
 };
+use crate::languages::grammar::Taxonomy;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -38,9 +39,24 @@ pub enum Rejection {
     EmptySuggestion,
     TooLong,
 }
+/// The grammar taxonomy for a language id, resolved as the engine resolves
+/// every language: unknown ids read as Spanish, never as the neutral core.
+pub fn taxonomy(lang: &str) -> Taxonomy {
+    Taxonomy::for_id(resolve_language_id(lang))
+}
 /// No raw learner/model output is logged here. The caller may explicitly opt in
 /// to bounded sensitive diagnostics; production diagnostics contain reason only.
-pub fn validate(raw: &str, learner: &str, mixed: bool) -> Result<Option<JudgeFinding>, Rejection> {
+///
+/// `lang` is the profile's language: it decides which categories the judge may
+/// return (anything outside that language's taxonomy is rejected exactly as an
+/// unknown string is), which text policy grounds the evidence, and whose rule
+/// sentence replaces a bad explanation.
+pub fn validate(
+    lang: &str,
+    raw: &str,
+    learner: &str,
+    mixed: bool,
+) -> Result<Option<JudgeFinding>, Rejection> {
     if raw.len() > 12_000 {
         return Err(Rejection::TooLong);
     }
@@ -51,6 +67,13 @@ pub fn validate(raw: &str, learner: &str, mixed: bool) -> Result<Option<JudgeFin
         _ => clean.trim(),
     };
     let mut f: JudgeFinding = serde_json::from_str(clean).map_err(|_| Rejection::InvalidJson)?;
+    // `Category` is one namespace for every language. A category this
+    // language's judge was never offered is as invalid as an unknown string was
+    // when the enum was Spanish-only; never let it through as `Other`.
+    let taxonomy = taxonomy(lang);
+    if f.category.is_some_and(|c| !taxonomy.accepts(c)) {
+        return Err(Rejection::InvalidJson);
+    }
     if !f.has_error && !f.notable && !mixed {
         return Ok(None);
     }
@@ -58,13 +81,13 @@ pub fn validate(raw: &str, learner: &str, mixed: bool) -> Result<Option<JudgeFin
     if f.you_said.len() > 2000 || f.try_this.len() > 2000 {
         return Err(Rejection::TooLong);
     }
-    if f.you_said.trim().is_empty() || !text::contains_phrase(learner, &f.you_said) {
+    if f.you_said.trim().is_empty() || !text::contains_phrase(lang, learner, &f.you_said) {
         return Err(Rejection::Ungrounded);
     }
     if f.try_this.trim().is_empty() {
         return Err(Rejection::EmptySuggestion);
     }
-    if text::contains_english(&f.try_this) {
+    if text::contains_english(lang, &f.try_this) {
         return Err(Rejection::EnglishSuggestion);
     }
     if mixed {
@@ -72,126 +95,40 @@ pub fn validate(raw: &str, learner: &str, mixed: bool) -> Result<Option<JudgeFin
         f.has_error = true;
         f.notable = false;
     }
-    if f.has_error && text::speech_equivalent(&f.you_said, &f.try_this) {
+    if f.has_error && text::speech_equivalent(lang, &f.you_said, &f.try_this) {
         return Err(Rejection::Unchanged);
     }
-    if !f.has_error && !text::contains_phrase(learner, &f.try_this) {
+    if !f.has_error && !text::contains_phrase(lang, learner, &f.try_this) {
         return Err(Rejection::Ungrounded);
     }
     // §4 and the explicit tests resolve §3.3's contradictory long-why rule:
     // replace bad explanations with a rule template; don't lose a valid correction.
-    if !text::english_explanation(&f.why) {
-        f.why = explanation(f.category.unwrap_or(category)).into();
+    if !text::english_explanation(lang, &f.why) {
+        f.why = explanation(lang, f.category.unwrap_or(category)).into();
     }
-    if !text::english_explanation(&f.notable_why) {
-        f.notable_why = "You used this Spanish structure naturally in your answer.".into();
+    if !text::english_explanation(lang, &f.notable_why) {
+        f.notable_why = format!(
+            "You used this {} structure naturally in your answer.",
+            language_module(lang).name
+        );
     }
     Ok(Some(f))
 }
-pub fn explanation(c: Category) -> &'static str {
-    match c {
-        Category::VerbTense => "The verb tense needs to match when the action happens.",
-        Category::VerbConjugation => {
-            "The verb ending needs to agree with the person doing the action."
-        }
-        Category::SerEstar => {
-            "Spanish uses different verbs for identity and for states or location."
-        }
-        Category::GenderAgreement => {
-            "The adjective and article need to match the noun's grammatical gender."
-        }
-        Category::NumberAgreement => {
-            "The words describing a noun need to match its singular or plural form."
-        }
-        Category::Article => "The article needs to fit the noun and how it is used here.",
-        Category::Preposition => {
-            "This relationship between words needs a different preposition in Spanish."
-        }
-        Category::WordChoice => {
-            "A different Spanish word expresses your intended meaning more clearly here."
-        }
-        Category::WordOrder => {
-            "The order of these words needs to fit the structure of this Spanish sentence."
-        }
-        Category::MissingWord => {
-            "This Spanish sentence needs another word to express the complete idea."
-        }
-        Category::EnglishMixed => {
-            "This Spanish phrase expresses the idea you asked about in English."
-        }
-        Category::Other => {
-            "This sentence structure needs an adjustment to express your intended meaning clearly."
-        }
-    }
+/// One plain-English rule sentence for `c` in this language. Spanish wording
+/// is byte-identical to the table this module used to carry.
+pub fn explanation(lang: &str, c: Category) -> &'static str {
+    taxonomy(lang).explanation(c)
 }
-pub fn category_name(c: Category) -> &'static str {
-    match c {
-        Category::VerbTense => "When actions happen",
-        Category::VerbConjugation => "Verb endings",
-        Category::SerEstar => "Ser and estar",
-        Category::GenderAgreement => "Grammatical gender",
-        Category::NumberAgreement => "Singular and plural",
-        Category::Article => "Articles",
-        Category::Preposition => "Prepositions",
-        Category::WordChoice => "Choosing words",
-        Category::WordOrder => "Word order",
-        Category::MissingWord => "Complete sentences",
-        Category::EnglishMixed => "Useful Spanish phrases",
-        Category::Other => "Sentence structure",
-    }
+/// Short UI label for `c` in this language.
+pub fn category_name(lang: &str, c: Category) -> &'static str {
+    taxonomy(lang).category_name(c)
 }
-pub fn at_level(c: Category, s: Structure, level: Level) -> bool {
-    if level == Level::Advanced {
-        return true;
-    }
-    if matches!(
-        s,
-        Structure::Subjunctive | Structure::Conditional | Structure::Register
-    ) {
-        return false;
-    }
-    match level {
-        Level::Beginner => match c {
-            Category::GenderAgreement
-            | Category::NumberAgreement
-            | Category::Article
-            | Category::MissingWord
-            | Category::WordOrder
-            | Category::EnglishMixed => true,
-            Category::VerbConjugation | Category::SerEstar => s == Structure::Present,
-            _ => false,
-        },
-        Level::Intermediate => {
-            c != Category::Other
-                && !(matches!(
-                    c,
-                    Category::VerbConjugation | Category::SerEstar | Category::VerbTense
-                ) && s == Structure::General)
-        }
-        Level::Advanced => true,
-    }
+/// Whether a correction in `c`/`s` is worth showing at `level` in this language.
+pub fn at_level(lang: &str, c: Category, s: Structure, level: Level) -> bool {
+    taxonomy(lang).at_level(c, s, level)
 }
-fn demonstrably_above_level(c: Category, s: Structure, level: Level) -> bool {
-    if level == Level::Advanced || c == Category::Other {
-        return false;
-    }
-    match level {
-        Level::Beginner => {
-            matches!(
-                s,
-                Structure::Past
-                    | Structure::Future
-                    | Structure::Subjunctive
-                    | Structure::Conditional
-                    | Structure::Register
-            ) || matches!(c, Category::Preposition | Category::WordChoice)
-        }
-        Level::Intermediate => matches!(
-            s,
-            Structure::Subjunctive | Structure::Conditional | Structure::Register
-        ),
-        Level::Advanced => false,
-    }
+fn demonstrably_above_level(lang: &str, c: Category, s: Structure, level: Level) -> bool {
+    taxonomy(lang).demonstrably_above_level(c, s, level)
 }
 #[derive(Debug, Clone)]
 pub enum Decision {
@@ -203,6 +140,7 @@ pub fn decide(f: &JudgeFinding, s: &SessionState, p: &SpanishProfile) -> Decisio
     let Some(category) = f.category else {
         return Decision::Discard;
     };
+    let lang = p.language_id();
     let t = s.turn_index;
     if !f.has_error {
         if !f.notable
@@ -214,8 +152,8 @@ pub fn decide(f: &JudgeFinding, s: &SessionState, p: &SpanishProfile) -> Decisio
         let practiced = p
             .practicing
             .iter()
-            .any(|x| !x.mastered && text::contains_phrase(&f.you_said, &x.phrase));
-        if !practiced && !demonstrably_above_level(category, f.structure, p.level) {
+            .any(|x| !x.mastered && text::contains_phrase(lang, &f.you_said, &x.phrase));
+        if !practiced && !demonstrably_above_level(lang, category, f.structure, p.level) {
             return Decision::Discard;
         }
         // Respect card pacing for praise too: never crowd out conversation.
@@ -254,7 +192,7 @@ pub fn decide(f: &JudgeFinding, s: &SessionState, p: &SpanishProfile) -> Decisio
         count: 1,
     };
     if (f.severity == Severity::Polish && p.level != Level::Advanced)
-        || !at_level(category, f.structure, p.level)
+        || !at_level(lang, category, f.structure, p.level)
         || s.shown_categories
             .iter()
             .any(|x| x.category == category && t.saturating_sub(x.turn_index) <= 3)
@@ -278,6 +216,7 @@ pub fn apply(
         Decision::SaveForRecap(f) => (f, false),
         Decision::Discard => return None,
     };
+    let lang = p.language_id();
     card.shown = shown;
     card.count = s
         .feedback
@@ -307,7 +246,7 @@ pub fn apply(
                 if card.kind == FeedbackKind::Practiced {
                     for x in &mut p.practicing {
                         if !x.mastered
-                            && text::contains_phrase(&card.you_said, &x.phrase)
+                            && text::contains_phrase(lang, &card.you_said, &x.phrase)
                             && mark_use(x, &s.session_id)
                         {
                             s.mastered_this_session.push(x.phrase.clone());
@@ -323,8 +262,9 @@ pub fn apply(
     shown.then_some(card)
 }
 pub fn add_phrase(p: &mut SpanishProfile, phrase: &str, category: Category, now: u64) {
-    let n = text::normalize(phrase);
-    if n.is_empty() || p.practicing.iter().any(|x| text::normalize(&x.phrase) == n) {
+    let lang = p.language_id();
+    let n = text::normalize(lang, phrase);
+    if n.is_empty() || p.practicing.iter().any(|x| text::normalize(lang, &x.phrase) == n) {
         return;
     }
     p.practicing.push(PracticingPhrase {
@@ -434,7 +374,7 @@ pub fn recap(s: &SessionState, p: &SpanishProfile, recent: &[SessionResult]) -> 
         .into_iter()
         .map(|(category, fs)| Focus {
             category,
-            title: category_name(category).into(),
+            title: category_name(p.language_id(), category).into(),
             count: fs.len(),
             example: fs[0].clone(),
         })
@@ -452,10 +392,13 @@ pub fn recap(s: &SessionState, p: &SpanishProfile, recent: &[SessionResult]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Every legacy assertion below is Spanish; the language id is the only
+    /// change to these call sites.
+    const ES: &str = "es";
     #[test]
     fn fenced_judge_json_is_accepted() {
         let raw = "```json\n{\"hasError\":true,\"category\":\"verb_tense\",\"severity\":\"core\",\"structure\":\"past\",\"youSaid\":\"Ayer voy al parque\",\"tryThis\":\"Ayer fui al parque\",\"why\":\"A completed action in the past needs a past tense.\",\"notable\":false,\"notableWhy\":\"\"}\n```";
-        let f = validate(raw, "Ayer voy al parque con mi hermano", false).unwrap().unwrap();
+        let f = validate(ES, raw, "Ayer voy al parque con mi hermano", false).unwrap().unwrap();
         assert_eq!(f.try_this, "Ayer fui al parque");
     }
     fn profile(level: Level) -> SpanishProfile {
@@ -472,7 +415,7 @@ mod tests {
             structure: Structure::Present,
             you_said: "La casa es bonito".into(),
             try_this: "La casa es bonita".into(),
-            why: explanation(category).into(),
+            why: explanation(ES, category).into(),
             notable: false,
             notable_why: String::new(),
         }
@@ -510,31 +453,37 @@ mod tests {
     #[test]
     fn level_table() {
         assert!(!at_level(
+            ES,
             Category::VerbTense,
             Structure::Past,
             Level::Beginner
         ));
         assert!(at_level(
+            ES,
             Category::VerbTense,
             Structure::Past,
             Level::Intermediate
         ));
         assert!(!at_level(
+            ES,
             Category::VerbConjugation,
             Structure::Subjunctive,
             Level::Intermediate
         ));
         assert!(!at_level(
+            ES,
             Category::SerEstar,
             Structure::General,
             Level::Beginner
         ));
         assert!(at_level(
+            ES,
             Category::SerEstar,
             Structure::Present,
             Level::Beginner
         ));
         assert!(at_level(
+            ES,
             Category::Other,
             Structure::Register,
             Level::Advanced
@@ -587,13 +536,13 @@ mod tests {
         let mut f = finding(Category::Article);
         f.try_this = f.you_said.clone();
         assert_eq!(
-            validate(&serde_json::to_string(&f).unwrap(), &f.you_said, false).unwrap_err(),
+            validate(ES, &serde_json::to_string(&f).unwrap(), &f.you_said, false).unwrap_err(),
             Rejection::Unchanged
         );
         f.you_said = "Bamos a casa".into();
         f.try_this = "Vamos a casa".into();
         assert_eq!(
-            validate(&serde_json::to_string(&f).unwrap(), &f.you_said, false).unwrap_err(),
+            validate(ES, &serde_json::to_string(&f).unwrap(), &f.you_said, false).unwrap_err(),
             Rejection::Unchanged
         );
     }
@@ -601,6 +550,7 @@ mod tests {
     fn invalid_category_and_english_are_dropped() {
         assert_eq!(
             validate(
+                ES,
                 r#"{"hasError":true,"category":"invented"}"#,
                 "La casa",
                 false
@@ -611,7 +561,7 @@ mod tests {
         let mut f = finding(Category::Article);
         f.try_this = "The house is nice".into();
         assert_eq!(
-            validate(&serde_json::to_string(&f).unwrap(), &f.you_said, false).unwrap_err(),
+            validate(ES, &serde_json::to_string(&f).unwrap(), &f.you_said, false).unwrap_err(),
             Rejection::EnglishSuggestion
         );
     }
@@ -623,22 +573,22 @@ mod tests {
             "Debes cambiar el articulo".into(),
         ] {
             f.why = why;
-            let valid = validate(&serde_json::to_string(&f).unwrap(), &f.you_said, false)
+            let valid = validate(ES, &serde_json::to_string(&f).unwrap(), &f.you_said, false)
                 .unwrap()
                 .unwrap();
-            assert_eq!(valid.why, explanation(Category::Article));
+            assert_eq!(valid.why, explanation(ES, Category::Article));
         }
     }
     #[test]
     fn no_error_and_practiced_phrase_are_not_rejected_as_unchanged() {
         let raw = r#"{"hasError":false}"#;
-        assert!(validate(raw, "Hoy hace sol", false).unwrap().is_none());
+        assert!(validate(ES, raw, "Hoy hace sol", false).unwrap().is_none());
         let mut f = finding(Category::Article);
         f.has_error = false;
         f.notable = true;
         f.try_this = f.you_said.clone();
         assert!(
-            validate(&serde_json::to_string(&f).unwrap(), &f.you_said, false)
+            validate(ES, &serde_json::to_string(&f).unwrap(), &f.you_said, false)
                 .unwrap()
                 .is_some()
         );
@@ -647,7 +597,7 @@ mod tests {
     fn fabricated_evidence_is_dropped() {
         let f = finding(Category::Article);
         assert_eq!(
-            validate(&serde_json::to_string(&f).unwrap(), "Hoy hace sol", false).unwrap_err(),
+            validate(ES, &serde_json::to_string(&f).unwrap(), "Hoy hace sol", false).unwrap_err(),
             Rejection::Ungrounded
         );
     }
@@ -753,5 +703,79 @@ mod tests {
             .collect();
         assert!(suggest_level_bump(&sessions, Level::Beginner));
         assert!(!suggest_level_bump(&sessions[..2], Level::Beginner));
+    }
+    #[test]
+    fn categories_are_gated_per_language_and_unknown_language_is_spanish() {
+        // `case` is a German category. Spanish rejects it exactly as it
+        // rejects an unknown string, so nothing the Spanish validator accepts
+        // has widened; German accepts it and grounds it with German text.
+        let raw = r#"{"hasError":true,"category":"case","severity":"core","structure":"present","youSaid":"mit der Hund","tryThis":"mit dem Hund","why":"The dative case follows mit.","notable":false,"notableWhy":""}"#;
+        assert_eq!(validate(ES, raw, "Ich gehe mit der Hund", false).unwrap_err(), Rejection::InvalidJson);
+        assert_eq!(validate("xx", raw, "Ich gehe mit der Hund", false).unwrap_err(), Rejection::InvalidJson);
+        let f = validate("de", raw, "Ich gehe mit der Hund", false).unwrap().unwrap();
+        assert_eq!(f.category, Some(Category::Case));
+        assert_eq!(f.try_this, "mit dem Hund");
+        // A no-error finding carrying a foreign category is still invalid.
+        assert_eq!(
+            validate(ES, r#"{"hasError":false,"category":"measure_word"}"#, "Hoy hace sol", false).unwrap_err(),
+            Rejection::InvalidJson
+        );
+        // Mandarin evidence is grounded per character.
+        let zh = r#"{"hasError":true,"category":"measure_word","severity":"core","structure":"present","youSaid":"三猫","tryThis":"三只猫","why":"A measure word goes between the number and the noun.","notable":false,"notableWhy":""}"#;
+        let f = validate("zh", zh, "我有三猫", false).unwrap().unwrap();
+        assert_eq!(f.category, Some(Category::MeasureWord));
+        // Rule sentences, labels and level gates come from the language.
+        assert_eq!(explanation("de", Category::Case), Taxonomy::German.explanation(Category::Case));
+        assert_ne!(explanation("de", Category::Case), explanation("de", Category::Other));
+        assert_eq!(category_name("zh", Category::EnglishMixed), "Useful Mandarin phrases");
+        assert_eq!(category_name("xx", Category::EnglishMixed), "Useful Spanish phrases");
+        assert_eq!(explanation("xx", Category::SerEstar), explanation(ES, Category::SerEstar));
+        assert!(at_level("de", Category::Case, Structure::Present, Level::Advanced));
+        assert!(!at_level(ES, Category::Case, Structure::Present, Level::Beginner));
+        // The praise template names the profile's language.
+        let mut f = finding(Category::Article);
+        f.has_error = false;
+        f.notable = true;
+        f.try_this = f.you_said.clone();
+        f.notable_why = "Muy natural".into();
+        let valid = validate(ES, &serde_json::to_string(&f).unwrap(), &f.you_said, false).unwrap().unwrap();
+        assert_eq!(valid.notable_why, "You used this Spanish structure naturally in your answer.");
+        let mut f = finding(Category::Article);
+        f.has_error = false;
+        f.notable = true;
+        f.you_said = "ein Haus".into();
+        f.try_this = "ein Haus".into();
+        f.notable_why = String::new();
+        let valid = validate("de", &serde_json::to_string(&f).unwrap(), "Ich habe ein Haus", false).unwrap().unwrap();
+        assert_eq!(valid.notable_why, "You used this German structure naturally in your answer.");
+    }
+    #[test]
+    fn decisions_and_recap_use_the_profile_language() {
+        let p = SpanishProfile {
+            level: Level::Beginner,
+            language: "de".into(),
+            ..Default::default()
+        };
+        let mut s = SessionState::default();
+        s.turn_index = 1;
+        let mut f = finding(Category::Case);
+        f.you_said = "mit der Hund".into();
+        f.try_this = "mit dem Hund".into();
+        // German shows case to beginners; the same finding for a Spanish
+        // profile is a foreign category, gated as Other and held for the recap.
+        assert!(matches!(decide(&f, &s, &p), Decision::Show(_)));
+        let es = SpanishProfile { language: "es".into(), ..p.clone() };
+        assert!(matches!(decide(&f, &s, &es), Decision::SaveForRecap(_)));
+        // Subordinate-clause order is advanced-only in German.
+        let mut sub = finding(Category::SubordinateClause);
+        sub.you_said = "weil ich habe Zeit".into();
+        sub.try_this = "weil ich Zeit habe".into();
+        assert!(matches!(decide(&sub, &s, &p), Decision::SaveForRecap(_)));
+        let mut gp = p.clone();
+        let d = decide(&f, &s, &p);
+        apply(d, &mut s, &mut gp, 1);
+        let r = recap(&s, &gp, &[]);
+        assert_eq!(r.focus_next_time[0].title, Taxonomy::German.category_name(Category::Case));
+        assert_eq!(gp.practicing[0].phrase, "mit dem Hund");
     }
 }

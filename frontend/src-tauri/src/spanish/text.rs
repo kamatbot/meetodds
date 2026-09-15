@@ -1,96 +1,58 @@
 //! Deterministic, deliberately conservative speech-text heuristics; not language identification.
+//!
+//! Every language-dependent decision (which diacritics fold, which ASR
+//! confusions are forgiven, how words segment, which English tokens count as
+//! the learner falling back) lives in `crate::languages::text_policy`. The
+//! functions here take the profile's language id and delegate; an unknown or
+//! blank id resolves to Spanish (see [`super::resolve_language_id`]), which is
+//! byte-for-byte the behaviour this module had when it was Spanish-only.
+use super::resolve_language_id;
+use crate::languages::text_policy::{self, TextPolicy};
 use serde::{Deserialize, Serialize};
 
-pub fn normalize(input: &str) -> String {
-    let mut out = String::new();
-    for c in input.to_lowercase().chars() {
-        // Both precomposed and decomposed Spanish diacritics. Retain letters/digits,
-        // never concatenate words across punctuation.
-        let c = match c {
-            'á' | 'à' | 'â' | 'ä' => 'a',
-            'é' | 'è' | 'ê' | 'ë' => 'e',
-            'í' | 'ì' | 'î' | 'ï' => 'i',
-            'ó' | 'ò' | 'ô' | 'ö' => 'o',
-            'ú' | 'ù' | 'û' | 'ü' => 'u',
-            'ñ' => 'n',
-            '\u{0300}'..='\u{036f}' => continue,
-            other => other,
-        };
-        if c.is_alphanumeric() {
-            out.push(c);
-        } else {
-            out.push(' ');
-        }
-    }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-pub fn words(input: &str) -> Vec<String> {
-    normalize(input)
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect()
-}
-pub fn speech_equivalent(a: &str, b: &str) -> bool {
-    fn key(s: &str) -> String {
-        normalize(s)
-            .replace("ll", "y")
-            .replace('v', "b")
-            .replace('z', "s")
-    }
-    key(a) == key(b)
-}
-pub fn contains_phrase(text: &str, phrase: &str) -> bool {
-    let text = words(text);
-    let phrase = words(phrase);
-    !phrase.is_empty()
-        && phrase.len() <= text.len()
-        && text.windows(phrase.len()).any(|w| w == phrase)
+/// The text policy for a language id, resolved as the engine resolves every
+/// language: unknown ids read as Spanish, never as the generic default.
+pub fn policy(lang: &str) -> &'static TextPolicy {
+    text_policy::text_policy(resolve_language_id(lang))
 }
 
-// ~120 function/common English words. Ambiguous Spanish tokens (a, me, no, he,
-// has, son) are deliberately omitted from evidence. This is only a heuristic.
-const ENGLISH: &str = "the this that these those i you she it we they my your his her its our their mine yours ours theirs am is are was were be been being have had do does did doing will would shall should can could may might must and or but because although if then than as of to for from with without by at in on into onto through about during before after under over between among up down out off not never always sometimes often very too also just only even still already yet here there where when why how what which who whom whose yes please thanks thank hello goodbye want need like know think understand mean say said tell speak help repeat slower again much many more most less least some any every each all both either neither other another such own same now today yesterday tomorrow really actually so well let done get got go going went been while until unless whether however";
-fn english_word(w: &str) -> bool {
-    ENGLISH.split_whitespace().any(|e| e == w)
+pub fn normalize(lang: &str, input: &str) -> String {
+    policy(lang).normalize(input)
 }
-pub fn english_ratio(input: &str) -> f32 {
-    let tokens = words(input);
-    if tokens.is_empty() {
-        0.0
-    } else {
-        tokens.iter().filter(|w| english_word(w)).count() as f32 / tokens.len() as f32
-    }
+pub fn words(lang: &str, input: &str) -> Vec<String> {
+    policy(lang).words(input)
 }
-pub fn english_question(input: &str) -> bool {
-    let n = normalize(input);
-    n.contains("how do you say")
-        || n.contains("how can i say")
-        || (n.contains("what does") && n.contains("mean"))
-        || n.starts_with("what is the spanish")
+pub fn speech_equivalent(lang: &str, a: &str, b: &str) -> bool {
+    policy(lang).speech_equivalent(a, b)
 }
-pub fn is_english_mixed(input: &str) -> bool {
-    english_question(input) || english_ratio(input) >= 0.4
-}
-/// Strong English tokens also reject mixed Spanish suggestions below the 40% threshold.
-pub fn contains_english(input: &str) -> bool {
-    is_english_mixed(input)
-        || words(input).iter().any(|w| {
-            "the with without would should because please yesterday tomorrow thanks"
-                .split_whitespace()
-                .any(|e| e == w)
-        })
-}
-pub fn english_explanation(input: &str) -> bool {
-    let n = normalize(input);
-    let count = n.split_whitespace().count();
-    count > 0
-        && count <= 30
-        && english_ratio(input) >= 0.25
-        && !n.starts_with("usa ")
-        && !n.starts_with("debes ")
-        && input.matches(['.', '!', '?']).count() <= 1
+pub fn contains_phrase(lang: &str, text: &str, phrase: &str) -> bool {
+    policy(lang).contains_phrase(text, phrase)
 }
 
+/// Share of tokens that show the learner fell back to English. Zero when the
+/// target language is English: there is nothing to fall back from.
+pub fn english_ratio(lang: &str, input: &str) -> f32 {
+    policy(lang).native_ratio(input)
+}
+pub fn english_question(lang: &str, input: &str) -> bool {
+    policy(lang).native_question(input)
+}
+pub fn is_english_mixed(lang: &str, input: &str) -> bool {
+    policy(lang).is_native_mixed(input)
+}
+/// Strong English tokens also reject mixed target-language suggestions below
+/// the 40% threshold.
+pub fn contains_english(lang: &str, input: &str) -> bool {
+    policy(lang).contains_native(input)
+}
+pub fn english_explanation(lang: &str, input: &str) -> bool {
+    policy(lang).native_explanation(input)
+}
+
+/// Learner intent. The variant names and their `snake_case` wire form are
+/// part of the golden corpus (`golden.jsonl`) and the manual judge benchmark,
+/// so they keep the Spanish-era names: `SpanishAttempt` is an attempt in the
+/// profile's target language, `EnglishMixed` a fallback to the learner's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Intent {
@@ -100,49 +62,19 @@ pub enum Intent {
     Minimal,
     EmptyOrNoise,
 }
-pub fn classify(input: &str) -> Intent {
-    let n = normalize(input);
-    let raw = input.trim();
-    // Recognized one-word controls/minimal answers take precedence over the
-    // brief's generic <2-word noise rule; otherwise "sí"/"repeat" disappear.
-    if [
-        "repeat",
-        "repeat please",
-        "slower",
-        "otra vez",
-        "mas despacio",
-        "mas lento",
-        "no entiendo",
-        "que",
-        "repite",
-        "repite por favor",
-    ]
-    .contains(&n.as_str())
-    {
-        return Intent::MetaRequest;
+impl From<text_policy::Intent> for Intent {
+    fn from(intent: text_policy::Intent) -> Self {
+        match intent {
+            text_policy::Intent::TargetAttempt => Self::SpanishAttempt,
+            text_policy::Intent::NativeMixed => Self::EnglishMixed,
+            text_policy::Intent::MetaRequest => Self::MetaRequest,
+            text_policy::Intent::Minimal => Self::Minimal,
+            text_policy::Intent::EmptyOrNoise => Self::EmptyOrNoise,
+        }
     }
-    if ["si", "no", "no se", "ok", "okay", "vale", "bien", "tal vez"].contains(&n.as_str()) {
-        return Intent::Minimal;
-    }
-    let alphabetic = n
-        .split_whitespace()
-        .filter(|w| w.chars().any(char::is_alphabetic))
-        .count();
-    if alphabetic < 2
-        || ((raw.starts_with('[') && raw.ends_with(']'))
-            || (raw.starts_with('(') && raw.ends_with(')')))
-        || ["silence", "inaudible", "music", "musica", "unintelligible"].contains(&n.as_str())
-    {
-        return Intent::EmptyOrNoise;
-    }
-    if is_english_mixed(input) {
-        return Intent::EnglishMixed;
-    }
-    if n.split_whitespace().count() <= 2 {
-        Intent::Minimal
-    } else {
-        Intent::SpanishAttempt
-    }
+}
+pub fn classify(lang: &str, input: &str) -> Intent {
+    policy(lang).classify(input).into()
 }
 
 /// Remove complete AND unfinished reasoning blocks; never speak a partial think block.
@@ -171,7 +103,7 @@ pub fn strip_thinking(input: &str) -> String {
         .trim()
         .to_string()
 }
-pub fn clean_reply(input: &str, fallback: &str) -> (String, bool) {
+pub fn clean_reply(lang: &str, input: &str, fallback: &str) -> (String, bool) {
     let clean = strip_thinking(input);
     let next = clean.contains("[[next]]");
     let stripped = clean.replace("[[next]]", "");
@@ -187,8 +119,8 @@ pub fn clean_reply(input: &str, fallback: &str) -> (String, bool) {
     // not end in a question is still the model's real reply and beats a canned line.
     if text.is_empty()
         || text.contains(['{', '}', '<', '>', '`'])
-        || english_ratio(text) >= 0.5
-        || words(text).len() > 65
+        || english_ratio(lang, text) >= 0.5
+        || words(lang, text).len() > 65
     {
         return (fallback.into(), false);
     }
@@ -234,9 +166,12 @@ pub struct WordDiff {
     pub missed_word_indices: Vec<usize>,
     pub missed_words: Vec<String>,
 }
-pub fn word_diff(target: &str, attempt: &str) -> Result<WordDiff, &'static str> {
-    let a = words(target);
-    let b = words(attempt);
+/// Token-level diff in the profile's language: whitespace words for most
+/// targets, single characters for Mandarin, so a Mandarin phrase scores per
+/// character instead of as one giant token.
+pub fn word_diff(lang: &str, target: &str, attempt: &str) -> Result<WordDiff, &'static str> {
+    let a = words(lang, target);
+    let b = words(lang, attempt);
     if a.is_empty() || a.len() > 64 || b.len() > 128 {
         return Err("Practice phrase or attempt is outside the supported word budget");
     }
@@ -280,7 +215,22 @@ pub struct PracticeResult {
     pub succeeded: bool,
     pub attempts: u8,
 }
+/// Spoken feedback after a practice attempt. Spanish keeps its reviewed lines
+/// verbatim; the registry carries no such lines for the other languages, so
+/// they get the learner's own language (English, like every explanation the
+/// tutor shows) rather than a Spanish line or an unreviewed translation.
+fn practice_message(lang: &str, succeeded: bool, last: bool) -> &'static str {
+    match (resolve_language_id(lang) == super::LEGACY_LANGUAGE_ID, succeeded, last) {
+        (true, true, _) => "¡Muy bien!",
+        (true, false, true) => "Casi. Sigamos.",
+        (true, false, false) => "Casi. ¿Otra vez?",
+        (false, true, _) => "Very good!",
+        (false, false, true) => "Almost. Let's move on.",
+        (false, false, false) => "Almost. Once more?",
+    }
+}
 pub fn practice_attempt(
+    lang: &str,
     target: &str,
     attempt: &str,
     previous_attempts: u8,
@@ -288,16 +238,10 @@ pub fn practice_attempt(
     if previous_attempts >= 3 {
         return Err("This practice exercise has already ended");
     }
-    let diff = word_diff(target, attempt)?;
+    let diff = word_diff(lang, target, attempt)?;
     let succeeded = diff.score >= 0.8;
     let attempts = previous_attempts + 1;
-    let message = if succeeded {
-        "¡Muy bien!"
-    } else if attempts == 3 {
-        "Casi. Sigamos."
-    } else {
-        "Casi. ¿Otra vez?"
-    };
+    let message = practice_message(lang, succeeded, attempts == 3);
     Ok(PracticeResult {
         diff,
         message: message.into(),
@@ -310,10 +254,13 @@ pub fn practice_attempt(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Every legacy assertion below is Spanish; the language id is the only
+    /// change to these call sites.
+    const ES: &str = "es";
     #[test]
     fn normalization() {
-        assert_eq!(normalize("  ¡Áyer, FUI! al café… "), "ayer fui al cafe");
-        assert_eq!(normalize("cafe\u{301}"), "cafe");
+        assert_eq!(normalize(ES, "  ¡Áyer, FUI! al café… "), "ayer fui al cafe");
+        assert_eq!(normalize(ES, "cafe\u{301}"), "cafe");
     }
     #[test]
     fn intents() {
@@ -322,34 +269,35 @@ mod tests {
             "what does bonito mean",
             "I want to order food",
         ] {
-            assert_eq!(classify(s), Intent::EnglishMixed);
+            assert_eq!(classify(ES, s), Intent::EnglishMixed);
         }
         for s in ["repeat", "¿Qué?", "No entiendo", "más despacio"] {
-            assert_eq!(classify(s), Intent::MetaRequest);
+            assert_eq!(classify(ES, s), Intent::MetaRequest);
         }
         for s in ["sí", "no sé", "ok", "muy bien"] {
-            assert_eq!(classify(s), Intent::Minimal);
+            assert_eq!(classify(ES, s), Intent::Minimal);
         }
         for s in ["", "[background music]", "...", "1234", "xyz"] {
-            assert_eq!(classify(s), Intent::EmptyOrNoise);
+            assert_eq!(classify(ES, s), Intent::EmptyOrNoise);
         }
-        assert_eq!(classify("Ayer fui al parque"), Intent::SpanishAttempt);
+        assert_eq!(classify(ES, "Ayer fui al parque"), Intent::SpanishAttempt);
     }
     #[test]
     fn spanish_shared_words_are_not_english() {
-        assert!(!is_english_mixed("A mi me gusta el parque"));
-        assert!(!contains_english("He ido al parque"));
-        assert!(contains_english("Quiero the agua"));
+        assert!(!is_english_mixed(ES, "A mi me gusta el parque"));
+        assert!(!contains_english(ES, "He ido al parque"));
+        assert!(contains_english(ES, "Quiero the agua"));
     }
     #[test]
     fn phrase_boundaries() {
-        assert!(contains_phrase("Yo quiero agua hoy", "quiero agua"));
-        assert!(!contains_phrase("Quiero aguacate", "quiero agua"));
+        assert!(contains_phrase(ES, "Yo quiero agua hoy", "quiero agua"));
+        assert!(!contains_phrase(ES, "Quiero aguacate", "quiero agua"));
     }
     #[test]
     fn orthographic_noise() {
-        assert!(speech_equivalent("Bamos a la caza", "Vamos a la casa"));
+        assert!(speech_equivalent(ES, "Bamos a la caza", "Vamos a la casa"));
         assert!(!speech_equivalent(
+            ES,
             "Ayer voy al parque",
             "Ayer fui al parque"
         ));
@@ -365,20 +313,20 @@ mod tests {
     #[test]
     fn reply_marker_never_spoken() {
         assert_eq!(
-            clean_reply("¿Quieres agua? [[next]]", "¿Agua o leche?"),
+            clean_reply(ES, "¿Quieres agua? [[next]]", "¿Agua o leche?"),
             ("¿Quieres agua?".into(), true)
         );
         assert_eq!(
-            clean_reply("What do you want?", "¿Agua o leche?").0,
+            clean_reply(ES, "What do you want?", "¿Agua o leche?").0,
             "¿Agua o leche?"
         );
         // Real replies survive even without a closing question or with 3 sentences.
         assert_eq!(
-            clean_reply("Tutor: \"¡Qué bien! Fuiste al parque. ¿Con quién fuiste?\"", "x").0,
+            clean_reply(ES, "Tutor: \"¡Qué bien! Fuiste al parque. ¿Con quién fuiste?\"", "x").0,
             "¡Qué bien! Fuiste al parque. ¿Con quién fuiste?"
         );
-        assert_eq!(clean_reply("Me gusta mucho el fútbol.", "x").0, "Me gusta mucho el fútbol.");
-        assert_eq!(clean_reply("{\"reply\": \"hola\"}", "x").0, "x");
+        assert_eq!(clean_reply(ES, "Me gusta mucho el fútbol.", "x").0, "Me gusta mucho el fútbol.");
+        assert_eq!(clean_reply(ES, "{\"reply\": \"hola\"}", "x").0, "x");
     }
     #[test]
     fn sentence_limit_keeps_the_question() {
@@ -395,11 +343,11 @@ mod tests {
     }
     #[test]
     fn diff_and_threshold() {
-        let d = word_diff("Ayer fui al parque contigo", "ayer fui parque contigo").unwrap();
+        let d = word_diff(ES, "Ayer fui al parque contigo", "ayer fui parque contigo").unwrap();
         assert_eq!(d.score, 0.8);
         assert_eq!(d.missed_word_indices, vec![2]);
         assert!(
-            practice_attempt("Ayer fui al parque contigo", "ayer fui parque contigo", 0)
+            practice_attempt(ES, "Ayer fui al parque contigo", "ayer fui parque contigo", 0)
                 .unwrap()
                 .succeeded
         );
@@ -407,20 +355,56 @@ mod tests {
     #[test]
     fn repeated_words_count_once() {
         assert_eq!(
-            word_diff("muy muy bien", "muy bien").unwrap().score,
+            word_diff(ES, "muy muy bien", "muy bien").unwrap().score,
             2.0 / 3.0
         );
     }
     #[test]
     fn three_attempts_exit_positively() {
-        let r = practice_attempt("Quiero un vaso de agua", "hola", 2).unwrap();
+        let r = practice_attempt(ES, "Quiero un vaso de agua", "hola", 2).unwrap();
         assert!(r.done);
         assert!(!r.succeeded);
         assert_eq!(r.message, "Casi. Sigamos.");
-        assert!(practice_attempt("agua", "agua", 3).is_err());
+        assert!(practice_attempt(ES, "agua", "agua", 3).is_err());
     }
     #[test]
     fn oversized_diff_is_bounded() {
-        assert!(word_diff(&vec!["a"; 65].join(" "), "a").is_err());
+        assert!(word_diff(ES, &vec!["a"; 65].join(" "), "a").is_err());
+    }
+    #[test]
+    fn mandarin_tokens_are_characters_and_unknown_language_is_spanish() {
+        // Whitespace-free scripts segment per character, so a Mandarin
+        // learner's token counts, phrase grounding and practice diffs work.
+        assert_eq!(words("zh", "我喜欢喝茶").len(), 5);
+        assert_eq!(words("es", "我喜欢喝茶").len(), 1);
+        assert_eq!(classify("zh", "我喜欢喝茶"), Intent::SpanishAttempt);
+        assert_eq!(classify("zh", "再说一遍"), Intent::MetaRequest);
+        assert!(contains_phrase("zh", "我今天喜欢喝茶", "喜欢喝茶"));
+        let d = word_diff("zh", "我喜欢喝茶", "我喜欢茶").unwrap();
+        assert_eq!(d.score, 0.8);
+        assert_eq!(d.missed_words, vec!["喝"]);
+        // Spanish practice lines are untouched; other languages get English.
+        assert_eq!(practice_attempt("es", "agua", "agua", 0).unwrap().message, "¡Muy bien!");
+        assert_eq!(practice_attempt("zh", "茶", "茶", 0).unwrap().message, "Very good!");
+        // German keeps ß and umlauts; Spanish folding is not applied to it.
+        assert_eq!(normalize("de", "Straße"), "straße");
+        assert_eq!(normalize("es", "Straße"), "straße");
+        assert_eq!(classify("de", "Ich möchte bitte einen Kaffee"), Intent::SpanishAttempt);
+        // A blank or unknown id behaves exactly like Spanish, never panics.
+        for lang in ["", "xx", "  "] {
+            assert_eq!(normalize(lang, "¡Áyer, FUI!"), normalize("es", "¡Áyer, FUI!"));
+            assert!(speech_equivalent(lang, "Bamos a la caza", "Vamos a la casa"));
+            assert_eq!(classify(lang, "Ayer fui al parque"), Intent::SpanishAttempt);
+            assert_eq!(classify(lang, "más despacio"), Intent::MetaRequest);
+        }
+        assert!(!speech_equivalent("de", "Bamos a la caza", "Vamos a la casa"));
+    }
+    #[test]
+    fn english_target_replies_are_never_rejected_as_english() {
+        assert_eq!(
+            clean_reply("en", "What would you like to drink?", "x").0,
+            "What would you like to drink?"
+        );
+        assert_eq!(clean_reply("es", "What would you like to drink?", "x").0, "x");
     }
 }

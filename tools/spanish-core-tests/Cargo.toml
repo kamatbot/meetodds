@@ -7,9 +7,11 @@ publish = false
 # Independent workspace: run pure/core tests without Tauri, audio, GPU or a model.
 [workspace]
 
+# The engine depends on crate::languages, so the root under src/ compiles the
+# language registry with it and re-exports the engine at the top level.
 [lib]
 name = "spanish_core"
-path = "../../frontend/src-tauri/src/spanish/mod.rs"
+path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

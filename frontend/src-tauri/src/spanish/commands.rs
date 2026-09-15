@@ -570,7 +570,7 @@ pub async fn spanish_help_suggestion<R: Runtime>(
     .await?;
     let cleaned = core::text::strip_thinking(&raw);
     let line = core::text::limit_sentences(cleaned.trim().trim_matches('"').trim(), 1);
-    if line.is_empty() || core::text::english_ratio(&line) >= 0.5 {
+    if line.is_empty() || core::text::english_ratio(resolve_language(&profile.language), &line) >= 0.5 {
         return Err("The model did not return a Spanish example.".to_string());
     }
     Ok(line)
@@ -1111,7 +1111,7 @@ pub async fn spanish_tutor_turn<R: Runtime>(
     }
 
     let text = request.learner_text.unwrap_or_default();
-    let intent = core::text::classify(&text);
+    let intent = core::text::classify(learner.language_id(), &text);
     let learner_input =
         mode == core::tutor::Mode::Reply && !matches!(intent, core::text::Intent::EmptyOrNoise | core::text::Intent::MetaRequest);
     let needs_model =
@@ -1184,9 +1184,9 @@ pub async fn spanish_tutor_turn<R: Runtime>(
             core::policy::observe(
                 &mut tutoring,
                 &learner,
-                core::Observation { tokens: core::text::words(&text).len(), error: None, english_mixed: intent == core::text::Intent::EnglishMixed },
+                core::Observation { tokens: core::text::words(learner.language_id(), &text).len(), error: None, english_mixed: intent == core::text::Intent::EnglishMixed },
             );
-            core::scenes::advance(&mut tutoring, false);
+            core::scenes::advance(learner.language_id(), &mut tutoring, false);
         }
         for event in &audible {
             tutoring.remember("tutor", &event.text);
@@ -1253,8 +1253,17 @@ pub struct PracticeResult {
 }
 
 #[tauri::command]
-pub fn spanish_practice_attempt(target: String, attempt: String, previous_attempts: u8) -> Result<PracticeResult, String> {
-    let result = core::text::practice_attempt(&target, &attempt, previous_attempts).map_err(|e| e.to_string())?;
+pub fn spanish_practice_attempt(
+    target: String,
+    attempt: String,
+    previous_attempts: u8,
+    // Optional so a client that predates language selection keeps working; an
+    // absent or unknown value resolves to Spanish, as elsewhere.
+    language: Option<String>,
+) -> Result<PracticeResult, String> {
+    let lang = resolve_language(language.as_deref().unwrap_or_default());
+    let result = core::text::practice_attempt(lang, &target, &attempt, previous_attempts)
+        .map_err(|e| e.to_string())?;
     Ok(PracticeResult {
         score: result.diff.score,
         missed_word_indices: result.diff.missed_word_indices,

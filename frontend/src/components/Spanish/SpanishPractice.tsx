@@ -862,6 +862,9 @@ function SessionScreen({
         target: practice.target,
         attempt: text,
         previousAttempts: practice.previousAttempts.length,
+        // Scoring uses the target language's text rules; omitting it would
+        // fall back to Spanish on the native side.
+        language: profile.language,
       });
       const nextAttempts = [...practice.previousAttempts, text];
       if (res.done) {

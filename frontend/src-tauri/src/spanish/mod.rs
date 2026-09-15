@@ -15,52 +15,15 @@ pub use tutor::{Mode, TutorEngine, TutorReplyEvent, TutorRequest, TutorResponse}
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Level {
-    #[default]
-    Beginner,
-    Intermediate,
-    Advanced,
-}
-impl Level {
-    pub fn dial(self) -> u8 {
-        match self {
-            Self::Beginner => 0,
-            Self::Intermediate => 1,
-            Self::Advanced => 2,
-        }
-    }
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Beginner => "beginner",
-            Self::Intermediate => "intermediate",
-            Self::Advanced => "advanced",
-        }
-    }
-}
+/// Learner level, grammar category and judge structure metadata are the
+/// wire-compatible types from the language registry: one flat `Category`
+/// namespace for every language (the Spanish twelve keep their names, order
+/// and snake_case wire strings), so a German judge can return `case` and a
+/// Mandarin one `measure_word` through the same `Feedback` struct. Which
+/// categories a given language's judge may return is decided by
+/// `languages::grammar::Taxonomy`, checked in `policy::validate`.
+pub use crate::languages::grammar::{Category, Level, Structure};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Category {
-    VerbTense,
-    VerbConjugation,
-    SerEstar,
-    GenderAgreement,
-    NumberAgreement,
-    Article,
-    Preposition,
-    WordChoice,
-    WordOrder,
-    MissingWord,
-    EnglishMixed,
-    Other,
-}
-impl Default for Category {
-    fn default() -> Self {
-        Self::Other
-    }
-}
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -68,20 +31,6 @@ pub enum Severity {
     #[default]
     Core,
     Polish,
-}
-/// Optional judge metadata disambiguates present conjugation from subjunctive, etc.
-/// Missing metadata is treated conservatively, not assumed to be present tense.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Structure {
-    Present,
-    Past,
-    Future,
-    Subjunctive,
-    Conditional,
-    Register,
-    #[default]
-    General,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -134,14 +83,29 @@ pub struct LearnerProfile {
 /// written before the tutor became multilingual actually was.
 pub const LEGACY_LANGUAGE_ID: &str = "es";
 
+/// Maps a stored or client-supplied language id onto a registered one. Blank
+/// (pre-multilingual profiles) and unrecognised ids both read as Spanish, so
+/// every per-language lookup in the engine (text policy, grammar taxonomy,
+/// scenes, free-talk content, prompts) degrades to the legacy behaviour
+/// instead of to a generic default or a panic.
+pub fn resolve_language_id(id: &str) -> &'static str {
+    crate::languages::module(id.trim())
+        .map(|m| m.id)
+        .unwrap_or(LEGACY_LANGUAGE_ID)
+}
+
+/// The registry module for a language id, resolved as [`resolve_language_id`].
+/// Total: Spanish is always registered, so the fallback is never reached.
+pub fn language_module(id: &str) -> &'static crate::languages::LanguageModule {
+    crate::languages::module(resolve_language_id(id)).unwrap_or(&crate::languages::SPANISH)
+}
+
 impl LearnerProfile {
-    pub fn language_id(&self) -> &str {
-        let id = self.language.trim();
-        if id.is_empty() {
-            LEGACY_LANGUAGE_ID
-        } else {
-            id
-        }
+    pub fn language_id(&self) -> &'static str {
+        resolve_language_id(&self.language)
+    }
+    pub fn language_module(&self) -> &'static crate::languages::LanguageModule {
+        language_module(&self.language)
     }
 }
 

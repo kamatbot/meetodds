@@ -24,6 +24,8 @@ struct Case {
 #[derive(Deserialize)]
 struct Expected { intent: Intent, category: Option<Category>, severity: Option<Severity> }
 
+/// The corpus is Spanish; the engine now takes the profile's language id.
+fn profile_language() -> &'static str { spanish_core::LEGACY_LANGUAGE_ID }
 fn local_endpoint(url: &str) -> Result<String, String> {
     let rest = url.strip_prefix("http://").ok_or("Use an explicit loopback HTTP server, not a hosted endpoint.")?;
     if rest.contains(['@', '?', '#', '\\']) { return Err("Unsupported endpoint URL.".into()); }
@@ -76,7 +78,7 @@ fn run() -> Result<(), String> {
     let mut latencies = Vec::new();
     eprintln!("Manual synthetic corpus; model alias: {model}. Confirm the server's GGUF/version/quantization separately. This is judge-call latency, NOT first spoken-word latency.");
     for case in cases {
-        let intent = text::classify(&case.learner);
+        let intent = text::classify(profile_language(), &case.learner);
         if intent != case.expected.intent {
             println!("{}: FAIL intent {:?} != {:?}", case.id, intent, case.expected.intent); failed += 1; continue;
         }
@@ -90,7 +92,7 @@ fn run() -> Result<(), String> {
         let raw = query(&endpoint, model, judge_prompt(&profile, &state, &case.learner, intent == Intent::EnglishMixed))?;
         let millis = start.elapsed().as_secs_f64() * 1000.0;
         latencies.push(millis);
-        match policy::validate(&raw, &case.learner, intent == Intent::EnglishMixed) {
+        match policy::validate(profile.language_id(), &raw, &case.learner, intent == Intent::EnglishMixed) {
             Err(reason) => { println!("{}: FAIL invalid finding {:?} ({millis:.0} ms)", case.id, reason); failed += 1; invalid += 1; }
             Ok(finding) => {
                 let error = finding.as_ref().filter(|finding| finding.has_error);
@@ -123,7 +125,7 @@ fn main() { if let Err(message) = run() { eprintln!("{message}"); std::process::
         for line in include_str!("../../../frontend/src-tauri/src/spanish/golden.jsonl").lines() {
             let case: Case = serde_json::from_str(line).unwrap();
             assert!(ids.insert(case.id.clone()));
-            assert_eq!(text::classify(&case.learner), case.expected.intent, "{}", case.id);
+            assert_eq!(text::classify(profile_language(), &case.learner), case.expected.intent, "{}", case.id);
         }
         assert!(ids.len() >= 40);
     }

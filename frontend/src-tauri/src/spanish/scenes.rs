@@ -1,31 +1,17 @@
 //! Situation content and deterministic progression. No model calls.
-use super::{Level, OpenerUse, SessionState, SpanishProfile};
+//!
+//! Spanish keeps its hand-written [`SCENES`] here; every other language's
+//! scenes come from `crate::languages::scenes`, and the free-talk lines
+//! (closing, fallbacks, pacing instructions, topic openers) for all languages
+//! including Spanish come from `crate::languages::talk`. Lookups take the
+//! profile's language id; an unknown id resolves to Spanish.
+use super::{resolve_language_id, OpenerUse, SessionState, SpanishProfile};
+use crate::languages::talk::{self, TalkContent};
 
-#[derive(Debug, Clone, Copy)]
-pub struct Beat {
-    pub goal: &'static str,
-    pub opener: &'static str,
-    pub options: &'static str,
-    pub max_turns: usize,
-}
-#[derive(Debug)]
-pub struct Scene {
-    pub id: &'static str,
-    pub tutor_role: &'static str,
-    pub learner_role: &'static str,
-    pub goal: &'static str,
-    pub beats: [Beat; 4],
-    pub target_structures: [[&'static str; 2]; 3],
-    pub filler: &'static str,
-}
-impl Scene {
-    pub fn beat(&self, index: usize) -> &Beat {
-        &self.beats[index.min(self.beats.len() - 1)]
-    }
-    pub fn targets(&self, level: Level) -> &[&'static str; 2] {
-        &self.target_structures[level.dial() as usize]
-    }
-}
+/// The one `Scene`/`Beat` shape shared by every language, so `scene()` can
+/// serve the Spanish set and the registry sets through a single type.
+pub use crate::languages::scenes::{Beat, Scene};
+
 macro_rules! beat {
     ($goal:literal,$opener:literal,$options:literal) => {
         Beat {
@@ -306,23 +292,44 @@ pub static SCENES: [Scene; 8] = [
         ],
     },
 ];
-pub fn scene(id: &str) -> Option<&'static Scene> {
-    SCENES.iter().find(|s| s.id == id)
-}
-pub const CLOSING: &str =
-    "¡Muy bien, terminamos! ¿Quieres practicar otra vez o hablar de otro tema?";
-pub const TALK_FALLBACK: &str = "¿Qué te gusta hacer en tu tiempo libre?";
-pub fn fallback(s: &SessionState) -> &'static str {
-    if s.scene_done {
-        CLOSING
+/// The scene set for a language: Spanish is hand-written here, the rest come
+/// from the registry. A registered language without scenes (none today) and
+/// an unknown id both fall back to Spanish rather than to nothing.
+pub fn scenes_for(lang: &str) -> &'static [Scene; 8] {
+    let lang = resolve_language_id(lang);
+    if lang == super::LEGACY_LANGUAGE_ID {
+        &SCENES
     } else {
-        scene(&s.scene_id)
-            .map(|c| c.beat(s.beat).opener)
-            .unwrap_or(TALK_FALLBACK)
+        crate::languages::scenes::scenes_for(lang).unwrap_or(&SCENES)
     }
 }
-pub fn scaffold(s: &SessionState) -> &'static str {
-    scene(&s.scene_id)
+pub fn scene(lang: &str, id: &str) -> Option<&'static Scene> {
+    scenes_for(lang).iter().find(|s| s.id == id)
+}
+/// Free-talk content for a language. Every registered language has an entry;
+/// Spanish is the fallback for an unknown id, matching `resolve_language_id`.
+pub fn talk_for(lang: &str) -> &'static TalkContent {
+    talk::talk_for(resolve_language_id(lang)).unwrap_or(&talk::SPANISH_TALK)
+}
+/// Said once a scene is finished.
+pub fn closing(lang: &str) -> &'static str {
+    talk_for(lang).closing
+}
+/// Opens free talk when no scene is driving the conversation.
+pub fn talk_fallback(lang: &str) -> &'static str {
+    talk_for(lang).talk_fallback
+}
+pub fn fallback(lang: &str, s: &SessionState) -> &'static str {
+    if s.scene_done {
+        closing(lang)
+    } else {
+        scene(lang, &s.scene_id)
+            .map(|c| c.beat(s.beat).opener)
+            .unwrap_or(talk_fallback(lang))
+    }
+}
+pub fn scaffold(lang: &str, s: &SessionState) -> &'static str {
+    scene(lang, &s.scene_id)
         .map(|c| {
             let b = c.beat(s.beat);
             if b.options.is_empty() {
@@ -331,13 +338,20 @@ pub fn scaffold(s: &SessionState) -> &'static str {
                 b.options
             }
         })
-        .unwrap_or("¿Quieres hablar de comida o de juegos?")
+        .unwrap_or(talk_for(lang).scaffold_fallback)
 }
-pub fn advance(s: &mut SessionState, reported_met: bool) {
+/// Thinking noise spoken while a slow reply is generated: the scene's own
+/// line, or for free talk the language's first scene's line.
+pub fn filler(lang: &str, s: &SessionState) -> &'static str {
+    scene(lang, &s.scene_id)
+        .map(|x| x.filler)
+        .unwrap_or(scenes_for(lang)[0].filler)
+}
+pub fn advance(lang: &str, s: &mut SessionState, reported_met: bool) {
     if s.scene_done || s.scene_id == "just_talk" {
         return;
     }
-    let Some(scene) = scene(&s.scene_id) else {
+    let Some(scene) = scene(lang, &s.scene_id) else {
         return;
     };
     s.beat_turns = s.beat_turns.saturating_add(1);
@@ -350,142 +364,12 @@ pub fn advance(s: &mut SessionState, reported_met: bool) {
         }
     }
 }
-pub fn dial_instruction(dial: u8) -> &'static str {
-    match dial {
-        0 => "UNA sola pregunta corta (máximo 10 palabras), en presente, una cláusula. Nada antes de la pregunta.",
-        1 => "Máximo dos frases cortas con vocabulario familiar; termina con una pregunta.",
-        2 => "Natural sentences; invite reasons and past experiences.",
-        _ => "Natural idioms and nuanced follow-up questions.",
-    }
+/// Model-facing pacing instruction for a dial position, in this language's
+/// reviewed wording. Clamps rather than panicking on a stored dial.
+pub fn dial_instruction(lang: &str, dial: u8) -> &'static str {
+    talk_for(lang).dial_instruction(dial)
 }
 
-#[derive(Debug)]
-pub struct Topic {
-    pub id: &'static str,
-    pub openers: [[&'static str; 3]; 3],
-}
-pub static TOPICS: [Topic; 6] = [
-    Topic {
-        id: "family",
-        openers: [
-            [
-                "¿Qué te gusta hacer con tu familia?",
-                "¿Con quién hablas más en casa?",
-                "¿Qué hacéis juntos los fines de semana?",
-            ],
-            [
-                "¿Qué hiciste con tu familia el fin de semana pasado?",
-                "¿Qué tradición familiar te gusta más?",
-                "¿Cómo ha cambiado tu familia con el tiempo?",
-            ],
-            [
-                "¿Qué costumbre familiar te gustaría conservar siempre?",
-                "¿Cómo resolverías una diferencia de opinión en casa?",
-                "¿Qué has aprendido de alguien de tu familia?",
-            ],
-        ],
-    },
-    Topic {
-        id: "school",
-        openers: [
-            [
-                "¿Qué asignatura te gusta más?",
-                "¿Qué haces durante el recreo?",
-                "¿Cómo es tu clase?",
-            ],
-            [
-                "¿Qué aprendiste esta semana?",
-                "¿Qué cambiarías de tu horario?",
-                "¿Cómo te preparas para un proyecto?",
-            ],
-            [
-                "¿Qué hace que una clase sea interesante?",
-                "¿Cómo diseñarías tu escuela ideal?",
-                "¿Es más importante memorizar o comprender?",
-            ],
-        ],
-    },
-    Topic {
-        id: "sports",
-        openers: [
-            [
-                "¿Qué deporte te gusta?",
-                "¿Prefieres jugar o ver partidos?",
-                "¿Dónde haces ejercicio?",
-            ],
-            [
-                "¿Cuándo empezaste a practicar ese deporte?",
-                "¿Cómo fue el último partido que viste?",
-                "¿Qué deporte te gustaría probar?",
-            ],
-            [
-                "¿Qué valoras más en un equipo?",
-                "¿Qué cambiarías de las reglas de tu deporte favorito?",
-                "¿Cómo influye el deporte en tu vida?",
-            ],
-        ],
-    },
-    Topic {
-        id: "food",
-        openers: [
-            [
-                "¿Cuál es tu comida favorita?",
-                "¿Qué desayunas normalmente?",
-                "¿Prefieres dulce o salado?",
-            ],
-            [
-                "¿Qué cocinaste o comiste ayer?",
-                "¿Qué plato te gustaría aprender a preparar?",
-                "¿Qué comida probaste por primera vez recientemente?",
-            ],
-            [
-                "¿Qué plato representa mejor un lugar que conoces?",
-                "¿Cómo han cambiado tus gustos con los años?",
-                "¿Qué hace que una comida sea memorable?",
-            ],
-        ],
-    },
-    Topic {
-        id: "travel",
-        openers: [
-            [
-                "¿Adónde quieres viajar?",
-                "¿Prefieres la playa o la montaña?",
-                "¿Qué llevas en tu mochila?",
-            ],
-            [
-                "¿Cómo fueron tus últimas vacaciones?",
-                "¿Qué lugar te sorprendió más?",
-                "¿Cómo prepararías un viaje corto?",
-            ],
-            [
-                "¿Qué aprendiste viajando que no esperabas?",
-                "¿Cómo elegirías entre comodidad y aventura?",
-                "¿Qué hace que te sientas en casa en otro lugar?",
-            ],
-        ],
-    },
-    Topic {
-        id: "games",
-        openers: [
-            [
-                "¿Cuál es tu juego favorito?",
-                "¿Con quién te gusta jugar?",
-                "¿Prefieres juegos de mesa o videojuegos?",
-            ],
-            [
-                "¿Cómo aprendiste a jugar a tu juego favorito?",
-                "¿Qué pasó en tu última partida?",
-                "¿Qué juego recomendarías a un amigo?",
-            ],
-            [
-                "¿Qué hace que un juego siga siendo interesante?",
-                "¿Cómo diseñarías un juego cooperativo?",
-                "¿Qué cambiarías de tu juego favorito y por qué?",
-            ],
-        ],
-    },
-];
 /// Preferred topics first; broaden only when all their three openers were used
 /// recently. A single topic's three openers cannot by themselves satisfy a
 /// five-session nonrepeat window. This fallback makes that rule achievable.
@@ -508,9 +392,10 @@ pub fn choose_opener(
         .filter(|x| sessions.contains(&x.session_id.as_str()))
         .map(|x| x.opener_id.as_str())
         .collect();
+    let talk = talk_for(p.language_id());
     let mut candidates = vec![];
-    for topic in &TOPICS {
-        for (i, text) in topic.openers[p.level.dial() as usize].iter().enumerate() {
+    for topic in &talk.topics {
+        for (i, text) in topic.openers_for(p.level.dial()).iter().enumerate() {
             let id = format!("{}:{}:{}", topic.id, p.level.name(), i);
             if !recent_ids.contains(&id.as_str()) {
                 candidates.push((
@@ -522,8 +407,18 @@ pub fn choose_opener(
         }
     }
     candidates.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    // 18 candidates per level > five prior sessions, so this is always populated.
-    let (_, id, text) = candidates.remove(0);
+    // 18 candidates per level > the six-entry history window, so this is always
+    // populated; the fallback only keeps stored state from ever panicking here.
+    let (_, id, text) = if candidates.is_empty() {
+        let topic = &talk.topics[0];
+        (
+            true,
+            format!("{}:{}:0", topic.id, p.level.name()),
+            topic.openers_for(p.level.dial())[0],
+        )
+    } else {
+        candidates.remove(0)
+    };
     (
         OpenerUse {
             session_id: session_id.into(),
@@ -535,7 +430,11 @@ pub fn choose_opener(
 
 #[cfg(test)]
 mod tests {
+    use super::super::Level;
     use super::*;
+    /// Every legacy assertion below is Spanish; the language id is the only
+    /// change to these call sites.
+    const ES: &str = "es";
     #[test]
     fn eight_complete_scripts() {
         assert_eq!(SCENES.len(), 8);
@@ -553,10 +452,10 @@ mod tests {
     #[test]
     fn token_and_timeout_advance() {
         let mut s = SessionState::new("s", "ordering_food", Level::Beginner);
-        advance(&mut s, true);
+        advance(ES, &mut s, true);
         assert_eq!(s.beat, 1);
         for _ in 0..3 {
-            advance(&mut s, false);
+            advance(ES, &mut s, false);
         }
         assert_eq!(s.beat, 2);
     }
@@ -564,17 +463,17 @@ mod tests {
     fn last_beat_closes_without_overflow() {
         let mut s = SessionState::new("s", "ordering_food", Level::Beginner);
         s.beat = 3;
-        advance(&mut s, true);
+        advance(ES, &mut s, true);
         assert!(s.scene_done);
         assert_eq!(s.beat, 3);
-        advance(&mut s, true);
-        assert_eq!(fallback(&s), CLOSING);
+        advance(ES, &mut s, true);
+        assert_eq!(fallback(ES, &s), closing(ES));
     }
     #[test]
     fn talk_does_not_end() {
         let mut s = SessionState::new("s", "just_talk", Level::Beginner);
         for _ in 0..100 {
-            advance(&mut s, true);
+            advance(ES, &mut s, true);
         }
         assert!(!s.scene_done);
     }
@@ -600,5 +499,48 @@ mod tests {
         };
         let (u, _) = choose_opener(&p, &[], "s");
         assert!(u.opener_id.starts_with("sports:intermediate:"));
+    }
+    #[test]
+    fn scenes_and_talk_follow_the_language() {
+        let german = crate::languages::scenes::scenes_for("de").unwrap();
+        let de = scene("de", "ordering_food").unwrap();
+        assert_eq!(de, &german[0]);
+        assert_ne!(de.beats[0].opener, scene(ES, "ordering_food").unwrap().beats[0].opener);
+        assert_eq!(scene(ES, "ordering_food").unwrap().beats[0].opener, "¡Hola! ¿Qué quieres tomar?");
+        // Every registered language serves all eight scene ids.
+        for m in crate::languages::LANGUAGES.iter() {
+            for id in crate::languages::scenes::SCENE_IDS {
+                assert!(scene(m.id, id).is_some(), "{} {id}", m.id);
+            }
+            assert!(!closing(m.id).is_empty() && !talk_fallback(m.id).is_empty());
+        }
+        let s = SessionState::new("s", "ordering_food", Level::Beginner);
+        assert_eq!(fallback("de", &s), de.beats[0].opener);
+        assert_eq!(scaffold("de", &s), de.beats[0].options);
+        assert_eq!(filler("de", &s), de.filler);
+        assert_eq!(closing("de"), crate::languages::talk::talk_for("de").unwrap().closing);
+        assert_eq!(dial_instruction("de", 0), crate::languages::talk::talk_for("de").unwrap().dial_instructions[0]);
+        assert_eq!(dial_instruction(ES, 9), dial_instruction(ES, 3));
+        // Free talk in German draws German openers for the preferred topic.
+        let p = SpanishProfile {
+            topics: vec!["food".into()],
+            language: "de".into(),
+            ..Default::default()
+        };
+        let (u, text) = choose_opener(&p, &[], "s");
+        assert!(u.opener_id.starts_with("food:beginner:"));
+        let de_talk = crate::languages::talk::talk_for("de").unwrap();
+        assert!(de_talk.topic("food").unwrap().openers_for(0).contains(&text));
+        // Unknown or blank ids degrade to Spanish rather than to nothing.
+        for lang in ["", "xx"] {
+            assert_eq!(scene(lang, "ordering_food").unwrap(), scene(ES, "ordering_food").unwrap());
+            assert_eq!(closing(lang), "¡Muy bien, terminamos! ¿Quieres practicar otra vez o hablar de otro tema?");
+            assert_eq!(talk_fallback(lang), "¿Qué te gusta hacer en tu tiempo libre?");
+            let just_talk = SessionState::new("s", "just_talk", Level::Beginner);
+            assert_eq!(scaffold(lang, &just_talk), "¿Quieres hablar de comida o de juegos?");
+            assert_eq!(filler(lang, &just_talk), "Mmm, a ver…");
+        }
+        let (_, text) = choose_opener(&SpanishProfile { language: "xx".into(), ..Default::default() }, &[], "s");
+        assert!(text.starts_with('¿'));
     }
 }
