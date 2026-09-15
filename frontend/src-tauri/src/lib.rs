@@ -44,6 +44,7 @@ pub mod config;
 pub mod console_utils;
 pub mod database;
 pub mod groq;
+pub mod languages;
 pub mod live_translation;
 pub mod manual_notes_window;
 pub mod notifications;
@@ -684,6 +685,9 @@ pub fn run() {
             live_translation::api_cancel_live_translation,
             live_translation::api_warm_live_translation,
             live_translation::api_prepare_live_translation,
+            languages::commands::languages_list,
+            languages::commands::languages_themes,
+            languages::commands::languages_meaning_options,
             spanish::commands::spanish_list_profiles,
             spanish::commands::spanish_save_profile,
             spanish::commands::spanish_delete_profile,

@@ -1,0 +1,17 @@
+[package]
+name = "meetodds-languages-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Independent workspace, mirroring tools/spanish-core-tests: compiles the
+# language registry as a standalone lib so its data can be tested without
+# Tauri, audio, GPU or a model.
+[workspace]
+
+[lib]
+name = "meetodds_languages"
+path = "../../frontend/src-tauri/src/languages/mod.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
