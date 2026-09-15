@@ -15,6 +15,7 @@ pub mod commands;
 
 pub mod grammar;
 pub mod prompts;
+pub mod text_policy;
 pub mod scenes;
 pub mod talk;
 

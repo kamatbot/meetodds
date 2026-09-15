@@ -404,8 +404,7 @@ impl LevelTable {
             Level::Intermediate => {
                 c != Category::Other
                     && !self.advanced_only.contains(&c)
-                    && !(self.intermediate_needs_structure.contains(&c)
-                        && s == Structure::General)
+                    && !(self.intermediate_needs_structure.contains(&c) && s == Structure::General)
             }
             Level::Advanced => true,
         }
@@ -602,7 +601,12 @@ const GERMAN_LEVELS: LevelTable = LevelTable {
     beginner_present_only: &[C::VerbConjugation],
     intermediate_needs_structure: &[C::VerbConjugation, C::VerbTense],
     advanced_only: &[C::SubordinateClause],
-    above_beginner: &[C::Preposition, C::WordChoice, C::SeparableVerb, C::SubordinateClause],
+    above_beginner: &[
+        C::Preposition,
+        C::WordChoice,
+        C::SeparableVerb,
+        C::SubordinateClause,
+    ],
     above_intermediate: &[C::SubordinateClause],
 };
 
@@ -636,7 +640,12 @@ const NORWEGIAN_LEVELS: LevelTable = LevelTable {
     beginner_present_only: &[C::VerbTense],
     intermediate_needs_structure: &[C::VerbTense],
     advanced_only: &[C::SubordinateClause],
-    above_beginner: &[C::Preposition, C::WordChoice, C::VerbSecond, C::SubordinateClause],
+    above_beginner: &[
+        C::Preposition,
+        C::WordChoice,
+        C::VerbSecond,
+        C::SubordinateClause,
+    ],
     above_intermediate: &[C::SubordinateClause],
 };
 
@@ -1038,18 +1047,78 @@ mod tests {
 
     /// (variant, wire, explanation, label) as spanish/mod.rs + policy.rs define them.
     const SPANISH_ORACLE: [(Category, &str, &str, &str); 12] = [
-        (C::VerbTense, "verb_tense", "The verb tense needs to match when the action happens.", "When actions happen"),
-        (C::VerbConjugation, "verb_conjugation", "The verb ending needs to agree with the person doing the action.", "Verb endings"),
-        (C::SerEstar, "ser_estar", "Spanish uses different verbs for identity and for states or location.", "Ser and estar"),
-        (C::GenderAgreement, "gender_agreement", "The adjective and article need to match the noun's grammatical gender.", "Grammatical gender"),
-        (C::NumberAgreement, "number_agreement", "The words describing a noun need to match its singular or plural form.", "Singular and plural"),
-        (C::Article, "article", "The article needs to fit the noun and how it is used here.", "Articles"),
-        (C::Preposition, "preposition", "This relationship between words needs a different preposition in Spanish.", "Prepositions"),
-        (C::WordChoice, "word_choice", "A different Spanish word expresses your intended meaning more clearly here.", "Choosing words"),
-        (C::WordOrder, "word_order", "The order of these words needs to fit the structure of this Spanish sentence.", "Word order"),
-        (C::MissingWord, "missing_word", "This Spanish sentence needs another word to express the complete idea.", "Complete sentences"),
-        (C::EnglishMixed, "english_mixed", "This Spanish phrase expresses the idea you asked about in English.", "Useful Spanish phrases"),
-        (C::Other, "other", "This sentence structure needs an adjustment to express your intended meaning clearly.", "Sentence structure"),
+        (
+            C::VerbTense,
+            "verb_tense",
+            "The verb tense needs to match when the action happens.",
+            "When actions happen",
+        ),
+        (
+            C::VerbConjugation,
+            "verb_conjugation",
+            "The verb ending needs to agree with the person doing the action.",
+            "Verb endings",
+        ),
+        (
+            C::SerEstar,
+            "ser_estar",
+            "Spanish uses different verbs for identity and for states or location.",
+            "Ser and estar",
+        ),
+        (
+            C::GenderAgreement,
+            "gender_agreement",
+            "The adjective and article need to match the noun's grammatical gender.",
+            "Grammatical gender",
+        ),
+        (
+            C::NumberAgreement,
+            "number_agreement",
+            "The words describing a noun need to match its singular or plural form.",
+            "Singular and plural",
+        ),
+        (
+            C::Article,
+            "article",
+            "The article needs to fit the noun and how it is used here.",
+            "Articles",
+        ),
+        (
+            C::Preposition,
+            "preposition",
+            "This relationship between words needs a different preposition in Spanish.",
+            "Prepositions",
+        ),
+        (
+            C::WordChoice,
+            "word_choice",
+            "A different Spanish word expresses your intended meaning more clearly here.",
+            "Choosing words",
+        ),
+        (
+            C::WordOrder,
+            "word_order",
+            "The order of these words needs to fit the structure of this Spanish sentence.",
+            "Word order",
+        ),
+        (
+            C::MissingWord,
+            "missing_word",
+            "This Spanish sentence needs another word to express the complete idea.",
+            "Complete sentences",
+        ),
+        (
+            C::EnglishMixed,
+            "english_mixed",
+            "This Spanish phrase expresses the idea you asked about in English.",
+            "Useful Spanish phrases",
+        ),
+        (
+            C::Other,
+            "other",
+            "This sentence structure needs an adjustment to express your intended meaning clearly.",
+            "Sentence structure",
+        ),
     ];
 
     // --- Spanish behaviour identity ---------------------------------------
@@ -1111,7 +1180,11 @@ mod tests {
         let es = Taxonomy::Spanish;
         assert!(!es.at_level(C::VerbTense, Structure::Past, Level::Beginner));
         assert!(es.at_level(C::VerbTense, Structure::Past, Level::Intermediate));
-        assert!(!es.at_level(C::VerbConjugation, Structure::Subjunctive, Level::Intermediate));
+        assert!(!es.at_level(
+            C::VerbConjugation,
+            Structure::Subjunctive,
+            Level::Intermediate
+        ));
         assert!(!es.at_level(C::SerEstar, Structure::General, Level::Beginner));
         assert!(es.at_level(C::SerEstar, Structure::Present, Level::Beginner));
         assert!(es.at_level(C::Other, Structure::Register, Level::Advanced));
@@ -1177,10 +1250,20 @@ mod tests {
         fn serialize_some<T: ?Sized + Serialize>(self, _: &T) -> Result<String, Unsupported> {
             Err(Unsupported)
         }
-        fn serialize_newtype_struct<T: ?Sized + Serialize>(self, _: &'static str, _: &T) -> Result<String, Unsupported> {
+        fn serialize_newtype_struct<T: ?Sized + Serialize>(
+            self,
+            _: &'static str,
+            _: &T,
+        ) -> Result<String, Unsupported> {
             Err(Unsupported)
         }
-        fn serialize_newtype_variant<T: ?Sized + Serialize>(self, _: &'static str, _: u32, _: &'static str, _: &T) -> Result<String, Unsupported> {
+        fn serialize_newtype_variant<T: ?Sized + Serialize>(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: &T,
+        ) -> Result<String, Unsupported> {
             Err(Unsupported)
         }
         fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq, Unsupported> {
@@ -1189,19 +1272,39 @@ mod tests {
         fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple, Unsupported> {
             Err(Unsupported)
         }
-        fn serialize_tuple_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeTupleStruct, Unsupported> {
+        fn serialize_tuple_struct(
+            self,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeTupleStruct, Unsupported> {
             Err(Unsupported)
         }
-        fn serialize_tuple_variant(self, _: &'static str, _: u32, _: &'static str, _: usize) -> Result<Self::SerializeTupleVariant, Unsupported> {
+        fn serialize_tuple_variant(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeTupleVariant, Unsupported> {
             Err(Unsupported)
         }
         fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Unsupported> {
             Err(Unsupported)
         }
-        fn serialize_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeStruct, Unsupported> {
+        fn serialize_struct(
+            self,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeStruct, Unsupported> {
             Err(Unsupported)
         }
-        fn serialize_struct_variant(self, _: &'static str, _: u32, _: &'static str, _: usize) -> Result<Self::SerializeStructVariant, Unsupported> {
+        fn serialize_struct_variant(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeStructVariant, Unsupported> {
             Err(Unsupported)
         }
     }
@@ -1219,7 +1322,11 @@ mod tests {
     fn every_category_round_trips_through_serde_and_wire() {
         for c in Category::ALL {
             let wire = c.wire();
-            assert_eq!(c.serialize(Capture).unwrap(), wire, "{c:?} serialises to its wire string");
+            assert_eq!(
+                c.serialize(Capture).unwrap(),
+                wire,
+                "{c:?} serialises to its wire string"
+            );
             assert_eq!(deserialize(wire).unwrap(), c, "{wire} deserialises");
             assert_eq!(Category::from_wire(wire), Some(c));
             assert_eq!(c.to_string(), wire);
@@ -1251,7 +1358,10 @@ mod tests {
                     && !wire.ends_with('_'),
                 "{wire}"
             );
-            assert!(!WIRE[..i].iter().any(|(_, w)| w == wire), "{wire} duplicated");
+            assert!(
+                !WIRE[..i].iter().any(|(_, w)| w == wire),
+                "{wire} duplicated"
+            );
         }
         assert_eq!(WIRE.len(), Category::ALL.len());
         assert_eq!(WIRE_NAMES.len(), WIRE.len());
@@ -1283,7 +1393,14 @@ mod tests {
 
     #[test]
     fn unknown_wire_strings_are_rejected_not_panicked() {
-        for bad in ["", "invented", "SerEstar", "ser-estar", "ser_estar ", "verbo"] {
+        for bad in [
+            "",
+            "invented",
+            "SerEstar",
+            "ser-estar",
+            "ser_estar ",
+            "verbo",
+        ] {
             assert_eq!(Category::from_wire(bad), None, "{bad:?}");
             assert!(deserialize(bad).is_err(), "{bad:?}");
             for t in Taxonomy::LANGUAGES.iter().chain([&Taxonomy::Neutral]) {
@@ -1302,7 +1419,10 @@ mod tests {
         }
         let n = Taxonomy::Neutral;
         // Core categories keep their own meaning.
-        assert_eq!(n.explanation(C::WordOrder), C::WordOrder.neutral_explanation());
+        assert_eq!(
+            n.explanation(C::WordOrder),
+            C::WordOrder.neutral_explanation()
+        );
         assert_eq!(n.category_name(C::MissingWord), "Complete sentences");
         assert!(n.at_level(C::WordOrder, Structure::Present, Level::Beginner));
         assert!(n.at_level(C::Preposition, Structure::General, Level::Intermediate));
@@ -1401,7 +1521,10 @@ mod tests {
             // Advanced-only categories are praiseworthy below advanced and are
             // never also listed as beginner material.
             for c in l.advanced_only {
-                assert!(l.above_beginner.contains(c) && l.above_intermediate.contains(c), "{t:?} {c}");
+                assert!(
+                    l.above_beginner.contains(c) && l.above_intermediate.contains(c),
+                    "{t:?} {c}"
+                );
                 assert!(!l.beginner.contains(c) && !l.beginner_present_only.contains(c));
             }
         }
@@ -1415,7 +1538,11 @@ mod tests {
                     assert!(t.at_level(*c, s, Level::Advanced));
                     assert!(!t.demonstrably_above_level(*c, s, Level::Advanced));
                 }
-                for s in [Structure::Subjunctive, Structure::Conditional, Structure::Register] {
+                for s in [
+                    Structure::Subjunctive,
+                    Structure::Conditional,
+                    Structure::Register,
+                ] {
                     assert!(!t.at_level(*c, s, Level::Beginner));
                     assert!(!t.at_level(*c, s, Level::Intermediate));
                 }
@@ -1430,10 +1557,23 @@ mod tests {
     #[test]
     fn mandarin_differs_from_spanish() {
         let zh = Taxonomy::Mandarin;
-        for c in [C::VerbTense, C::VerbConjugation, C::GenderAgreement, C::NumberAgreement, C::Article, C::SerEstar] {
+        for c in [
+            C::VerbTense,
+            C::VerbConjugation,
+            C::GenderAgreement,
+            C::NumberAgreement,
+            C::Article,
+            C::SerEstar,
+        ] {
             assert!(!zh.accepts(c), "{c}");
         }
-        for c in [C::MeasureWord, C::Aspect, C::Particle, C::BaBei, C::Negation] {
+        for c in [
+            C::MeasureWord,
+            C::Aspect,
+            C::Particle,
+            C::BaBei,
+            C::Negation,
+        ] {
             assert!(zh.accepts(c), "{c}");
             assert!(!Taxonomy::Spanish.accepts(c), "{c}");
         }
@@ -1458,7 +1598,12 @@ mod tests {
     #[test]
     fn german_differs_from_spanish() {
         let de = Taxonomy::German;
-        for c in [C::Case, C::VerbSecond, C::SubordinateClause, C::SeparableVerb] {
+        for c in [
+            C::Case,
+            C::VerbSecond,
+            C::SubordinateClause,
+            C::SeparableVerb,
+        ] {
             assert!(de.accepts(c), "{c}");
             assert!(!Taxonomy::Spanish.accepts(c), "{c}");
         }
@@ -1472,11 +1617,23 @@ mod tests {
         assert!(de.demonstrably_above_level(C::SeparableVerb, Structure::Present, Level::Beginner));
         // Subordinate-clause order waits for advanced, like Spanish subjunctive.
         assert!(!de.at_level(C::SubordinateClause, Structure::Present, Level::Beginner));
-        assert!(!de.at_level(C::SubordinateClause, Structure::Present, Level::Intermediate));
+        assert!(!de.at_level(
+            C::SubordinateClause,
+            Structure::Present,
+            Level::Intermediate
+        ));
         assert!(de.at_level(C::SubordinateClause, Structure::Present, Level::Advanced));
-        assert!(de.demonstrably_above_level(C::SubordinateClause, Structure::Present, Level::Intermediate));
+        assert!(de.demonstrably_above_level(
+            C::SubordinateClause,
+            Structure::Present,
+            Level::Intermediate
+        ));
         // Konjunktiv II requests arrive as `conditional` and stay advanced.
-        assert!(!de.at_level(C::VerbConjugation, Structure::Conditional, Level::Intermediate));
+        assert!(!de.at_level(
+            C::VerbConjugation,
+            Structure::Conditional,
+            Level::Intermediate
+        ));
         assert_eq!(de.category_name(C::Case), "Grammatical case");
         assert!(de.explanation(C::SubordinateClause).contains("end"));
     }
@@ -1490,8 +1647,15 @@ mod tests {
         assert!(!nb.at_level(C::VerbTense, Structure::Past, Level::Beginner));
         assert!(!nb.at_level(C::VerbSecond, Structure::General, Level::Beginner));
         assert!(nb.at_level(C::VerbSecond, Structure::General, Level::Intermediate));
-        assert!(!nb.at_level(C::SubordinateClause, Structure::General, Level::Intermediate));
-        assert_eq!(nb.category_name(C::Article), "Definite and indefinite forms");
+        assert!(!nb.at_level(
+            C::SubordinateClause,
+            Structure::General,
+            Level::Intermediate
+        ));
+        assert_eq!(
+            nb.category_name(C::Article),
+            "Definite and indefinite forms"
+        );
         // English: no gender; countability and articles at beginner; do-support present only.
         let en = Taxonomy::English;
         assert!(!en.accepts(C::GenderAgreement));
@@ -1511,7 +1675,10 @@ mod tests {
         let pt = Taxonomy::Portuguese;
         assert!(pt.accepts(C::SerEstar));
         assert!(pt.at_level(C::SerEstar, Structure::Present, Level::Beginner));
-        assert_eq!(pt.explanation(C::SerEstar), "Portuguese uses different verbs for identity and for states or location.");
+        assert_eq!(
+            pt.explanation(C::SerEstar),
+            "Portuguese uses different verbs for identity and for states or location."
+        );
         assert_eq!(pt.category_name(C::SerEstar), "Ser and estar");
         // Shared wording never leaks another language's name.
         for t in Taxonomy::LANGUAGES {
