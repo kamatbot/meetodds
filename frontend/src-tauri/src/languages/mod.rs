@@ -13,6 +13,7 @@
 #[cfg(feature = "tauri-commands")]
 pub mod commands;
 
+pub mod prompts;
 pub mod scenes;
 
 use serde::Serialize;

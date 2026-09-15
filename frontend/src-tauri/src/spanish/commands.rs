@@ -28,6 +28,11 @@ pub struct SpanishProfile {
     pub id: String,
     pub name: String,
     pub level: String,
+    /// Target language id (nb, es, en, fr, de, it, pt, zh). Blank from a client
+    /// that predates language selection; resolved to Spanish on the way in, to
+    /// match the `DEFAULT 'es'` backfill on spanish_profiles.language.
+    #[serde(default)]
+    pub language: String,
     pub variety: String,
     pub topics: Vec<String>,
     /// Owned by the tutoring engine (spanish_tutor_turn); the client may echo
@@ -121,6 +126,7 @@ struct ProfileRow {
     id: String,
     name: String,
     level: String,
+    language: String,
     variety: String,
     topics: String,
     practicing: String,
@@ -135,6 +141,7 @@ impl ProfileRow {
             id: self.id,
             name: self.name,
             level: self.level,
+            language: self.language,
             variety: self.variety,
             topics: serde_json::from_str(&self.topics).unwrap_or_default(),
             practicing: serde_json::from_str(&self.practicing).unwrap_or_default(),
@@ -173,7 +180,7 @@ impl SessionRow {
 }
 
 const PROFILE_COLUMNS: &str =
-    "id, name, level, variety, topics, practicing, allow_cloud, created_at, updated_at";
+    "id, name, level, language, variety, topics, practicing, allow_cloud, created_at, updated_at";
 const SESSION_COLUMNS: &str =
     "id, profile_id, situation, started_at, ended_at, turns, feedback, level_signal";
 
@@ -205,19 +212,24 @@ pub async fn spanish_save_profile(
         profile.created_at.clone()
     };
     let topics_json = serde_json::to_string(&profile.topics).unwrap_or_else(|_| "[]".to_string());
+    // An unknown id would strand the profile on a language with no scenes, so it
+    // resolves to Spanish here rather than being stored as-is.
+    let language = resolve_language(&profile.language);
 
     // `practicing` is deliberately absent from the UPDATE SET below: the tutoring
     // engine (spanish_tutor_turn) is the only writer of that column. A brand new
     // profile starts with '[]'; an existing one keeps whatever the engine wrote.
     sqlx::query(
-        "INSERT INTO spanish_profiles (id, name, level, variety, topics, practicing, allow_cloud, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?) \
-         ON CONFLICT(id) DO UPDATE SET name = excluded.name, level = excluded.level, variety = excluded.variety, \
+        "INSERT INTO spanish_profiles (id, name, level, language, variety, topics, practicing, allow_cloud, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?) \
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, level = excluded.level, \
+             language = excluded.language, variety = excluded.variety, \
              topics = excluded.topics, allow_cloud = excluded.allow_cloud, updated_at = excluded.updated_at",
     )
     .bind(&profile.id)
     .bind(&profile.name)
     .bind(&profile.level)
+    .bind(language)
     .bind(&profile.variety)
     .bind(&topics_json)
     .bind(profile.allow_cloud)
@@ -952,11 +964,20 @@ fn scene_id(situation: Option<&str>) -> &'static str {
     }
 }
 
-fn core_profile(profile: &SpanishProfile) -> Result<core::SpanishProfile, String> {
-    Ok(core::SpanishProfile {
+/// Maps a stored or client-supplied language id onto one the engine can serve.
+/// Blank (pre-multilingual profiles) and unrecognised ids both read as Spanish.
+fn resolve_language(id: &str) -> &'static str {
+    crate::languages::module(id.trim())
+        .map(|m| m.id)
+        .unwrap_or(core::LEGACY_LANGUAGE_ID)
+}
+
+fn core_profile(profile: &SpanishProfile) -> Result<core::LearnerProfile, String> {
+    Ok(core::LearnerProfile {
         id: profile.id.clone(),
         name: profile.name.clone(),
         level: parse_level(&profile.level)?,
+        language: resolve_language(&profile.language).to_string(),
         variety: profile.variety.clone(),
         topics: profile.topics.clone(),
         practicing: profile.practicing.clone(),

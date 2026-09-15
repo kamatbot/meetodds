@@ -106,14 +106,21 @@ pub struct PracticingPhrase {
     #[serde(default)]
     pub use_session_ids: Vec<String>,
 }
+/// A learner's practice profile for one target language.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SpanishProfile {
+pub struct LearnerProfile {
     pub id: String,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub level: Level,
+    /// `LanguageModule` id from `crate::languages` (nb, es, en, fr, de, it, pt,
+    /// zh). Empty on profiles written before the tutor carried a language;
+    /// [`LearnerProfile::language_id`] resolves those to Spanish, matching the
+    /// `DEFAULT 'es'` the database migration backfills.
+    #[serde(default)]
+    pub language: String,
     #[serde(default)]
     pub variety: String,
     #[serde(default)]
@@ -121,6 +128,26 @@ pub struct SpanishProfile {
     #[serde(default)]
     pub practicing: Vec<PracticingPhrase>,
 }
+
+/// Target language this profile practises. Never empty, never panics: a blank
+/// or unrecognised stored value reads as Spanish, which is what every profile
+/// written before the tutor became multilingual actually was.
+pub const LEGACY_LANGUAGE_ID: &str = "es";
+
+impl LearnerProfile {
+    pub fn language_id(&self) -> &str {
+        let id = self.language.trim();
+        if id.is_empty() {
+            LEGACY_LANGUAGE_ID
+        } else {
+            id
+        }
+    }
+}
+
+/// Former name of [`LearnerProfile`], kept so the Tauri command shell and any
+/// stored payloads keep resolving while the rename lands.
+pub type SpanishProfile = LearnerProfile;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Feedback {
