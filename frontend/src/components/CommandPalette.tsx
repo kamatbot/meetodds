@@ -8,6 +8,7 @@ import {
   Brain,
   Download,
   Home,
+  Languages,
   Library,
   ListChecks,
   LoaderCircle,
@@ -256,6 +257,14 @@ export default function CommandPalette({ onToggleSidebar }: CommandPaletteProps)
                   >
                     <Brain className="h-4 w-4 text-2" strokeWidth={1.75} />
                     Meeting memory
+                  </Command.Item>
+                  <Command.Item
+                    value="spanish practice speak learn"
+                    onSelect={() => run(() => router.push('/spanish'))}
+                    className={itemClass}
+                  >
+                    <Languages className="h-4 w-4 text-2" strokeWidth={1.75} />
+                    Practice Spanish
                   </Command.Item>
                   <Command.Item
                     value="toggle sidebar show hide"

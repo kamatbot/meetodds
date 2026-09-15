@@ -243,16 +243,16 @@ pub struct LiveTranslationResponse {
 }
 
 #[derive(Clone)]
-struct TranslationProviderConfig {
-    provider: LLMProvider,
-    provider_name: String,
-    model_name: String,
-    api_key: String,
-    ollama_endpoint: Option<String>,
-    custom_openai_endpoint: Option<String>,
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    top_p: Option<f32>,
+pub(crate) struct TranslationProviderConfig {
+    pub(crate) provider: LLMProvider,
+    pub(crate) provider_name: String,
+    pub(crate) model_name: String,
+    pub(crate) api_key: String,
+    pub(crate) ollama_endpoint: Option<String>,
+    pub(crate) custom_openai_endpoint: Option<String>,
+    pub(crate) max_tokens: Option<u32>,
+    pub(crate) temperature: Option<f32>,
+    pub(crate) top_p: Option<f32>,
 }
 
 fn normalize_language_key(value: &str) -> String {
@@ -1188,7 +1188,7 @@ async fn cleanup_translation(request_id: &str, generation: u64) {
     }
 }
 
-async fn resolve_provider_config(pool: &SqlitePool) -> Result<TranslationProviderConfig, String> {
+pub(crate) async fn resolve_provider_config(pool: &SqlitePool) -> Result<TranslationProviderConfig, String> {
     let setting = SettingsRepository::get_model_config(pool)
         .await
         .map_err(|error| format!("Failed to load translation model settings: {error}"))?

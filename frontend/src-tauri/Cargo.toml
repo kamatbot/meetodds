@@ -1,6 +1,6 @@
 [package]
 name = "meetodds"
-version = "0.4.20"
+version = "0.4.21"
 description = "MeetOdds local-first meeting capture, transcription, and summaries"
 authors = ["MeetOdds contributors"]
 license = "MIT"
@@ -24,8 +24,13 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["platform-default"]
-platform-default = []
+default = ["platform-default", "tauri-commands"]
+platform-default = ["tauri-commands"]
+# Gates `spanish::commands` (Tauri/sqlx/reqwest-dependent command shell) out of the
+# model-free `spanish` core when it's compiled standalone as the `spanish_core` lib
+# target used by tools/spanish-core-tests (that package defines no such feature, so
+# this cfg is simply false there — no Tauri/sqlx/reqwest dependency needed).
+tauri-commands = []
 metal = ["whisper-rs/metal"]
 coreml = ["whisper-rs/coreml"]
 cuda = ["whisper-rs/cuda"]
@@ -126,3 +131,4 @@ infer = "0.15"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 memory-stats = "1.0"
 strsim = "0.10.0"
+tokio = { version = "1.32.0", features = ["full", "tracing", "test-util"] }
