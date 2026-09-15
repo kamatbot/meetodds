@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
+import { listLanguages, type LanguageId, type LanguageSummary } from '@/lib/languages';
 import { listen } from '@tauri-apps/api/event';
 import {
   ArrowLeft,
@@ -200,15 +201,26 @@ function ProfilesScreen({
   const [name, setName] = useState('');
   const [level, setLevel] = useState<Level>('beginner');
   const [variety, setVariety] = useState<Variety>('es_MX');
+  // Defaults to Spanish: every profile that existed before language selection
+  // was Spanish, and the native side resolves a blank id the same way.
+  const [language, setLanguage] = useState<LanguageId>('es');
+  const [languages, setLanguages] = useState<LanguageSummary[]>([]);
   const [topics, setTopics] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // The registry is static content; a failure just leaves the Spanish-only
+    // fallback in the picker rather than blocking profile creation.
+    listLanguages().then(setLanguages).catch(() => undefined);
+  }, []);
 
   const openAddForm = () => {
     setEditing(null);
     setName('');
     setLevel('beginner');
     setVariety('es_MX');
+    setLanguage('es');
     setTopics('');
     setFormError(null);
     setShowForm(true);
@@ -219,6 +231,7 @@ function ProfilesScreen({
     setName(profile.name);
     setLevel(profile.level);
     setVariety(profile.variety);
+    setLanguage(profile.language ?? 'es');
     setTopics(profile.topics.join(', '));
     setFormError(null);
     setShowForm(true);
@@ -239,7 +252,10 @@ function ProfilesScreen({
           id: editing?.id ?? '',
           name: trimmed,
           level,
-          variety,
+          language,
+          // variety selects a Spanish regional voice; it means nothing for the
+          // other languages, so it is only sent when Spanish is the target.
+          variety: language === 'es' ? variety : '',
           topics: topicList,
           // ponytail: practicing is native-owned; sending [] rather than omitting to
           // keep the payload shape uniform for add vs. edit.
@@ -398,14 +414,34 @@ function ProfilesScreen({
               ))}
             </div>
 
-            <p className="mb-1 mt-3 text-[11.5px] font-medium text-2">Spanish</p>
-            <div className="flex gap-1.5">
-              {VARIETIES.map((v) => (
-                <button key={v.value} type="button" onClick={() => setVariety(v.value)} className={segBtn(variety === v.value)}>
-                  {v.label}
-                </button>
+            <label htmlFor="tutor-profile-language" className="mb-1 mt-3 block text-[11.5px] font-medium text-2">
+              Language
+            </label>
+            <select
+              id="tutor-profile-language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as LanguageId)}
+              className="h-9 w-full rounded-[10px] border border-border bg-bg px-3 text-[13.5px] text-text focus:outline-none"
+            >
+              {(languages.length ? languages : [{ id: 'es', name: 'Spanish' } as LanguageSummary]).map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
               ))}
-            </div>
+            </select>
+
+            {language === 'es' && (
+              <>
+                <p className="mb-1 mt-3 text-[11.5px] font-medium text-2">Spanish</p>
+                <div className="flex gap-1.5">
+                  {VARIETIES.map((v) => (
+                    <button key={v.value} type="button" onClick={() => setVariety(v.value)} className={segBtn(variety === v.value)}>
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
 
             <label htmlFor="spanish-profile-topics" className="mb-1 mt-3 block text-[11.5px] font-medium text-2">
               Topics they like
