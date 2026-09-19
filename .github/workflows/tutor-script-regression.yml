@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: '24'
       - name: Install existing dependency graph
-        run: cd frontend && npx --yes pnpm@9.15.9 install --frozen-lockfile --ignore-scripts
+        run: cd frontend && npx --yes pnpm@9.15.9 install --ignore-workspace --frozen-lockfile --ignore-scripts
       - name: Script-routing regression tests
         run: NODE_PATH="$PWD/frontend/node_modules" node --test frontend/tests/lib/practice-script.test.cjs
       - name: Lint changed frontend files
