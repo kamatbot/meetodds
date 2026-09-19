@@ -259,12 +259,12 @@ export default function CommandPalette({ onToggleSidebar }: CommandPaletteProps)
                     Meeting memory
                   </Command.Item>
                   <Command.Item
-                    value="spanish practice speak learn"
+                    value="language practice spanish hindi german italian portuguese mandarin japanese korean speak learn"
                     onSelect={() => run(() => router.push('/spanish'))}
                     className={itemClass}
                   >
                     <Languages className="h-4 w-4 text-2" strokeWidth={1.75} />
-                    Practice Spanish
+                    Language practice
                   </Command.Item>
                   <Command.Item
                     value="toggle sidebar show hide"

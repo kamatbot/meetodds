@@ -275,7 +275,7 @@ function ProfilesScreen({
   };
 
   const deleteProfile = async (profile: SpanishProfile) => {
-    if (!confirm(`Remove ${profile.name}'s Spanish practice profile? This cannot be undone.`)) return;
+    if (!confirm(`Remove ${profile.name}'s language-learning profile? This cannot be undone.`)) return;
     try {
       await invoke('spanish_delete_profile', { id: profile.id });
       onProfilesChange(profiles.filter((p) => p.id !== profile.id));
@@ -285,6 +285,9 @@ function ProfilesScreen({
   };
 
   const showReadinessBanner = readiness && (!readiness.whisperReady || !readiness.llmReady);
+  const languageName = (profile: SpanishProfile) =>
+    languages.find((candidate) => candidate.id === (profile.language ?? 'es'))?.name
+      ?? (profile.language ?? 'es');
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-y-auto bg-bg text-text custom-scrollbar">
@@ -301,7 +304,7 @@ function ProfilesScreen({
         </button>
 
         <h1 className="text-display text-text">Who&apos;s practicing?</h1>
-        <p className="mt-1 text-body text-2">Pick a family member, or add a new Spanish learner.</p>
+        <p className="mt-1 text-body text-2">Choose a learner, or add a profile for any supported language.</p>
 
         {showReadinessBanner && readiness && (
           <div className="mt-5 flex items-start gap-3 rounded-[11px] border border-warn/30 bg-warn/10 p-3.5 text-[12.5px] text-text">
@@ -340,8 +343,11 @@ function ProfilesScreen({
                       {LEVELS.find((l) => l.value === profile.level)?.label ?? profile.level}
                     </span>
                     <span className="rounded-[6px] bg-panel-2 px-1.5 py-0.5 text-[10.5px] font-medium text-2">
-                      {VARIETIES.find((v) => v.value === profile.variety)?.label ?? profile.variety}
+                      {languageName(profile)}
                     </span>
+                    {(profile.language ?? 'es') === 'es' && <span className="rounded-[6px] bg-panel-2 px-1.5 py-0.5 text-[10.5px] font-medium text-2">
+                      {VARIETIES.find((v) => v.value === profile.variety)?.label ?? profile.variety}
+                    </span>}
                   </span>
                 </span>
               </button>
@@ -373,7 +379,7 @@ function ProfilesScreen({
                 className="horizon-button mx-auto mt-4 inline-flex items-center gap-1.5 bg-accent px-4 text-accent-foreground"
               >
                 <Plus className="h-4 w-4" strokeWidth={1.8} />
-                Add a family member
+                Add a learner
               </button>
             </div>
           )}
@@ -386,7 +392,7 @@ function ProfilesScreen({
             className="mt-3 inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-panel px-3 py-2 text-[12.5px] font-medium text-text hover:bg-[var(--hover)]"
           >
             <Plus className="h-4 w-4" strokeWidth={1.8} />
-            Add a family member
+            Add a learner
           </button>
         )}
 
@@ -559,7 +565,7 @@ function StartScreen({
           Profiles
         </button>
 
-        <h1 className="text-display text-text">Hola, {profile.name}</h1>
+        <h1 className="text-display text-text">Ready, {profile.name}?</h1>
         <p className="mt-1 text-body text-2">What do you want to practice today?</p>
 
         {speakError && <p className="mt-3 text-[12.5px] text-danger">{speakError}</p>}
