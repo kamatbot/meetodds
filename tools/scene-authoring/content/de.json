@@ -1,0 +1,149 @@
+{
+  "language_id": "de",
+  "scenes": [
+    {
+      "id": "ordering_food",
+      "tutor_role": "waiter",
+      "learner_role": "customer",
+      "goal": "order food and a drink, then ask for the bill",
+      "filler": "Hm, mal sehen…",
+      "beats": [
+        {"goal": "greet and choose a drink", "opener": "Guten Tag! Was möchten Sie trinken?", "options": "Wasser oder Saft?"},
+        {"goal": "order food; offer a dish", "opener": "Wir haben heute Schnitzel und Pizza. Was möchten Sie essen?", "options": "Schnitzel oder Pizza?"},
+        {"goal": "ask how the food tastes", "opener": "Und, wie schmeckt es Ihnen?", "options": "Gut oder nicht so gut?"},
+        {"goal": "ask for the bill and finish", "opener": "Möchten Sie noch etwas, oder darf ich die Rechnung bringen?", "options": "Noch etwas oder die Rechnung?"}
+      ],
+      "target_structures": [
+        ["ich möchte + Akkusativ", "haben Sie …?"],
+        ["ich hätte gern …", "könnten Sie mir … bringen?"],
+        ["conditional politeness", "complaining politely"]
+      ]
+    },
+    {
+      "id": "meeting_someone",
+      "tutor_role": "new acquaintance",
+      "learner_role": "new acquaintance",
+      "goal": "introduce yourself and find a shared interest",
+      "filler": "Einen Moment…",
+      "beats": [
+        {"goal": "exchange names", "opener": "Hallo! Wie heißt du?", "options": "Heißt du Anna oder anders?"},
+        {"goal": "say where you live", "opener": "Und wo wohnst du?", "options": "In Berlin oder woanders?"},
+        {"goal": "find a shared interest", "opener": "Was machst du gern in deiner Freizeit?", "options": "Sport oder Musik?"},
+        {"goal": "suggest another conversation", "opener": "Wollen wir uns mal wieder treffen?", "options": "Morgen oder am Wochenende?"}
+      ],
+      "target_structures": [
+        ["ich heiße …", "ich wohne in + Dativ"],
+        ["ich interessiere mich für + Akkusativ", "hast du Lust, … zu + Infinitiv?"],
+        ["shared interests", "polite invitations"]
+      ]
+    },
+    {
+      "id": "school_day",
+      "tutor_role": "classmate",
+      "learner_role": "student",
+      "goal": "talk about subjects, a class project and after-school activities",
+      "filler": "Lass mich überlegen…",
+      "beats": [
+        {"goal": "name a favorite subject", "opener": "Was ist dein Lieblingsfach?", "options": "Mathe oder Deutsch?"},
+        {"goal": "describe a class", "opener": "Wie findest du den Unterricht heute?", "options": "Interessant oder langweilig?"},
+        {"goal": "describe a project or activity", "opener": "Woran arbeitet ihr gerade im Unterricht?", "options": "Ein Projekt oder ein Referat?"},
+        {"goal": "arrange an after-school activity", "opener": "Wollen wir nach der Schule etwas zusammen machen?", "options": "Lernen oder Fußball spielen?"}
+      ],
+      "target_structures": [
+        ["mein Lieblingsfach ist …", "ich finde … + Adjektiv"],
+        ["ich finde, dass … (Nebensatz)", "am liebsten + Verb"],
+        ["explain an opinion", "compare learning experiences"]
+      ]
+    },
+    {
+      "id": "weekend_plans",
+      "tutor_role": "friend",
+      "learner_role": "friend",
+      "goal": "agree an activity, place and time",
+      "filler": "Hm, mal sehen…",
+      "beats": [
+        {"goal": "choose an activity", "opener": "Was wollen wir am Wochenende machen?", "options": "Kino oder Fahrrad fahren?"},
+        {"goal": "choose a place", "opener": "Und wo treffen wir uns?", "options": "Bei mir oder in der Stadt?"},
+        {"goal": "agree a time", "opener": "Wann passt es dir?", "options": "Um drei oder um fünf?"},
+        {"goal": "confirm the plan", "opener": "Also, Samstag in der Stadt – bist du dabei?", "options": "Passt so, oder lieber später?"}
+      ],
+      "target_structures": [
+        ["wollen wir …?", "am Samstag / um drei Uhr"],
+        ["ich würde lieber …", "hättest du Lust auf + Akkusativ?"],
+        ["negotiate alternatives", "hypothetical plans"]
+      ]
+    },
+    {
+      "id": "shopping",
+      "tutor_role": "shop assistant",
+      "learner_role": "customer",
+      "goal": "choose an item, compare options and buy it",
+      "filler": "Einen Moment…",
+      "beats": [
+        {"goal": "identify an item", "opener": "Guten Tag! Kann ich Ihnen helfen? Was suchen Sie?", "options": "Eine Jacke oder ein T-Shirt?"},
+        {"goal": "choose size and color", "opener": "Welche Größe und welche Farbe brauchen Sie?", "options": "Blau in M oder schwarz in L?"},
+        {"goal": "compare an alternative", "opener": "Hier ist noch ein anderes Modell. Welches gefällt Ihnen besser?", "options": "Das erste oder das zweite?"},
+        {"goal": "ask price and decide", "opener": "Das ist eines unserer beliebtesten Modelle. Haben Sie noch eine Frage dazu?", "options": "Zum Preis oder zur Größe?"}
+      ],
+      "target_structures": [
+        ["ich suche + Akkusativ", "was kostet das?"],
+        ["ich hätte gern … in Größe M", "das gefällt mir besser als …"],
+        ["compare value", "negotiate politely"]
+      ]
+    },
+    {
+      "id": "asking_directions",
+      "tutor_role": "helpful pedestrian",
+      "learner_role": "visitor",
+      "goal": "find a destination and check the route",
+      "filler": "Hm, mal sehen…",
+      "beats": [
+        {"goal": "ask for a destination", "opener": "Entschuldigung, kann ich Ihnen helfen? Wo möchten Sie hin?", "options": "Zum Bahnhof oder zum Museum?"},
+        {"goal": "establish a landmark", "opener": "Kennen Sie hier schon etwas, zum Beispiel die Kirche oder den Marktplatz?", "options": "Die Kirche oder den Marktplatz?"},
+        {"goal": "explain and confirm a route", "opener": "Gehen Sie geradeaus bis zur Kirche und dann links. Gehen Sie lieber zu Fuß oder fahren Sie mit dem Bus?", "options": "Zu Fuß oder mit dem Bus?"},
+        {"goal": "check understanding and finish", "opener": "Also, wie gehen Sie jetzt?", "options": "Erst geradeaus oder erst links?"}
+      ],
+      "target_structures": [
+        ["wo ist …?", "wie komme ich zu + Dativ?"],
+        ["könnten Sie mir sagen, wo … ist?", "ich muss … abbiegen (Modalverb)"],
+        ["clarify ambiguous directions", "compare routes"]
+      ]
+    },
+    {
+      "id": "hotel_checkin",
+      "tutor_role": "hotel receptionist",
+      "learner_role": "guest",
+      "goal": "check in, ask about facilities and agree checkout",
+      "filler": "Einen Moment…",
+      "beats": [
+        {"goal": "greet and confirm reservation", "opener": "Guten Abend! Haben Sie eine Reservierung?", "options": "Reserviert oder ohne Reservierung?"},
+        {"goal": "choose a room", "opener": "Was für ein Zimmer möchten Sie?", "options": "Einzelzimmer oder Doppelzimmer?"},
+        {"goal": "ask about facilities", "opener": "Haben Sie noch Fragen zum Hotel?", "options": "Zum Frühstück oder zum WLAN?"},
+        {"goal": "agree checkout and finish", "opener": "Und bis wann möchten Sie bleiben?", "options": "Bis Sonntag oder bis Montag?"}
+      ],
+      "target_structures": [
+        ["ich habe eine Reservierung auf den Namen …", "gibt es …?"],
+        ["ich hätte gern ein Zimmer mit + Dativ", "wann muss ich auschecken?"],
+        ["request an accommodation", "resolve a reservation problem"]
+      ]
+    },
+    {
+      "id": "planning_party",
+      "tutor_role": "friend helping organize",
+      "learner_role": "party organizer",
+      "goal": "plan guests, food, activities and timing",
+      "filler": "Lass mich überlegen…",
+      "beats": [
+        {"goal": "decide who is invited", "opener": "Wen laden wir alles ein?", "options": "Nur Freunde oder auch Familie?"},
+        {"goal": "choose food", "opener": "Und was gibt es zu essen?", "options": "Pizza oder Kuchen?"},
+        {"goal": "choose an activity", "opener": "Was machen wir auf der Party?", "options": "Musik oder Spiele?"},
+        {"goal": "confirm when and finish", "opener": "Wann soll die Party sein?", "options": "Freitag oder Samstag?"}
+      ],
+      "target_structures": [
+        ["wir laden … ein (trennbares Verb)", "es gibt + Akkusativ"],
+        ["wir könnten …", "lass uns … (Vorschlag)"],
+        ["coordinate preferences", "negotiate constraints"]
+      ]
+    }
+  ]
+}

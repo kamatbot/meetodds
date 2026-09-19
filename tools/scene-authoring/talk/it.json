@@ -1,0 +1,62 @@
+{
+  "language_id": "it",
+  "closing": "Benissimo, abbiamo finito! Vuoi esercitarti ancora o parlare di un altro argomento?",
+  "talk_fallback": "Cosa ti piace fare nel tempo libero?",
+  "scaffold_fallback": "Vuoi parlare di cibo o di giochi?",
+  "dial_instructions": [
+    "ONE short question only (max 10 words), in the presente indicativo, one clause, using tu. Nothing before the question.",
+    "At most two short sentences with familiar vocabulary (presente, simple passato prossimo); end with a question, using tu.",
+    "Natural sentences; invite reasons (perché) and past experiences (passato prossimo, imperfetto). Keep tu throughout.",
+    "Natural Italian idiom, congiuntivo and condizionale where they come naturally, and nuanced follow-up questions. Keep tu throughout."
+  ],
+  "topics": [
+    {
+      "id": "family",
+      "openers": [
+        ["Cosa ti piace fare con la tua famiglia?", "Con chi parli di più a casa?", "Cosa fate insieme nel fine settimana?"],
+        ["Cosa hai fatto con la tua famiglia lo scorso fine settimana?", "Quale tradizione di famiglia ti piace di più?", "Com'è cambiata la tua famiglia nel tempo?"],
+        ["Quale abitudine di famiglia vorresti conservare per sempre?", "Come risolveresti una differenza di opinioni in casa?", "Cosa hai imparato da qualcuno della tua famiglia?"]
+      ]
+    },
+    {
+      "id": "school",
+      "openers": [
+        ["Quale materia ti piace di più?", "Cosa fai durante la ricreazione?", "Com'è la tua classe?"],
+        ["Cosa hai imparato questa settimana?", "Cosa cambieresti del tuo orario?", "Come ti prepari per un progetto?"],
+        ["Cosa rende interessante una lezione?", "Come progetteresti la tua scuola ideale?", "È più importante memorizzare o capire?"]
+      ]
+    },
+    {
+      "id": "sports",
+      "openers": [
+        ["Quale sport ti piace?", "Preferisci giocare o guardare le partite?", "Dove fai sport?"],
+        ["Quando hai iniziato a praticare questo sport?", "Com'è stata l'ultima partita che hai visto?", "Quale sport ti piacerebbe provare?"],
+        ["Cosa apprezzi di più in una squadra?", "Cosa cambieresti delle regole del tuo sport preferito?", "Come influisce lo sport sulla tua vita?"]
+      ]
+    },
+    {
+      "id": "food",
+      "openers": [
+        ["Qual è il tuo piatto preferito?", "Cosa mangi di solito a colazione?", "Preferisci il dolce o il salato?"],
+        ["Cosa hai cucinato o mangiato ieri?", "Quale piatto ti piacerebbe imparare a preparare?", "Quale cibo hai provato per la prima volta di recente?"],
+        ["Quale piatto rappresenta meglio un posto che conosci?", "Come sono cambiati i tuoi gusti con gli anni?", "Cosa rende memorabile un pasto?"]
+      ]
+    },
+    {
+      "id": "travel",
+      "openers": [
+        ["Dove vuoi andare in viaggio?", "Preferisci il mare o la montagna?", "Cosa porti nello zaino?"],
+        ["Come sono andate le tue ultime vacanze?", "Quale posto ti ha sorpreso di più?", "Come organizzeresti un viaggio breve?"],
+        ["Cosa hai imparato viaggiando che non ti aspettavi?", "Come sceglieresti tra comodità e avventura?", "Cosa ti fa sentire a casa in un altro posto?"]
+      ]
+    },
+    {
+      "id": "games",
+      "openers": [
+        ["Qual è il tuo gioco preferito?", "Con chi ti piace giocare?", "Preferisci i giochi da tavolo o i videogiochi?"],
+        ["Come hai imparato a giocare al tuo gioco preferito?", "Cos'è successo nella tua ultima partita?", "Quale gioco consiglieresti a un amico?"],
+        ["Cosa fa sì che un gioco resti interessante nel tempo?", "Come progetteresti un gioco cooperativo?", "Cosa cambieresti del tuo gioco preferito e perché?"]
+      ]
+    }
+  ]
+}

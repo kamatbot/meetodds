@@ -1,0 +1,134 @@
+{
+  "language_id": "de",
+  "closing": "Sehr gut, das war's! Willst du noch mal üben oder über ein anderes Thema reden?",
+  "talk_fallback": "Was machst du gern in deiner Freizeit?",
+  "scaffold_fallback": "Willst du über Essen oder über Spiele reden?",
+  "dial_instructions": [
+    "ONE short question only (max 10 words), in the present tense (Präsens), a single main clause: either a W-question with the verb in second position or a yes/no question with the verb first. No subordinate clauses. Nothing before the question.",
+    "At most two short sentences with familiar vocabulary; main clauses only (no dass/weil clauses), present tense or simple Perfekt with haben/sein; end with a question.",
+    "Natural sentences; use the Perfekt and subordinate clauses with weil/dass/wenn; invite reasons and past experiences.",
+    "Natural idioms, modal particles (doch, mal, eigentlich, denn), Konjunktiv II (würde/hätte/wäre) and nuanced follow-up questions."
+  ],
+  "topics": [
+    {
+      "id": "family",
+      "openers": [
+        [
+          "Was machst du gern mit deiner Familie?",
+          "Mit wem redest du zu Hause am meisten?",
+          "Was macht ihr am Wochenende zusammen?"
+        ],
+        [
+          "Was hast du letztes Wochenende mit deiner Familie gemacht?",
+          "Welche Familientradition magst du am liebsten?",
+          "Wie hat sich deine Familie mit der Zeit verändert?"
+        ],
+        [
+          "Welche Familiengewohnheit würdest du gern für immer behalten?",
+          "Wie würdest du eine Meinungsverschiedenheit zu Hause lösen?",
+          "Was hast du von jemandem aus deiner Familie gelernt?"
+        ]
+      ]
+    },
+    {
+      "id": "school",
+      "openers": [
+        [
+          "Welches Fach magst du am liebsten?",
+          "Was machst du in der Pause?",
+          "Wie ist deine Klasse?"
+        ],
+        [
+          "Was hast du diese Woche gelernt?",
+          "Was würdest du an deinem Stundenplan ändern?",
+          "Wie bereitest du dich auf ein Projekt vor?"
+        ],
+        [
+          "Was macht eine Unterrichtsstunde interessant?",
+          "Wie würdest du deine ideale Schule gestalten?",
+          "Was ist wichtiger: auswendig lernen oder verstehen?"
+        ]
+      ]
+    },
+    {
+      "id": "sports",
+      "openers": [
+        [
+          "Welchen Sport magst du?",
+          "Spielst du lieber selbst oder schaust du lieber zu?",
+          "Wo machst du Sport?"
+        ],
+        [
+          "Wann hast du mit diesem Sport angefangen?",
+          "Wie war das letzte Spiel, das du gesehen hast?",
+          "Welchen Sport würdest du gern mal ausprobieren?"
+        ],
+        [
+          "Was ist dir in einem Team am wichtigsten?",
+          "Was würdest du an den Regeln deines Lieblingssports ändern?",
+          "Wie beeinflusst Sport dein Leben?"
+        ]
+      ]
+    },
+    {
+      "id": "food",
+      "openers": [
+        [
+          "Was ist dein Lieblingsessen?",
+          "Was frühstückst du normalerweise?",
+          "Isst du lieber süß oder salzig?"
+        ],
+        [
+          "Was hast du gestern gekocht oder gegessen?",
+          "Welches Gericht würdest du gern kochen lernen?",
+          "Was hast du in letzter Zeit zum ersten Mal probiert?"
+        ],
+        [
+          "Welches Gericht steht am besten für einen Ort, den du kennst?",
+          "Wie hat sich dein Geschmack über die Jahre verändert?",
+          "Was macht ein Essen unvergesslich?"
+        ]
+      ]
+    },
+    {
+      "id": "travel",
+      "openers": [
+        [
+          "Wohin möchtest du reisen?",
+          "Magst du lieber Strand oder Berge?",
+          "Was hast du in deinem Rucksack?"
+        ],
+        [
+          "Wie war dein letzter Urlaub?",
+          "Welcher Ort hat dich am meisten überrascht?",
+          "Wie würdest du eine kurze Reise planen?"
+        ],
+        [
+          "Was hast du auf Reisen gelernt, womit du nicht gerechnet hast?",
+          "Wie würdest du dich zwischen Komfort und Abenteuer entscheiden?",
+          "Was gibt dir an einem anderen Ort das Gefühl, zu Hause zu sein?"
+        ]
+      ]
+    },
+    {
+      "id": "games",
+      "openers": [
+        [
+          "Was ist dein Lieblingsspiel?",
+          "Mit wem spielst du gern?",
+          "Magst du lieber Brettspiele oder Videospiele?"
+        ],
+        [
+          "Wie hast du dein Lieblingsspiel gelernt?",
+          "Was ist in deiner letzten Runde passiert?",
+          "Welches Spiel würdest du einem Freund empfehlen?"
+        ],
+        [
+          "Was macht ein Spiel auf Dauer interessant?",
+          "Wie würdest du ein kooperatives Spiel gestalten?",
+          "Was würdest du an deinem Lieblingsspiel ändern, und warum?"
+        ]
+      ]
+    }
+  ]
+}

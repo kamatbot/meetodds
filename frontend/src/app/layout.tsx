@@ -114,5 +114,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   if (pathname === '/manual-notes') {
     return <html lang="en" className={fontVariables}><body className="h-screen w-screen overflow-hidden bg-bg text-text">{children}</body></html>
   }
+  if (pathname === '/spanish' || pathname === '/spanish/') {
+    return <html lang="en" className={fontVariables}><body className="h-screen w-screen overflow-hidden bg-bg text-text">{children}</body></html>
+  }
   return <MainAppLayout>{children}</MainAppLayout>
 }

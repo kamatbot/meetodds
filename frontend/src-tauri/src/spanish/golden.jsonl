@@ -1,0 +1,44 @@
+{"id":"tense-01","level":"intermediate","learner":"Ayer voy al parque con mi hermano","question":"¿Qué hiciste ayer?","expected":{"intent":"spanish_attempt","category":"verb_tense","severity":"core"}}
+{"id":"tense-02","level":"beginner","learner":"Ayer juego al fútbol con mis amigos","question":"¿Qué hiciste ayer?","expected":{"intent":"spanish_attempt","category":"verb_tense","severity":"polish"}}
+{"id":"conjugation-01","level":"beginner","learner":"Yo tiene una bicicleta roja","expected":{"intent":"spanish_attempt","category":"verb_conjugation","severity":"core"}}
+{"id":"conjugation-02","level":"beginner","learner":"Nosotros come pizza los viernes","expected":{"intent":"spanish_attempt","category":"verb_conjugation","severity":"core"}}
+{"id":"ser-estar-01","level":"beginner","learner":"Mi hermana es en casa ahora","expected":{"intent":"spanish_attempt","category":"ser_estar","severity":"core"}}
+{"id":"ser-estar-02","level":"intermediate","learner":"Madrid está la capital de España","expected":{"intent":"spanish_attempt","category":"ser_estar","severity":"core"}}
+{"id":"gender-01","level":"beginner","learner":"La casa es bonito","expected":{"intent":"spanish_attempt","category":"gender_agreement","severity":"core"}}
+{"id":"gender-02","level":"beginner","learner":"Tengo una mochila rojo","expected":{"intent":"spanish_attempt","category":"gender_agreement","severity":"core"}}
+{"id":"number-01","level":"beginner","learner":"Mis amigos son muy simpático","expected":{"intent":"spanish_attempt","category":"number_agreement","severity":"core"}}
+{"id":"number-02","level":"beginner","learner":"Las casas son blanca","expected":{"intent":"spanish_attempt","category":"number_agreement","severity":"core"}}
+{"id":"article-01","level":"intermediate","learner":"Voy a el parque después de clase","expected":{"intent":"spanish_attempt","category":"article","severity":"core"},"acceptableCategories":["preposition"]}
+{"id":"article-02","level":"intermediate","learner":"Vengo de el colegio con mi hermano","expected":{"intent":"spanish_attempt","category":"article","severity":"core"},"acceptableCategories":["preposition"]}
+{"id":"preposition-01","level":"intermediate","learner":"Pienso de mis amigos todos los días","expected":{"intent":"spanish_attempt","category":"preposition","severity":"core"}}
+{"id":"preposition-02","level":"beginner","learner":"Sueño en viajar a España","expected":{"intent":"spanish_attempt","category":"preposition","severity":"polish"}}
+{"id":"word-choice-01","level":"intermediate","learner":"Estoy embarazado porque olvidé mi tarea delante de toda la clase","question":"¿Te sentiste avergonzado al olvidar la tarea?","expected":{"intent":"spanish_attempt","category":"word_choice","severity":"core"}}
+{"id":"word-order-01","level":"beginner","learner":"Yo no sé dónde está la biblioteca","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"missing-01","level":"beginner","learner":"Yo voy comprar pan en la tienda","expected":{"intent":"spanish_attempt","category":"missing_word","severity":"core"},"acceptableCategories":["preposition"]}
+{"id":"missing-02","level":"intermediate","learner":"Tengo estudiar para el examen mañana","expected":{"intent":"spanish_attempt","category":"missing_word","severity":"core"}}
+{"id":"subjunctive-01","level":"intermediate","learner":"Espero que tú vienes mañana","expected":{"intent":"spanish_attempt","category":"verb_conjugation","severity":"polish"},"acceptableCategories":["verb_tense"]}
+{"id":"subjunctive-02","level":"advanced","learner":"Espero que tú vienes mañana","expected":{"intent":"spanish_attempt","category":"verb_conjugation","severity":"core"},"acceptableCategories":["verb_tense"]}
+{"id":"english-01","level":"beginner","learner":"How do you say I am hungry in Spanish","expected":{"intent":"english_mixed","category":"english_mixed","severity":"core"}}
+{"id":"english-02","level":"beginner","learner":"I want to order a glass of water","expected":{"intent":"english_mixed","category":"english_mixed","severity":"core"}}
+{"id":"english-03","level":"intermediate","learner":"What does la cuenta mean","expected":{"intent":"english_mixed","category":"english_mixed","severity":"core"}}
+{"id":"correct-01","level":"beginner","learner":"Quiero un vaso de agua por favor","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"correct-02","level":"intermediate","learner":"Ayer fui al parque con mi hermano","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"correct-03","level":"advanced","learner":"Si hubiera tenido tiempo habría ido contigo","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"variety-01","level":"intermediate","learner":"Vos tenés una bicicleta muy bonita","variety":"Latin America","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"variety-02","level":"intermediate","learner":"Vosotros tenéis una bicicleta muy bonita","variety":"Spain","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"variety-03","level":"beginner","learner":"Me gusta el jugo de naranja","variety":"Spain","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"orthography-01","level":"beginner","learner":"bamos a la casa","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"orthography-02","level":"beginner","learner":"me gusta el cafe con leche","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"orthography-03","level":"intermediate","learner":"ayer fui ala? no al parque","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"self-correction-01","level":"intermediate","learner":"Ayer voy perdón fui al parque","expected":{"intent":"spanish_attempt","category":null,"severity":null}}
+{"id":"meta-01","level":"beginner","learner":"repeat","expected":{"intent":"meta_request","category":null,"severity":null}}
+{"id":"meta-02","level":"beginner","learner":"Más despacio","expected":{"intent":"meta_request","category":null,"severity":null}}
+{"id":"meta-03","level":"beginner","learner":"No entiendo","expected":{"intent":"meta_request","category":null,"severity":null}}
+{"id":"meta-04","level":"beginner","learner":"¿Qué?","expected":{"intent":"meta_request","category":null,"severity":null}}
+{"id":"minimal-01","level":"beginner","learner":"sí","expected":{"intent":"minimal","category":null,"severity":null}}
+{"id":"minimal-02","level":"beginner","learner":"no sé","expected":{"intent":"minimal","category":null,"severity":null}}
+{"id":"minimal-03","level":"beginner","learner":"muy bien","expected":{"intent":"minimal","category":null,"severity":null}}
+{"id":"noise-01","level":"beginner","learner":"[background music]","expected":{"intent":"empty_or_noise","category":null,"severity":null}}
+{"id":"noise-02","level":"beginner","learner":"...","expected":{"intent":"empty_or_noise","category":null,"severity":null}}
+{"id":"noise-03","level":"beginner","learner":"","expected":{"intent":"empty_or_noise","category":null,"severity":null}}
+{"id":"correct-04","level":"beginner","learner":"A mí me gusta jugar con mis amigos","expected":{"intent":"spanish_attempt","category":null,"severity":null}}

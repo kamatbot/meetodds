@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Brain, Home, Library, ListChecks, Mic, MoreHorizontal, Pencil, RefreshCw, Search, Settings, SlidersHorizontal, Star, Trash2, Upload } from 'lucide-react';
+import { Brain, Home, Languages, Library, ListChecks, Mic, MoreHorizontal, Pencil, RefreshCw, Search, Settings, SlidersHorizontal, Star, Trash2, Upload } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -64,6 +64,7 @@ export default function Sidebar() {
       <button type="button" onClick={() => router.push('/meetings')} className={navItem(isMeetings && !isStarred)}><Library className="h-4 w-4" strokeWidth={1.8} />Meetings<span className="ml-auto font-mono text-[9.5px] text-3">⌘2</span></button>
       <button type="button" onClick={() => router.push('/actions')} className={navItem(isActions)}><ListChecks className="h-4 w-4" strokeWidth={1.8} />Actions</button>
       <button type="button" onClick={() => router.push('/memory')} className={navItem(isMemory)}><Brain className="h-4 w-4" strokeWidth={1.8} />Memory</button>
+      <button type="button" onClick={() => router.push('/spanish')} className={navItem(pathname === '/spanish')}><Languages className="h-4 w-4" strokeWidth={1.8} />Spanish</button>
       <button type="button" onClick={() => router.push('/meetings?starred=1')} className={navItem(isStarred)}><Star className="h-4 w-4" strokeWidth={1.8} />Starred<span className="ml-auto font-mono text-[9.5px] text-3">⌘3</span></button>
     </nav>
     <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2 custom-scrollbar"><section aria-label="Recent meetings"><div className="horizon-eyebrow flex h-10 items-end px-3 pb-2">Recent</div><div className="grid gap-0.5">{recentMeetings.map(renderMeetingRow)}{meetings.length === 0 && <p className="px-3 py-4 text-xs text-3">No saved meetings yet.</p>}</div>{meetings.length > 8 && <button type="button" onClick={() => setShowAllMeetings(v => !v)} className="mt-1 rounded-[9px] px-3 py-1.5 text-[11px] font-medium text-3 hover:bg-[var(--hover)] hover:text-text">{showAllMeetings ? 'Show recent' : `Show all ${meetings.length} →`}</button>}</section></div>

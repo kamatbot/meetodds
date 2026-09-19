@@ -1,0 +1,20 @@
+[package]
+name = "meetodds-tutoring-core-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Independent workspace. Compiles the language registry and the tutoring engine
+# together, without Tauri, audio, GPU or a model, so the engine can depend on
+# crate::languages and still be tested here. See src/tutoring_core.rs.
+[workspace]
+
+[lib]
+name = "tutoring_core"
+path = "../../frontend/src-tauri/src/tutoring_core.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "test-util"] }
+tokio-util = { version = "0.7", features = ["rt"] }

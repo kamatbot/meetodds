@@ -1,0 +1,117 @@
+{
+  "language_id": "zh",
+  "scenes": [
+    {
+      "id": "ordering_food",
+      "tutor_role": "waiter",
+      "learner_role": "customer",
+      "goal": "order food and a drink, then ask for the bill",
+      "filler": "嗯，让我想想……",
+      "beats": [
+        {"goal": "greet and choose a drink", "opener": "您好！请问您想喝点什么？", "options": "茶还是果汁？"},
+        {"goal": "order food; offer a dish", "opener": "我们有饺子和炒饭，您想吃什么？", "options": "饺子还是炒饭？"},
+        {"goal": "ask how the food tastes", "opener": "菜怎么样？好吃吗？", "options": "好吃还是一般？"},
+        {"goal": "ask for the bill and finish", "opener": "您还要别的吗？还是现在买单？", "options": "还要别的还是买单？"}
+      ],
+      "target_structures": [["我要+名词", "有没有……？"], ["我想点……", "麻烦给我……"], ["conditional politeness", "complaining politely"]]
+    },
+    {
+      "id": "meeting_someone",
+      "tutor_role": "new acquaintance",
+      "learner_role": "new acquaintance",
+      "goal": "introduce yourself and find a shared interest",
+      "filler": "稍等一下……",
+      "beats": [
+        {"goal": "exchange names", "opener": "你好！你叫什么名字？", "options": "你叫李华还是别的名字？"},
+        {"goal": "say where you live", "opener": "你住在哪儿？", "options": "北京还是上海？"},
+        {"goal": "find a shared interest", "opener": "你平时喜欢做什么？", "options": "看电影还是打球？"},
+        {"goal": "suggest another conversation", "opener": "下次一起喝杯咖啡，怎么样？", "options": "这周末还是下周？"}
+      ],
+      "target_structures": [["我叫……", "我喜欢……"], ["我经常+动词", "我在这儿住了……年了"], ["shared interests", "polite invitations"]]
+    },
+    {
+      "id": "school_day",
+      "tutor_role": "classmate",
+      "learner_role": "student",
+      "goal": "talk about subjects, a class project and after-school activities",
+      "filler": "我看看……",
+      "beats": [
+        {"goal": "name a favorite subject", "opener": "你最喜欢哪门课？", "options": "数学还是英语？"},
+        {"goal": "describe a class", "opener": "今天的课怎么样？难不难？", "options": "难还是简单？"},
+        {"goal": "describe a project or activity", "opener": "你们小组的作业打算做什么？", "options": "做海报还是拍视频？"},
+        {"goal": "arrange an after-school activity", "opener": "放学以后一起去打球吧？", "options": "打篮球还是踢足球？"}
+      ],
+      "target_structures": [["我喜欢+科目", "……很难/很容易"], ["我觉得……", "……比……难"], ["explain an opinion", "compare learning experiences"]]
+    },
+    {
+      "id": "weekend_plans",
+      "tutor_role": "friend",
+      "learner_role": "friend",
+      "goal": "agree an activity, place and time",
+      "filler": "嗯，让我想想……",
+      "beats": [
+        {"goal": "choose an activity", "opener": "周末你想干什么？", "options": "看电影还是爬山？"},
+        {"goal": "choose a place", "opener": "我们去哪儿？", "options": "去商场还是去公园？"},
+        {"goal": "agree a time", "opener": "几点见面？", "options": "上午还是下午？"},
+        {"goal": "confirm the plan", "opener": "到时候微信联系，那就这么说定了？", "options": "说定了还是再改改？"}
+      ],
+      "target_structures": [["我想+动词", "……点见"], ["我们……吧", "要不……？"], ["negotiate alternatives", "hypothetical plans"]]
+    },
+    {
+      "id": "shopping",
+      "tutor_role": "shop assistant",
+      "learner_role": "customer",
+      "goal": "choose an item, compare options and buy it",
+      "filler": "稍等一下……",
+      "beats": [
+        {"goal": "identify an item", "opener": "您好！您想买点什么？", "options": "衣服还是鞋子？"},
+        {"goal": "choose size and color", "opener": "您要什么颜色？穿多大的？", "options": "黑色还是白色？"},
+        {"goal": "compare an alternative", "opener": "这件也不错，您觉得哪件好？", "options": "这件还是那件？"},
+        {"goal": "ask price and decide", "opener": "这件现在打折，您要不要？", "options": "要还是再看看？"}
+      ],
+      "target_structures": [["多少钱？", "我要这件"], ["有没有……一点的？", "……比……便宜"], ["compare value", "negotiate politely"]]
+    },
+    {
+      "id": "asking_directions",
+      "tutor_role": "helpful pedestrian",
+      "learner_role": "visitor",
+      "goal": "find a destination and check the route",
+      "filler": "我看看……",
+      "beats": [
+        {"goal": "ask for a destination", "opener": "您好，您要去哪儿？", "options": "地铁站还是火车站？"},
+        {"goal": "establish a landmark", "opener": "您看到前面的红绿灯了吗？", "options": "看到了还是没看到？"},
+        {"goal": "explain and confirm a route", "opener": "一直往前走，到红绿灯左拐就到了。明白吗？", "options": "左拐还是右拐？"},
+        {"goal": "check understanding and finish", "opener": "要不要我再说一遍？", "options": "再说一遍还是明白了？"}
+      ],
+      "target_structures": [["……在哪儿？", "往左拐/往右拐"], ["请问，……怎么走？", "离这儿远不远？"], ["clarify ambiguous directions", "compare routes"]]
+    },
+    {
+      "id": "hotel_checkin",
+      "tutor_role": "hotel receptionist",
+      "learner_role": "guest",
+      "goal": "check in, ask about facilities and agree checkout",
+      "filler": "稍等一下……",
+      "beats": [
+        {"goal": "greet and confirm reservation", "opener": "您好，欢迎光临！请问您有预订吗？", "options": "有预订还是没有？"},
+        {"goal": "choose a room", "opener": "您想要什么样的房间？", "options": "大床房还是双床房？"},
+        {"goal": "ask about facilities", "opener": "酒店有早餐和游泳池，您想问什么？", "options": "早餐还是游泳池？"},
+        {"goal": "agree checkout and finish", "opener": "您打算什么时候退房？", "options": "明天还是后天？"}
+      ],
+      "target_structures": [["我叫……", "有没有……？"], ["我订了……", "可以……吗？"], ["request an accommodation", "resolve a reservation problem"]]
+    },
+    {
+      "id": "planning_party",
+      "tutor_role": "friend helping organize",
+      "learner_role": "party organizer",
+      "goal": "plan guests, food, activities and timing",
+      "filler": "嗯，让我想想……",
+      "beats": [
+        {"goal": "decide who is invited", "opener": "你想请谁来？", "options": "同学还是同事？"},
+        {"goal": "choose food", "opener": "我们准备什么吃的？", "options": "披萨还是饺子？"},
+        {"goal": "choose an activity", "opener": "派对上玩什么？", "options": "唱歌还是玩游戏？"},
+        {"goal": "confirm when and finish", "opener": "那派对定在什么时候？", "options": "周五晚上还是周六？"}
+      ],
+      "target_structures": [["我想请……", "我们吃……"], ["把……准备好", "先……，然后……"], ["coordinate preferences", "negotiate constraints"]]
+    }
+  ]
+}

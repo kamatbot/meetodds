@@ -44,6 +44,7 @@ pub mod config;
 pub mod console_utils;
 pub mod database;
 pub mod groq;
+pub mod languages;
 pub mod live_translation;
 pub mod manual_notes_window;
 pub mod notifications;
@@ -53,8 +54,12 @@ pub mod openai;
 pub mod openai_codex;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod spanish;
+pub mod spanish_class;
 pub mod state;
 pub mod summary;
+#[path = "spanish/provider.rs"]
+pub mod spanish_provider;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
@@ -680,6 +685,27 @@ pub fn run() {
             live_translation::api_cancel_live_translation,
             live_translation::api_warm_live_translation,
             live_translation::api_prepare_live_translation,
+            languages::commands::languages_list,
+            languages::commands::languages_themes,
+            languages::commands::languages_meaning_options,
+            spanish::commands::spanish_list_profiles,
+            spanish::commands::spanish_save_profile,
+            spanish::commands::spanish_delete_profile,
+            spanish::commands::spanish_start_session,
+            spanish::commands::spanish_end_session,
+            spanish::commands::spanish_list_sessions,
+            spanish::commands::spanish_save_session,
+            spanish::commands::spanish_check_readiness,
+            spanish::commands::spanish_start_listening,
+            spanish::commands::spanish_stop_listening,
+            spanish::commands::spanish_speak,
+            spanish::commands::spanish_stop_speaking,
+            spanish::commands::spanish_tutor_turn,
+            spanish::commands::spanish_practice_attempt,
+            spanish::commands::spanish_translate_line,
+            spanish::commands::spanish_help_suggestion,
+            spanish_class::spanish_list_class_meetings,
+            spanish_class::spanish_build_lesson,
             anthropic::anthropic::get_anthropic_models,
             groq::groq::get_groq_models,
             api::api_get_meetings,

@@ -1,0 +1,349 @@
+{
+  "language_id": "pt",
+  "scenes": [
+    {
+      "id": "ordering_food",
+      "tutor_role": "waiter",
+      "learner_role": "customer",
+      "goal": "order food and a drink, then ask for the bill",
+      "filler": "Hmm, deixa eu ver…",
+      "beats": [
+        {
+          "goal": "greet and choose a drink",
+          "opener": "Olá! O que você vai querer para beber?",
+          "options": "Água ou suco?"
+        },
+        {
+          "goal": "order food; offer a dish",
+          "opener": "Hoje a gente tem feijoada e frango grelhado. O que você quer comer?",
+          "options": "Feijoada ou frango?"
+        },
+        {
+          "goal": "ask how the food tastes",
+          "opener": "E aí, o que você está achando da comida?",
+          "options": "Está gostoso ou mais ou menos?"
+        },
+        {
+          "goal": "ask for the bill and finish",
+          "opener": "Você quer mais alguma coisa ou já trago a conta?",
+          "options": "Mais alguma coisa ou a conta?"
+        }
+      ],
+      "target_structures": [
+        [
+          "quero + noun",
+          "tem…?"
+        ],
+        [
+          "eu queria / gostaria de",
+          "pode me trazer…?"
+        ],
+        [
+          "conditional politeness",
+          "complaining politely"
+        ]
+      ]
+    },
+    {
+      "id": "meeting_someone",
+      "tutor_role": "new acquaintance",
+      "learner_role": "new acquaintance",
+      "goal": "introduce yourself and find a shared interest",
+      "filler": "Um momento…",
+      "beats": [
+        {
+          "goal": "exchange names",
+          "opener": "Olá! Como você se chama?",
+          "options": "Você se chama Ana ou tem outro nome?"
+        },
+        {
+          "goal": "say where you live",
+          "opener": "E você mora aqui na cidade ou está só de passagem?",
+          "options": "Mora aqui ou em outra cidade?"
+        },
+        {
+          "goal": "find a shared interest",
+          "opener": "O que você gosta de fazer no tempo livre?",
+          "options": "Música ou esporte?"
+        },
+        {
+          "goal": "suggest another conversation",
+          "opener": "Foi ótimo conversar! A gente podia tomar um café um dia desses, que tal?",
+          "options": "Café ou almoço?"
+        }
+      ],
+      "target_structures": [
+        [
+          "me chamo",
+          "eu gosto de + noun"
+        ],
+        [
+          "costumo + infinitive",
+          "moro aqui há + time"
+        ],
+        [
+          "shared interests",
+          "polite invitations"
+        ]
+      ]
+    },
+    {
+      "id": "school_day",
+      "tutor_role": "classmate",
+      "learner_role": "student",
+      "goal": "talk about subjects, a class project and after-school activities",
+      "filler": "Deixa eu pensar…",
+      "beats": [
+        {
+          "goal": "name a favorite subject",
+          "opener": "Oi! Qual é a sua matéria favorita?",
+          "options": "Matemática ou história?"
+        },
+        {
+          "goal": "describe a class",
+          "opener": "Me conta: como é essa aula?",
+          "options": "Fácil ou difícil?"
+        },
+        {
+          "goal": "describe a project or activity",
+          "opener": "Você está fazendo algum projeto na escola?",
+          "options": "Um projeto de ciências ou de arte?"
+        },
+        {
+          "goal": "arrange an after-school activity",
+          "opener": "Depois da aula, quer fazer alguma coisa junto?",
+          "options": "Jogar bola ou estudar na biblioteca?"
+        }
+      ],
+      "target_structures": [
+        [
+          "gosto de + noun",
+          "a aula é + adjective"
+        ],
+        [
+          "a gente está fazendo",
+          "acho que + clause"
+        ],
+        [
+          "explain an opinion",
+          "compare learning experiences"
+        ]
+      ]
+    },
+    {
+      "id": "weekend_plans",
+      "tutor_role": "friend",
+      "learner_role": "friend",
+      "goal": "agree an activity, place and time",
+      "filler": "Hmm, deixa eu ver…",
+      "beats": [
+        {
+          "goal": "choose an activity",
+          "opener": "E aí, o que a gente faz no fim de semana?",
+          "options": "Cinema ou praia?"
+        },
+        {
+          "goal": "choose a place",
+          "opener": "Boa! E onde a gente se encontra?",
+          "options": "No shopping ou na praça?"
+        },
+        {
+          "goal": "agree a time",
+          "opener": "Que horas fica bom para você?",
+          "options": "De manhã ou de tarde?"
+        },
+        {
+          "goal": "confirm the plan",
+          "opener": "Então fechou? Te espero lá?",
+          "options": "Fechado ou quer mudar?"
+        }
+      ],
+      "target_structures": [
+        [
+          "vamos + infinitive",
+          "quero ir ao / à + place"
+        ],
+        [
+          "que tal + infinitive?",
+          "a gente podia + infinitive"
+        ],
+        [
+          "negotiate alternatives",
+          "hypothetical plans"
+        ]
+      ]
+    },
+    {
+      "id": "shopping",
+      "tutor_role": "shop assistant",
+      "learner_role": "customer",
+      "goal": "choose an item, compare options and buy it",
+      "filler": "Um momento…",
+      "beats": [
+        {
+          "goal": "identify an item",
+          "opener": "Olá! Posso ajudar? O que você está procurando?",
+          "options": "Uma camiseta ou um tênis?"
+        },
+        {
+          "goal": "choose size and color",
+          "opener": "Que tamanho você veste? E qual cor você prefere?",
+          "options": "Azul ou preto?"
+        },
+        {
+          "goal": "compare an alternative",
+          "opener": "Tem esse outro modelo também. Você prefere este ou aquele?",
+          "options": "Este ou aquele?"
+        },
+        {
+          "goal": "ask price and decide",
+          "opener": "Gostou? Quer saber quanto custa?",
+          "options": "Vai levar ou vai pensar mais?"
+        }
+      ],
+      "target_structures": [
+        [
+          "quero + noun",
+          "quanto custa?"
+        ],
+        [
+          "prefiro este / aquele",
+          "tem em outra cor?"
+        ],
+        [
+          "compare value",
+          "negotiate politely"
+        ]
+      ]
+    },
+    {
+      "id": "asking_directions",
+      "tutor_role": "helpful pedestrian",
+      "learner_role": "visitor",
+      "goal": "find a destination and check the route",
+      "filler": "Deixa eu pensar…",
+      "beats": [
+        {
+          "goal": "ask for a destination",
+          "opener": "Olá! Posso ajudar? Para onde você quer ir?",
+          "options": "Para o metrô ou para o museu?"
+        },
+        {
+          "goal": "establish a landmark",
+          "opener": "Você conhece a praça principal, ali perto da igreja?",
+          "options": "A praça ou a igreja?"
+        },
+        {
+          "goal": "explain and confirm a route",
+          "opener": "É só seguir reto e depois virar à esquerda na praça. Deu para entender?",
+          "options": "Entendi ou pode repetir?"
+        },
+        {
+          "goal": "check understanding and finish",
+          "opener": "Tudo certo? Você vai a pé ou pega o ônibus?",
+          "options": "A pé ou de ônibus?"
+        }
+      ],
+      "target_structures": [
+        [
+          "onde fica…?",
+          "fica perto / longe"
+        ],
+        [
+          "pode me dizer como chego a…?",
+          "é só + infinitive"
+        ],
+        [
+          "clarify ambiguous directions",
+          "compare routes"
+        ]
+      ]
+    },
+    {
+      "id": "hotel_checkin",
+      "tutor_role": "hotel receptionist",
+      "learner_role": "guest",
+      "goal": "check in, ask about facilities and agree checkout",
+      "filler": "Um momento…",
+      "beats": [
+        {
+          "goal": "greet and confirm reservation",
+          "opener": "Boa tarde! A reserva está em qual nome, por favor?",
+          "options": "Silva ou outro nome?"
+        },
+        {
+          "goal": "choose a room",
+          "opener": "Prefere um quarto com vista ou um mais silencioso?",
+          "options": "Com vista ou mais silencioso?"
+        },
+        {
+          "goal": "ask about facilities",
+          "opener": "Posso ajudar com mais alguma informação? Quer saber do café da manhã ou da piscina?",
+          "options": "Café da manhã ou piscina?"
+        },
+        {
+          "goal": "agree checkout and finish",
+          "opener": "Perfeito. E a que horas prefere fazer o check-out?",
+          "options": "De manhã cedo ou ao meio-dia?"
+        }
+      ],
+      "target_structures": [
+        [
+          "tenho uma reserva",
+          "tem Wi-Fi / café da manhã?"
+        ],
+        [
+          "eu gostaria de um quarto + adjective",
+          "o senhor / a senhora poderia + infinitive?"
+        ],
+        [
+          "request an accommodation",
+          "resolve a reservation problem"
+        ]
+      ]
+    },
+    {
+      "id": "planning_party",
+      "tutor_role": "friend helping organize",
+      "learner_role": "party organizer",
+      "goal": "plan guests, food, activities and timing",
+      "filler": "Hmm, deixa eu ver…",
+      "beats": [
+        {
+          "goal": "decide who is invited",
+          "opener": "E aí, quem a gente vai convidar para a festa?",
+          "options": "Só os amigos ou a família também?"
+        },
+        {
+          "goal": "choose food",
+          "opener": "E de comida, o que você quer servir?",
+          "options": "Pizza ou churrasco?"
+        },
+        {
+          "goal": "choose an activity",
+          "opener": "Vai ter alguma atividade na festa?",
+          "options": "Música ou jogos?"
+        },
+        {
+          "goal": "confirm when and finish",
+          "opener": "Aí a gente fecha tudo. E quando vai ser a festa?",
+          "options": "Sábado ou domingo?"
+        }
+      ],
+      "target_structures": [
+        [
+          "vou convidar + noun",
+          "quero + noun"
+        ],
+        [
+          "a gente podia + infinitive",
+          "vai ter + noun"
+        ],
+        [
+          "coordinate preferences",
+          "negotiate constraints"
+        ]
+      ]
+    }
+  ]
+}

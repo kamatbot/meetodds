@@ -1,0 +1,117 @@
+{
+  "language_id": "nb",
+  "scenes": [
+    {
+      "id": "ordering_food",
+      "tutor_role": "waiter",
+      "learner_role": "customer",
+      "goal": "order food and a drink, then ask for the bill",
+      "filler": "Hmm, la meg se…",
+      "beats": [
+        {"goal": "greet and choose a drink", "opener": "Hei! Hva vil du ha å drikke?", "options": "Vann eller brus?"},
+        {"goal": "order food; offer a dish", "opener": "Vi har pizza og fiskesuppe i dag. Hva har du lyst på?", "options": "Pizza eller fiskesuppe?"},
+        {"goal": "ask how the food tastes", "opener": "Hvordan smaker maten?", "options": "Veldig godt eller sånn passe?"},
+        {"goal": "ask for the bill and finish", "opener": "Vil du ha noe mer, eller skal jeg hente regningen?", "options": "Noe mer eller regningen?"}
+      ],
+      "target_structures": [["jeg vil ha + substantiv", "kan jeg få…?"], ["jeg vil gjerne ha", "kunne du hente…?"], ["conditional politeness", "complaining politely"]]
+    },
+    {
+      "id": "meeting_someone",
+      "tutor_role": "new acquaintance",
+      "learner_role": "new acquaintance",
+      "goal": "introduce yourself and find a shared interest",
+      "filler": "Et øyeblikk…",
+      "beats": [
+        {"goal": "exchange names", "opener": "Hei! Hva heter du?", "options": "Heter du Anna, eller noe annet?"},
+        {"goal": "say where you live", "opener": "Hyggelig! Hvor bor du?", "options": "I Oslo eller et annet sted?"},
+        {"goal": "find a shared interest", "opener": "Hva liker du å gjøre i fritida?", "options": "Fotball eller musikk?"},
+        {"goal": "suggest another conversation", "opener": "Skal vi ta en kaffe sammen en dag?", "options": "I morgen eller i helga?"}
+      ],
+      "target_structures": [["jeg heter", "jeg bor i"], ["jeg pleier å + infinitiv", "jeg har bodd her i + tid"], ["shared interests", "polite invitations"]]
+    },
+    {
+      "id": "school_day",
+      "tutor_role": "classmate",
+      "learner_role": "student",
+      "goal": "talk about subjects, a class project and after-school activities",
+      "filler": "La meg tenke…",
+      "beats": [
+        {"goal": "name a favorite subject", "opener": "Hvilket fag liker du best?", "options": "Matte eller norsk?"},
+        {"goal": "describe a class", "opener": "Hvordan var timen i dag?", "options": "Lett eller vanskelig?"},
+        {"goal": "describe a project or activity", "opener": "Hva handler prosjektet ditt om?", "options": "Dyr eller verdensrommet?"},
+        {"goal": "arrange an after-school activity", "opener": "Skal vi gjøre noe etter skolen?", "options": "Spille fotball eller gå på kino?"}
+      ],
+      "target_structures": [["jeg liker + substantiv", "det er + adjektiv"], ["jeg synes at…", "vi holder på med"], ["explain an opinion", "compare learning experiences"]]
+    },
+    {
+      "id": "weekend_plans",
+      "tutor_role": "friend",
+      "learner_role": "friend",
+      "goal": "agree an activity, place and time",
+      "filler": "Skal vi se…",
+      "beats": [
+        {"goal": "choose an activity", "opener": "Hva skal vi gjøre i helga?", "options": "Gå på tur eller gå på kino?"},
+        {"goal": "choose a place", "opener": "Hvor skal vi dra?", "options": "Til byen eller til hytta?"},
+        {"goal": "agree a time", "opener": "Når passer det for deg?", "options": "Lørdag eller søndag?"},
+        {"goal": "confirm the plan", "opener": "Da sier vi lørdag klokka tolv, ikke sant?", "options": "Klokka tolv eller klokka to?"}
+      ],
+      "target_structures": [["skal vi…?", "jeg vil gjerne"], ["det passer bra for meg", "hva med å + infinitiv?"], ["negotiate alternatives", "hypothetical plans"]]
+    },
+    {
+      "id": "shopping",
+      "tutor_role": "shop assistant",
+      "learner_role": "customer",
+      "goal": "choose an item, compare options and buy it",
+      "filler": "Hmm, la meg se…",
+      "beats": [
+        {"goal": "identify an item", "opener": "Hei! Hva leter du etter?", "options": "En genser eller en jakke?"},
+        {"goal": "choose size and color", "opener": "Hvilken størrelse trenger du, og hvilken farge vil du ha?", "options": "Medium i blått eller i svart?"},
+        {"goal": "compare an alternative", "opener": "Denne er litt billigere. Vil du prøve den også?", "options": "Denne eller den andre?"},
+        {"goal": "ask price and decide", "opener": "Den er på tilbud nå. Skal du ta den?", "options": "Kjøpe den eller vente litt?"}
+      ],
+      "target_structures": [["jeg leter etter", "hva koster…?"], ["har dere den i + farge/størrelse?", "kan jeg prøve den?"], ["compare value", "negotiate politely"]]
+    },
+    {
+      "id": "asking_directions",
+      "tutor_role": "helpful pedestrian",
+      "learner_role": "visitor",
+      "goal": "find a destination and check the route",
+      "filler": "Et øyeblikk…",
+      "beats": [
+        {"goal": "ask for a destination", "opener": "Hei! Hvor skal du?", "options": "Til stasjonen eller til torget?"},
+        {"goal": "establish a landmark", "opener": "Ser du kirka der borte, eller den store butikken?", "options": "Kirka eller butikken?"},
+        {"goal": "explain and confirm a route", "opener": "Du går rett fram og tar til venstre ved kirka. Er det greit?", "options": "Til venstre eller til høyre?"},
+        {"goal": "check understanding and finish", "opener": "Skal jeg si det én gang til, eller går det bra?", "options": "Én gang til, eller går det bra?"}
+      ],
+      "target_structures": [["hvor er…?", "unnskyld, kan du hjelpe meg?"], ["hvordan kommer jeg til…?", "er det langt herfra?"], ["clarify ambiguous directions", "compare routes"]]
+    },
+    {
+      "id": "hotel_checkin",
+      "tutor_role": "hotel receptionist",
+      "learner_role": "guest",
+      "goal": "check in, ask about facilities and agree checkout",
+      "filler": "Skal vi se…",
+      "beats": [
+        {"goal": "greet and confirm reservation", "opener": "Hei og velkommen! Har du reservert rom hos oss?", "options": "Reservert, eller trenger du et rom?"},
+        {"goal": "choose a room", "opener": "Hva slags rom vil du ha?", "options": "Enkeltrom eller dobbeltrom?"},
+        {"goal": "ask about facilities", "opener": "Vi har frokost og treningsrom. Er det noe du lurer på?", "options": "Frokosten eller treningsrommet?"},
+        {"goal": "agree checkout and finish", "opener": "Når skal du sjekke ut?", "options": "Klokka ti eller klokka elleve?"}
+      ],
+      "target_structures": [["jeg har bestilt", "er det…?"], ["kunne jeg få…?", "når serveres frokosten?"], ["request an accommodation", "resolve a reservation problem"]]
+    },
+    {
+      "id": "planning_party",
+      "tutor_role": "friend helping organize",
+      "learner_role": "party organizer",
+      "goal": "plan guests, food, activities and timing",
+      "filler": "La meg tenke…",
+      "beats": [
+        {"goal": "decide who is invited", "opener": "Hvem skal vi invitere?", "options": "Bare venner eller familien også?"},
+        {"goal": "choose food", "opener": "Hva skal vi servere?", "options": "Pizza eller tacos?"},
+        {"goal": "choose an activity", "opener": "Hva skal vi gjøre på festen?", "options": "Spill eller musikk og dans?"},
+        {"goal": "confirm when and finish", "opener": "Når skal festen være?", "options": "Fredag eller lørdag?"}
+      ],
+      "target_structures": [["vi inviterer", "vi kan ha + substantiv"], ["hva om vi + verb?", "jeg foreslår at vi…"], ["coordinate preferences", "negotiate constraints"]]
+    }
+  ]
+}

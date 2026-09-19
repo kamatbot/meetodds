@@ -1,0 +1,134 @@
+{
+  "language_id": "hi",
+  "closing": "Bahut badhiya, ho gaya! Phir se practice karein ya kisi aur topic pe baat karein?",
+  "talk_fallback": "Tumhe khaali waqt mein kya karna achha lagta hai?",
+  "scaffold_fallback": "Khaane ke baare mein baat karein ya khel ke baare mein?",
+  "dial_instructions": [
+    "ONE short question only (max 10 words), in the simple present (hai/hain, karte ho), a single clause: either a kya yes/no question or one question word (kya, kaun, kahan, kab). No ki-clauses. Nothing before the question.",
+    "At most two short sentences with familiar vocabulary; simple present or simple past (tha/thi/the, or the perfective with ne); no ki or agar clauses; end with a question.",
+    "Natural sentences; use the perfective past with ne, the habitual past (karta tha / karti thi) and ki, kyunki and agar clauses; invite reasons and past experiences.",
+    "Natural idioms and discourse particles (toh, hi, bhi, na), the subjunctive and counterfactual (agar … hota toh), the presumptive (hoga) and nuanced follow-up questions."
+  ],
+  "topics": [
+    {
+      "id": "family",
+      "openers": [
+        [
+          "Tumhe apne parivaar ke saath kya karna pasand hai?",
+          "Ghar pe tum sabse zyada kisse baat karte ho?",
+          "Weekend pe tum sab saath mein kya karte ho?"
+        ],
+        [
+          "Pichhle weekend tumne parivaar ke saath kya kiya?",
+          "Tumhare parivaar ki kaun si parampara tumhe sabse achhi lagti hai?",
+          "Waqt ke saath tumhara parivaar kaise badla hai?"
+        ],
+        [
+          "Parivaar ki kaun si aadat tum hamesha ke liye rakhna chahoge?",
+          "Ghar pe koi matbhed ho toh tum use kaise suljhaoge?",
+          "Tumne apne parivaar mein kisi se kya seekha hai?"
+        ]
+      ]
+    },
+    {
+      "id": "school",
+      "openers": [
+        [
+          "Tumhe kaun sa subject sabse zyada pasand hai?",
+          "Tum break mein kya karte ho?",
+          "Tumhari class kaisi hai?"
+        ],
+        [
+          "Is hafte tumne kya naya seekha?",
+          "Apne timetable mein tum kya badalna chahoge?",
+          "Tum kisi project ki taiyaari kaise karte ho?"
+        ],
+        [
+          "Ek class ko mazedaar kya banata hai?",
+          "Tumhara ideal school kaisa hota?",
+          "Zyada zaroori kya hai: ratna ya samajhna?"
+        ]
+      ]
+    },
+    {
+      "id": "sports",
+      "openers": [
+        [
+          "Tumhe kaun sa khel pasand hai?",
+          "Tum khud khelna pasand karte ho ya dekhna?",
+          "Tum khel kahan khelte ho?"
+        ],
+        [
+          "Tumne yeh khel kab shuru kiya?",
+          "Tumne jo aakhri match dekha, woh kaisa tha?",
+          "Tum kaun sa naya khel try karna chahoge?"
+        ],
+        [
+          "Team mein tumhare liye sabse zaroori kya hai?",
+          "Apne pasandeeda khel ke niyam tum kaise badloge?",
+          "Khel tumhari zindagi pe kaisa asar daalta hai?"
+        ]
+      ]
+    },
+    {
+      "id": "food",
+      "openers": [
+        [
+          "Tumhara pasandeeda khaana kya hai?",
+          "Tum naashte mein aam taur pe kya khaate ho?",
+          "Tumhe meetha zyada pasand hai ya namkeen?"
+        ],
+        [
+          "Kal tumne kya banaya ya khaaya?",
+          "Tum kaun si dish banaana seekhna chahoge?",
+          "Haal mein tumne pehli baar kya chakha?"
+        ],
+        [
+          "Kaun sa khaana tumhe kisi jagah ki sabse zyada yaad dilata hai?",
+          "Saalon mein tumhara swaad kaise badla hai?",
+          "Kisi khaane ko yaadgaar kya banata hai?"
+        ]
+      ]
+    },
+    {
+      "id": "travel",
+      "openers": [
+        [
+          "Tum kahan ghoomne jaana chahte ho?",
+          "Tumhe samundar zyada pasand hai ya pahaad?",
+          "Tumhare bag mein kya kya hai?"
+        ],
+        [
+          "Tumhari pichhli chhutti kaisi thi?",
+          "Kis jagah ne tumhe sabse zyada hairaan kiya?",
+          "Tum ek chhoti trip kaise plan karoge?"
+        ],
+        [
+          "Safar mein tumne aisa kya seekha jiski ummeed nahi thi?",
+          "Aaram aur adventure mein se tum kaise chunoge?",
+          "Kisi nayi jagah pe tumhe ghar jaisa ehsaas kya deta hai?"
+        ]
+      ]
+    },
+    {
+      "id": "games",
+      "openers": [
+        [
+          "Tumhara pasandeeda game kaun sa hai?",
+          "Tum kiske saath khelna pasand karte ho?",
+          "Tumhe board game zyada pasand hai ya video game?"
+        ],
+        [
+          "Tumne apna pasandeeda game kaise seekha?",
+          "Tumhare pichhle game mein kya hua?",
+          "Tum kisi dost ko kaun sa game suggest karoge?"
+        ],
+        [
+          "Koi game lambe waqt tak mazedaar kaise rehta hai?",
+          "Tum ek saath milke khelne waala game kaise banaoge?",
+          "Apne pasandeeda game mein tum kya badloge, aur kyun?"
+        ]
+      ]
+    }
+  ]
+}
