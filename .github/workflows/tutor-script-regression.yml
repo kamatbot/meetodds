@@ -1,0 +1,24 @@
+name: Tutor script regression
+on:
+  push:
+    branches: [fix/tutor-native-speech-romanized-display]
+permissions:
+  contents: read
+concurrency:
+  group: tutor-script-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive the checked-out source for isolated regression work
+        run: git archive --format=tar HEAD frontend tools Cargo.toml Cargo.lock | gzip > tutor-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tutor-source
+          path: tutor-source.tar.gz
+          retention-days: 1
