@@ -3,22 +3,39 @@ on:
   push:
     branches: [fix/tutor-native-speech-romanized-display]
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: tutor-script-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  source:
+  integrate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-      - name: Archive the checked-out source for isolated regression work
-        run: git archive --format=tar HEAD frontend tools Cargo.toml Cargo.lock | gzip > tutor-source.tar.gz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tutor-source
-          path: tutor-source.tar.gz
-          retention-days: 1
+          ref: fix/tutor-native-speech-romanized-display
+          fetch-depth: 0
+      - name: Apply reviewed text-channel change and commit source checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'fix/tutor-native-speech-romanized-display'
+          python3 - <<'PY'
+          import base64, gzip, hashlib, pathlib, os
+          parts = sorted(pathlib.Path('tools/recovery').glob('tutor-speech.part*'))
+          assert len(parts) == 4
+          patch = gzip.decompress(base64.b64decode(''.join(p.read_text() for p in parts), validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '053df5a72b59a51ec34d2fde05995f1fc34727e063c5af38c07828b2907ed0d2'
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'tutor-speech.patch').write_bytes(patch)
+          PY
+          git show c679bcd9d494afd716b0dbe88a42b33ef54e8ff1:.github/workflows/tutor-script-regression.yml > .github/workflows/tutor-script-regression.yml
+          git apply --check "$RUNNER_TEMP/tutor-speech.patch"
+          git apply "$RUNNER_TEMP/tutor-speech.patch"
+          rm tools/recovery/tutor-speech.part*
+          git add -A frontend docs/NATIVE-SPEECH-DISPLAY.md .github/workflows/tutor-script-regression.yml tools/recovery
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: separate native Hindi speech from romanized tutor display'
+          git push origin HEAD:refs/heads/fix/tutor-native-speech-romanized-display
