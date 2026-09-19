@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
+import { PracticeScriptProvider, PracticeText } from './PracticeText';
 import { listLanguages, type LanguageId, type LanguageSummary } from '@/lib/languages';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -46,6 +47,7 @@ import {
   isCurrentSpanishReply,
   nextLevel,
   spanishReplyRate,
+  tutorSpeechArguments,
 } from '@/lib/spanish';
 
 type Screen = 'profiles' | 'start' | 'session' | 'recap';
@@ -87,6 +89,10 @@ function fmtElapsed(totalSec: number): string {
 }
 
 export default function SpanishPractice() {
+  return <PracticeScriptProvider><SpanishPracticeScreens /></PracticeScriptProvider>;
+}
+
+function SpanishPracticeScreens() {
   const router = useRouter();
   const [screen, setScreen] = useState<Screen>('profiles');
   const [profiles, setProfiles] = useState<SpanishProfile[]>([]);
@@ -577,7 +583,7 @@ function StartScreen({
               <div className="mt-3 grid gap-1.5">
                 {practicePhrases.map((p) => (
                   <div key={p.phrase} className="flex items-center gap-2 rounded-[9px] bg-panel-2 px-2.5 py-1.5">
-                    <span className="min-w-0 flex-1 truncate text-[12.5px] text-text">{p.phrase}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] text-text"><PracticeText text={p.phrase} language={profile.language} /></span>
                     <button
                       type="button"
                       aria-label={`Hear "${p.phrase}"`}
@@ -851,34 +857,40 @@ function SessionScreen({
   // return value), and routes the text to a transcript bubble / help callout
   // depending on which mode it answers.
   const handleReplyEvent = useCallback(async (event: TutorReplyEvent) => {
+    const stillCurrent = () => !endedRef.current && currentRequestIdRef.current === event.requestId
+      && sessionIdRef.current === event.sessionId;
+    if (!stillCurrent()) return;
     if (event.filler) {
-      void invoke('spanish_speak', { text: event.text, variety: profile.variety, rate: 150, language: profile.language }).catch(() => undefined);
+      void invoke('spanish_speak', tutorSpeechArguments(event, profile.variety, 150, profile.language)).catch(() => undefined);
       return;
     }
     await invoke('spanish_stop_speaking').catch(() => undefined);
+    if (!stillCurrent()) return;
     setStatus('speaking');
     const mode = tutorModeRef.current;
     const isTurn = !event.repeat && (mode === 'open' || mode === 'reply' || mode === 'stuck');
     // Text lands the moment the reply arrives; the voice follows it.
     if (isTurn) {
       addTurn('tutor', event.text);
-      void prefetchHelp(event.text);
     }
     const rate = spanishReplyRate(event, 165);
     try {
-      await invoke('spanish_speak', { text: event.text, variety: profile.variety, rate, language: profile.language });
+      await invoke('spanish_speak', tutorSpeechArguments(event, profile.variety, rate, profile.language));
     } catch (e) {
-      setError(describeError(e));
+      if (stillCurrent()) setError(describeError(e));
     }
+    if (!stillCurrent()) return;
     speechDoneRef.current = true;
     if (isTurn) {
+      // Native preparation gets priority over speculative example generation.
+      void prefetchHelp(event.text);
       armStuckTimer();
     } else if (mode === 'help') {
       setHelpText(event.text);
     }
     maybeClearBusy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.variety]);
+  }, [profile.variety, profile.language]);
 
   const finalizeReply = useCallback(async () => {
     const text = pendingRef.current.trim();
@@ -1076,7 +1088,7 @@ function SessionScreen({
       setStatus(idleStatus());
     }
     setHelpText(text);
-    void invoke('spanish_speak', { text, variety: profile.variety, rate: 150, language: profile.language }).catch(() => undefined);
+    void invoke('spanish_speak', { text, variety: profile.variety, rate: 150, language: profile.language }).catch((e) => setError(describeError(e)));
   };
 
   const startPracticeIt = async (target: string) => {
@@ -1109,7 +1121,7 @@ function SessionScreen({
   };
 
   const hearTutorLine = (text: string) => {
-    void invoke('spanish_speak', { text, variety: profile.variety, rate: 165, language: profile.language }).catch(() => undefined);
+    void invoke('spanish_speak', { text, variety: profile.variety, rate: 165, language: profile.language }).catch((e) => setError(describeError(e)));
   };
 
   const showEnglish = async (text: string) => {
@@ -1211,7 +1223,7 @@ function SessionScreen({
               if (turn.role === 'learner') {
                 return (
                   <div key={i} className="flex items-end justify-end gap-2">
-                    <div className="max-w-[80%] rounded-[16px] bg-accent px-4 py-3 text-body text-accent-foreground">{turn.text}</div>
+                    <div className="max-w-[80%] rounded-[16px] bg-accent px-4 py-3 text-body text-accent-foreground"><PracticeText text={turn.text} language={profile.language} /></div>
                     <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent-soft text-[10.5px] font-semibold text-accent">
                       {profile.name.slice(0, 1).toUpperCase()}
                     </span>
@@ -1227,7 +1239,7 @@ function SessionScreen({
                           isLastTutor ? 'text-[23px] font-medium leading-[30px]' : 'text-body'
                         }`}
                       >
-                        {turn.text}
+                        <PracticeText text={turn.text} language={profile.language} />
                       </div>
                       <button
                         type="button"
@@ -1260,7 +1272,7 @@ function SessionScreen({
             })}
             {livePartial && (
               <div className="flex justify-end">
-                <div className="max-w-[80%] rounded-[16px] border border-dashed border-accent/50 bg-accent-soft px-4 py-3 text-body text-text">{livePartial}</div>
+                <div className="max-w-[80%] rounded-[16px] border border-dashed border-accent/50 bg-accent-soft px-4 py-3 text-body text-text"><PracticeText text={livePartial} language={profile.language} /></div>
               </div>
             )}
           </div>
@@ -1290,7 +1302,7 @@ function SessionScreen({
               <Sparkles className="mt-1 h-5 w-5 shrink-0" strokeWidth={1.8} />
               <div className="min-w-0 flex-1">
                 <p className="horizon-eyebrow mb-1">You could say</p>
-                <p className="text-[22px] font-semibold leading-snug">{helpText}</p>
+                <p className="text-[22px] font-semibold leading-snug"><PracticeText text={helpText} language={profile.language} /></p>
               </div>
               <button type="button" aria-label="Dismiss suggestion" onClick={() => setHelpText(null)} className="shrink-0">
                 <X className="h-5 w-5" strokeWidth={1.8} />
@@ -1322,11 +1334,11 @@ function SessionScreen({
                 <div className="mt-3 grid gap-3">
                   <div>
                     <p className="horizon-eyebrow mb-1">You said</p>
-                    <p className="text-[17px] leading-snug text-2">{feedbackCard.youSaid}</p>
+                    <p className="text-[17px] leading-snug text-2"><PracticeText text={feedbackCard.youSaid} language={profile.language} /></p>
                   </div>
                   <div>
                     <p className="horizon-eyebrow mb-1">Try this</p>
-                    <p className="text-[24px] font-semibold leading-snug text-text">{feedbackCard.tryThis}</p>
+                    <p className="text-[24px] font-semibold leading-snug text-text"><PracticeText text={feedbackCard.tryThis} language={profile.language} /></p>
                   </div>
                   <button type="button" onClick={() => setWhyOpen((v) => !v)} className="flex items-center gap-1 text-left text-[13px] font-medium text-2 hover:text-text">
                     Why? <ChevronDown className={`h-3.5 w-3.5 transition-transform ${whyOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
@@ -1335,7 +1347,7 @@ function SessionScreen({
                 </div>
               ) : (
                 <div className="mt-3 grid gap-2">
-                  <p className="text-[22px] font-semibold leading-snug text-text">{feedbackCard.tryThis}</p>
+                  <p className="text-[22px] font-semibold leading-snug text-text"><PracticeText text={feedbackCard.tryThis} language={profile.language} /></p>
                   <p className="text-[15px] leading-snug text-2">{feedbackCard.why}</p>
                 </div>
               )}
@@ -1369,13 +1381,13 @@ function SessionScreen({
                     key={i}
                     className={practice.lastResult?.missedWordIndices.includes(i) ? 'text-danger underline decoration-2 opacity-80' : ''}
                   >
-                    {w}
+                    <PracticeText text={w} language={profile.language} />
                     {i < targetWords.length - 1 ? ' ' : ''}
                   </span>
                 ))}
               </p>
               {practice.lastResult && !practice.lastResult.done && (
-                <p className="mt-2 text-[14px] text-danger">{practice.lastResult.message} ({practice.previousAttempts.length}/3)</p>
+                <p className="mt-2 text-[14px] text-danger"><PracticeText text={practice.lastResult.message} language={profile.language} /> ({practice.previousAttempts.length}/3)</p>
               )}
             </div>
           )}
@@ -1580,7 +1592,7 @@ function RecapScreen({
               <div key={i} className="horizon-card flex items-start gap-2 p-3">
                 <div className="min-w-0 flex-1 text-[12.5px]">
                   <p className="font-medium text-text">{focus.title || CATEGORY_LABELS[focus.category] || focus.category} · {focus.count}×</p>
-                  <p className="mt-1 text-2">{focus.example.youSaid} → <span className="font-medium text-text">{focus.example.tryThis}</span></p>
+                  <p className="mt-1 text-2"><PracticeText text={focus.example.youSaid} language={profile.language} /> → <span className="font-medium text-text"><PracticeText text={focus.example.tryThis} language={profile.language} /></span></p>
                 </div>
                 <button
                   type="button"
@@ -1607,11 +1619,11 @@ function RecapScreen({
                 <div className="min-w-0 flex-1 text-[12.5px]">
                   {f.kind === 'correction' || f.kind === 'translation' ? (
                     <>
-                      <p className="text-2">{f.youSaid} →</p>
-                      <p className="font-medium text-text">{f.tryThis}</p>
+                      <p className="text-2"><PracticeText text={f.youSaid} language={profile.language} /> →</p>
+                      <p className="font-medium text-text"><PracticeText text={f.tryThis} language={profile.language} /></p>
                     </>
                   ) : (
-                    <p className="font-medium text-success">{f.tryThis}</p>
+                    <p className="font-medium text-success"><PracticeText text={f.tryThis} language={profile.language} /></p>
                   )}
                   <p className="mt-1 text-[11.5px] text-2">{f.why}</p>
                 </div>
@@ -1638,7 +1650,7 @@ function RecapScreen({
             <div className="mt-2 flex flex-wrap gap-1.5">
               {recap.masteredPhrases.map((phrase) => (
                 <span key={phrase} className="rounded-[8px] bg-success/10 px-2.5 py-1 text-[12px] font-medium text-success">
-                  {phrase}
+                  <PracticeText text={phrase} language={profile.language} />
                 </span>
               ))}
             </div>

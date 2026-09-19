@@ -83,6 +83,8 @@ export type TutorMode = 'open' | 'reply' | 'help' | 'stuck';
  * THE APP SPEAKS ONLY FROM THESE EVENTS, never from the command's return value. */
 export interface TutorReplyEvent {
   text: string;
+  /** Native-script speech, independent of the learner-readable text. */
+  speechText?: string;
   repeat: boolean;
   rate?: number;
   filler?: boolean;
@@ -200,4 +202,10 @@ export interface LessonBrief {
   prompts: string[];
   /** Situation text handed to the tutor session. */
   situation: string;
+}
+
+/** Central event-to-voice mapping: text stays canonical and romanized UI output
+ * never enters this payload. The backend validates/repairs legacy voice text. */
+export function tutorSpeechArguments(event: TutorReplyEvent, variety: Variety, rate: number, language?: LanguageId) {
+  return { text: event.text, speechText: event.speechText, variety, rate, language };
 }

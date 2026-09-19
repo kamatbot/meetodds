@@ -10,6 +10,8 @@ pub mod persistence;
 pub mod policy;
 pub mod scenes;
 pub mod text;
+pub mod speech;
+pub mod romanization;
 pub mod tutor;
 pub use tutor::{Mode, TutorEngine, TutorReplyEvent, TutorRequest, TutorResponse};
 
