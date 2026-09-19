@@ -29,11 +29,10 @@ jobs:
           assert hashlib.sha256(patch).hexdigest() == '053df5a72b59a51ec34d2fde05995f1fc34727e063c5af38c07828b2907ed0d2'
           pathlib.Path(os.environ['RUNNER_TEMP'], 'tutor-speech.patch').write_bytes(patch)
           PY
-          git show c679bcd9d494afd716b0dbe88a42b33ef54e8ff1:.github/workflows/tutor-script-regression.yml > .github/workflows/tutor-script-regression.yml
-          git apply --check "$RUNNER_TEMP/tutor-speech.patch"
-          git apply "$RUNNER_TEMP/tutor-speech.patch"
+          git apply --exclude='.github/workflows/tutor-script-regression.yml' --check "$RUNNER_TEMP/tutor-speech.patch"
+          git apply --exclude='.github/workflows/tutor-script-regression.yml' "$RUNNER_TEMP/tutor-speech.patch"
           rm tools/recovery/tutor-speech.part*
-          git add -A frontend docs/NATIVE-SPEECH-DISPLAY.md .github/workflows/tutor-script-regression.yml tools/recovery
+          git add -A frontend docs/NATIVE-SPEECH-DISPLAY.md tools/recovery
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
