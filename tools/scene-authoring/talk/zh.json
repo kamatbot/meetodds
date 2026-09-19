@@ -1,0 +1,44 @@
+{
+  "language_id": "zh",
+  "closing": "太好了，我们结束了！你想再练一次，还是换个话题聊聊？",
+  "talk_fallback": "你有空的时候喜欢做什么？",
+  "scaffold_fallback": "你想聊吃的还是聊游戏？",
+  "dial_instructions": [
+    "ONE short question only (at most 12 characters), one clause, no aspect markers (no 了, 过, 着) and no time adverbs; use a simple 吗 question or a 什么/哪/谁/哪儿 question. Nothing before the question.",
+    "At most two short sentences with familiar, basic vocabulary (simple 是/有/喜欢/想 sentences, 还是 choices); end with a question.",
+    "Natural sentences; invite reasons (为什么, 因为……所以……) and past experiences (了, 过, ……的时候), with 比 and 还是 comparisons.",
+    "Natural colloquial Mandarin with idioms, 成语 and sentence-final particles (吧, 呢, 嘛); nuanced follow-up questions using hypotheticals (如果……的话, 要是……) and 比起……, 相比之下 comparisons."
+  ],
+  "topics": [
+    {"id": "family", "openers": [
+      ["你喜欢和家人一起做什么？", "在家里你和谁说话最多？", "周末你们一家人一起做什么？"],
+      ["上个周末你和家人做了什么？", "你最喜欢家里的哪个传统？", "这些年你的家庭有什么变化？"],
+      ["你希望家里的哪个习惯一直保留下去？", "如果家里人意见不一样，你会怎么解决？", "你从家里的某个人身上学到了什么？"]
+    ]},
+    {"id": "school", "openers": [
+      ["你最喜欢哪门课？", "课间休息的时候你做什么？", "你们班是什么样的？"],
+      ["这个星期你学到了什么？", "你想改一改课程表的哪一部分？", "你是怎么准备一个项目的？"],
+      ["什么样的课才算有意思？", "如果让你设计理想的学校，你会怎么设计？", "你觉得记忆更重要，还是理解更重要？"]
+    ]},
+    {"id": "sports", "openers": [
+      ["你喜欢什么运动？", "你喜欢自己打球，还是看比赛？", "你在哪儿锻炼？"],
+      ["你是什么时候开始做这项运动的？", "你最近看的一场比赛怎么样？", "你想试试什么新运动？"],
+      ["在一个团队里，你最看重什么？", "你想改一改你最喜欢的运动的哪条规则？", "运动对你的生活有什么影响？"]
+    ]},
+    {"id": "food", "openers": [
+      ["你最喜欢吃什么？", "你早餐一般吃什么？", "你喜欢吃甜的还是咸的？"],
+      ["你昨天做了什么菜，或者吃了什么？", "你想学做哪道菜？", "你最近第一次尝了什么新东西？"],
+      ["哪道菜最能代表你熟悉的一个地方？", "这些年你的口味有什么变化？", "什么样的一顿饭会让人难忘？"]
+    ]},
+    {"id": "travel", "openers": [
+      ["你想去哪儿旅行？", "你喜欢海边还是山里？", "你的背包里装什么？"],
+      ["你上次的假期过得怎么样？", "哪个地方最让你意外？", "你会怎么安排一次短途旅行？"],
+      ["旅行中你学到了什么意想不到的东西？", "舒适和冒险，你会怎么选？", "什么会让你在别的地方也有家的感觉？"]
+    ]},
+    {"id": "games", "openers": [
+      ["你最喜欢的游戏是什么？", "你喜欢和谁一起玩？", "你喜欢桌游还是电子游戏？"],
+      ["你是怎么学会玩你最喜欢的游戏的？", "你上一局玩得怎么样？", "你会向朋友推荐什么游戏？"],
+      ["是什么让一个游戏一直有意思？", "如果让你设计一款合作游戏，你会怎么设计？", "你想改一改你最喜欢的游戏的什么地方，为什么？"]
+    ]}
+  ]
+}

@@ -1,0 +1,349 @@
+{
+  "language_id": "fr",
+  "scenes": [
+    {
+      "id": "ordering_food",
+      "tutor_role": "waiter",
+      "learner_role": "customer",
+      "goal": "order food and a drink, then ask for the bill",
+      "filler": "Alors, voyons voir…",
+      "beats": [
+        {
+          "goal": "greet and choose a drink",
+          "opener": "Bonjour ! Qu'est-ce que vous voulez boire ?",
+          "options": "De l'eau ou un jus ?"
+        },
+        {
+          "goal": "order food; offer a dish",
+          "opener": "On a des pizzas et des salades. Qu'est-ce que vous voulez manger ?",
+          "options": "Pizza ou salade ?"
+        },
+        {
+          "goal": "ask how the food tastes",
+          "opener": "Alors, ça vous plaît ?",
+          "options": "C'est bon ou pas ?"
+        },
+        {
+          "goal": "ask for the bill and finish",
+          "opener": "Vous voulez autre chose, ou je vous apporte l'addition ?",
+          "options": "Autre chose ou l'addition ?"
+        }
+      ],
+      "target_structures": [
+        [
+          "je voudrais + nom",
+          "vous avez… ?"
+        ],
+        [
+          "j'aimerais",
+          "vous pourriez m'apporter… ?"
+        ],
+        [
+          "conditional politeness",
+          "complaining politely"
+        ]
+      ]
+    },
+    {
+      "id": "meeting_someone",
+      "tutor_role": "new acquaintance",
+      "learner_role": "new acquaintance",
+      "goal": "introduce yourself and find a shared interest",
+      "filler": "Un instant…",
+      "beats": [
+        {
+          "goal": "exchange names",
+          "opener": "Salut ! Tu t'appelles comment ?",
+          "options": "Léa ou un autre prénom ?"
+        },
+        {
+          "goal": "say where you live",
+          "opener": "Et tu habites où ?",
+          "options": "À Paris ou ailleurs ?"
+        },
+        {
+          "goal": "find a shared interest",
+          "opener": "Moi, j'adore le cinéma. Et toi, tu aimes quoi, comme loisirs ?",
+          "options": "Le cinéma ou le sport ?"
+        },
+        {
+          "goal": "suggest another conversation",
+          "opener": "Ça te dirait qu'on se revoie pour discuter ?",
+          "options": "Cette semaine ou le week-end prochain ?"
+        }
+      ],
+      "target_structures": [
+        [
+          "je m'appelle",
+          "j'habite à + ville"
+        ],
+        [
+          "j'ai l'habitude de + infinitif",
+          "ça fait… que j'habite"
+        ],
+        [
+          "shared interests",
+          "polite invitations"
+        ]
+      ]
+    },
+    {
+      "id": "school_day",
+      "tutor_role": "classmate",
+      "learner_role": "student",
+      "goal": "talk about subjects, a class project and after-school activities",
+      "filler": "Hmm, attends…",
+      "beats": [
+        {
+          "goal": "name a favorite subject",
+          "opener": "Salut ! C'est quoi, ta matière préférée ?",
+          "options": "Les maths ou l'histoire ?"
+        },
+        {
+          "goal": "describe a class",
+          "opener": "Et le cours de ce matin, c'était comment ?",
+          "options": "Intéressant ou ennuyeux ?"
+        },
+        {
+          "goal": "describe a project or activity",
+          "opener": "Tu fais quoi comme projet en ce moment ?",
+          "options": "Un exposé ou une expérience ?"
+        },
+        {
+          "goal": "arrange an after-school activity",
+          "opener": "On fait quelque chose après les cours ?",
+          "options": "Foot ou bibliothèque ?"
+        }
+      ],
+      "target_structures": [
+        [
+          "j'aime + article + nom",
+          "le cours est + adjectif"
+        ],
+        [
+          "je trouve que + phrase",
+          "après les cours, on peut + infinitif"
+        ],
+        [
+          "explain an opinion",
+          "compare learning experiences"
+        ]
+      ]
+    },
+    {
+      "id": "weekend_plans",
+      "tutor_role": "friend",
+      "learner_role": "friend",
+      "goal": "agree an activity, place and time",
+      "filler": "Alors, voyons voir…",
+      "beats": [
+        {
+          "goal": "choose an activity",
+          "opener": "Tu veux faire quoi ce week-end ?",
+          "options": "Cinéma ou rando ?"
+        },
+        {
+          "goal": "choose a place",
+          "opener": "On se retrouve où ?",
+          "options": "Chez moi ou en ville ?"
+        },
+        {
+          "goal": "agree a time",
+          "opener": "Et à quelle heure ?",
+          "options": "Le matin ou l'après-midi ?"
+        },
+        {
+          "goal": "confirm the plan",
+          "opener": "Donc c'est bon, on fait ça ?",
+          "options": "C'est bon ou on change ?"
+        }
+      ],
+      "target_structures": [
+        [
+          "je veux + infinitif",
+          "à + heure"
+        ],
+        [
+          "ça te dit de + infinitif ?",
+          "si tu veux, on peut…"
+        ],
+        [
+          "negotiate alternatives",
+          "hypothetical plans"
+        ]
+      ]
+    },
+    {
+      "id": "shopping",
+      "tutor_role": "shop assistant",
+      "learner_role": "customer",
+      "goal": "choose an item, compare options and buy it",
+      "filler": "Hmm, attendez…",
+      "beats": [
+        {
+          "goal": "identify an item",
+          "opener": "Bonjour ! Je peux vous aider ? Vous cherchez quelque chose ?",
+          "options": "Un pull ou un t-shirt ?"
+        },
+        {
+          "goal": "choose size and color",
+          "opener": "Vous faites quelle taille ? Et en quelle couleur ?",
+          "options": "En bleu ou en noir ?"
+        },
+        {
+          "goal": "compare an alternative",
+          "opener": "Il y a aussi ce modèle-là. Vous préférez lequel ?",
+          "options": "Celui-ci ou celui-là ?"
+        },
+        {
+          "goal": "ask price and decide",
+          "opener": "Il n'est pas cher, en plus. Alors, vous le prenez ?",
+          "options": "Vous le prenez ou vous laissez ?"
+        }
+      ],
+      "target_structures": [
+        [
+          "je cherche + nom",
+          "ça coûte combien ?"
+        ],
+        [
+          "celui-ci / celui-là",
+          "je préfère… parce que…"
+        ],
+        [
+          "compare value",
+          "negotiate politely"
+        ]
+      ]
+    },
+    {
+      "id": "asking_directions",
+      "tutor_role": "helpful pedestrian",
+      "learner_role": "visitor",
+      "goal": "find a destination and check the route",
+      "filler": "Alors, voyons voir…",
+      "beats": [
+        {
+          "goal": "ask for a destination",
+          "opener": "Bonjour ! Vous cherchez quelque chose ?",
+          "options": "La gare ou le musée ?"
+        },
+        {
+          "goal": "establish a landmark",
+          "opener": "Vous voyez la pharmacie, là-bas ?",
+          "options": "Vous la voyez ou pas ?"
+        },
+        {
+          "goal": "explain and confirm a route",
+          "opener": "Alors, vous allez tout droit, puis à gauche à la pharmacie. C'est bon ?",
+          "options": "À gauche ou à droite ?"
+        },
+        {
+          "goal": "check understanding and finish",
+          "opener": "Vous avez compris, ou je répète ?",
+          "options": "C'est clair ou je répète ?"
+        }
+      ],
+      "target_structures": [
+        [
+          "où est + article + nom ?",
+          "à gauche / à droite / tout droit"
+        ],
+        [
+          "pourriez-vous me dire où… ?",
+          "il faut + infinitif"
+        ],
+        [
+          "clarify ambiguous directions",
+          "compare routes"
+        ]
+      ]
+    },
+    {
+      "id": "hotel_checkin",
+      "tutor_role": "hotel receptionist",
+      "learner_role": "guest",
+      "goal": "check in, ask about facilities and agree checkout",
+      "filler": "Un instant…",
+      "beats": [
+        {
+          "goal": "greet and confirm reservation",
+          "opener": "Bonsoir, bienvenue ! C'est à quel nom, la réservation ?",
+          "options": "Dupont ou un autre nom ?"
+        },
+        {
+          "goal": "choose a room",
+          "opener": "Vous préférez quelle chambre ?",
+          "options": "Un grand lit ou deux lits ?"
+        },
+        {
+          "goal": "ask about facilities",
+          "opener": "Vous avez des questions sur l'hôtel ?",
+          "options": "Le wifi ou le petit-déjeuner ?"
+        },
+        {
+          "goal": "agree checkout and finish",
+          "opener": "Et vous partez quand ?",
+          "options": "Demain matin ou après-demain ?"
+        }
+      ],
+      "target_structures": [
+        [
+          "j'ai une réservation",
+          "il y a… ?"
+        ],
+        [
+          "est-ce qu'il serait possible de… ?",
+          "à quelle heure est + nom ?"
+        ],
+        [
+          "request an accommodation",
+          "resolve a reservation problem"
+        ]
+      ]
+    },
+    {
+      "id": "planning_party",
+      "tutor_role": "friend helping organize",
+      "learner_role": "party organizer",
+      "goal": "plan guests, food, activities and timing",
+      "filler": "Hmm, attends…",
+      "beats": [
+        {
+          "goal": "decide who is invited",
+          "opener": "Alors, tu invites qui à la fête ?",
+          "options": "Des amis ou la famille ?"
+        },
+        {
+          "goal": "choose food",
+          "opener": "Et on prépare quoi à manger ?",
+          "options": "Des pizzas ou un buffet ?"
+        },
+        {
+          "goal": "choose an activity",
+          "opener": "On fait quoi comme animation ?",
+          "options": "De la musique ou des jeux ?"
+        },
+        {
+          "goal": "confirm when and finish",
+          "opener": "C'est pour quand, alors ?",
+          "options": "Vendredi soir ou samedi ?"
+        }
+      ],
+      "target_structures": [
+        [
+          "j'invite + nom",
+          "on mange + nom"
+        ],
+        [
+          "il faudrait + infinitif",
+          "on pourrait + infinitif"
+        ],
+        [
+          "coordinate preferences",
+          "negotiate constraints"
+        ]
+      ]
+    }
+  ]
+}

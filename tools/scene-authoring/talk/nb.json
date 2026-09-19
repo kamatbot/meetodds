@@ -1,0 +1,134 @@
+{
+  "language_id": "nb",
+  "closing": "Kjempebra, da er vi ferdige! Vil du øve en gang til, eller snakke om noe annet?",
+  "talk_fallback": "Hva liker du å gjøre i fritida?",
+  "scaffold_fallback": "Vil du snakke om mat eller om spill?",
+  "dial_instructions": [
+    "ONE short question only (max 10 words), present tense, one main clause, nothing before the question. Question word first with V2 word order (e.g. 'Hva liker du å gjøre i helgene?'); no subordinate clauses, no 'ville'/'skulle' forms.",
+    "At most two short sentences with familiar everyday vocabulary; end with a question. Simple main clauses in V2 order, present tense or simple preteritum, du-forms only; avoid 'som'/'at' clauses.",
+    "Natural sentences; invite reasons and past experiences: preteritum and perfektum ('har + partisipp'), 'fordi'/'siden' clauses, 'hvorfor' and 'hvordan' follow-ups on what the learner just said.",
+    "Natural idiom and nuanced follow-up questions: conditional 'ville/skulle ha' and 'hvis du hadde…', comparisons ('heller enn', 'sammenlignet med'), sentence adverbs like 'jo', 'vel', 'nok', and relaxed everyday Eastern Norwegian speech."
+  ],
+  "topics": [
+    {
+      "id": "family",
+      "openers": [
+        [
+          "Hva liker du å gjøre med familien din?",
+          "Hvem snakker du mest med hjemme?",
+          "Hva gjør dere sammen i helgene?"
+        ],
+        [
+          "Hva gjorde du med familien din forrige helg?",
+          "Hvilken familietradisjon liker du best?",
+          "Hvordan har familien din forandret seg med tida?"
+        ],
+        [
+          "Hvilken tradisjon i familien ville du helst beholdt for alltid?",
+          "Hvordan ville du løst en uenighet hjemme?",
+          "Hva har du lært av noen i familien din?"
+        ]
+      ]
+    },
+    {
+      "id": "school",
+      "openers": [
+        [
+          "Hvilket fag liker du best?",
+          "Hva gjør du i friminuttet?",
+          "Hvordan er klassen din?"
+        ],
+        [
+          "Hva lærte du denne uka?",
+          "Hva ville du forandret på timeplanen din?",
+          "Hvordan forbereder du deg til et prosjekt?"
+        ],
+        [
+          "Hva gjør en time interessant?",
+          "Hvordan ville du utformet drømmeskolen din?",
+          "Er det viktigere å pugge eller å forstå?"
+        ]
+      ]
+    },
+    {
+      "id": "sports",
+      "openers": [
+        [
+          "Hvilken sport liker du?",
+          "Liker du best å spille selv eller å se kamper?",
+          "Hvor trener du?"
+        ],
+        [
+          "Når begynte du med den sporten?",
+          "Hvordan var den siste kampen du så?",
+          "Hvilken sport har du lyst til å prøve?"
+        ],
+        [
+          "Hva setter du mest pris på i et lag?",
+          "Hva ville du forandret på reglene i favorittsporten din?",
+          "Hvordan påvirker sport livet ditt?"
+        ]
+      ]
+    },
+    {
+      "id": "food",
+      "openers": [
+        [
+          "Hva er favorittmaten din?",
+          "Hva spiser du vanligvis til frokost?",
+          "Liker du best søtt eller salt?"
+        ],
+        [
+          "Hva lagde eller spiste du i går?",
+          "Hvilken rett har du lyst til å lære å lage?",
+          "Hvilken mat smakte du for første gang nylig?"
+        ],
+        [
+          "Hvilken rett sier mest om et sted du kjenner?",
+          "Hvordan har smaken din forandret seg med årene?",
+          "Hva gjør et måltid minneverdig?"
+        ]
+      ]
+    },
+    {
+      "id": "travel",
+      "openers": [
+        [
+          "Hvor har du lyst til å reise?",
+          "Liker du best stranda eller fjellet?",
+          "Hva har du i sekken din?"
+        ],
+        [
+          "Hvordan var den siste ferien din?",
+          "Hvilket sted overrasket deg mest?",
+          "Hvordan ville du planlagt en kort tur?"
+        ],
+        [
+          "Hva lærte du på reise som du ikke hadde ventet?",
+          "Hvordan ville du valgt mellom komfort og eventyr?",
+          "Hva gjør at du føler deg hjemme et annet sted?"
+        ]
+      ]
+    },
+    {
+      "id": "games",
+      "openers": [
+        [
+          "Hva er favorittspillet ditt?",
+          "Hvem liker du å spille med?",
+          "Liker du best brettspill eller dataspill?"
+        ],
+        [
+          "Hvordan lærte du å spille favorittspillet ditt?",
+          "Hva skjedde sist du spilte?",
+          "Hvilket spill ville du anbefalt til en venn?"
+        ],
+        [
+          "Hva gjør at et spill fortsetter å være interessant?",
+          "Hvordan ville du laget et samarbeidsspill?",
+          "Hva ville du forandret på favorittspillet ditt, og hvorfor?"
+        ]
+      ]
+    }
+  ]
+}

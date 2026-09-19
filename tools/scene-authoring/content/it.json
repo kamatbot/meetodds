@@ -1,0 +1,117 @@
+{
+  "language_id": "it",
+  "scenes": [
+    {
+      "id": "ordering_food",
+      "tutor_role": "waiter",
+      "learner_role": "customer",
+      "goal": "order food and a drink, then ask for the bill",
+      "filler": "Mmm, vediamo…",
+      "beats": [
+        {"goal": "greet and choose a drink", "opener": "Buongiorno! Cosa prende da bere?", "options": "Un caffè o un'acqua?"},
+        {"goal": "order food; offer a dish", "opener": "Abbiamo la pizza e la pasta al pomodoro. Cosa desidera mangiare?", "options": "Pizza o pasta?"},
+        {"goal": "ask how the food tastes", "opener": "Tutto bene? Le piace?", "options": "Le piace molto o poco?"},
+        {"goal": "ask for the bill and finish", "opener": "Desidera altro o Le porto il conto?", "options": "Altro o il conto?"}
+      ],
+      "target_structures": [["vorrei + noun", "avete…?"], ["mi porta…?", "potrei avere…?"], ["conditional politeness", "complaining politely"]]
+    },
+    {
+      "id": "meeting_someone",
+      "tutor_role": "new acquaintance",
+      "learner_role": "new acquaintance",
+      "goal": "introduce yourself and find a shared interest",
+      "filler": "Un attimo…",
+      "beats": [
+        {"goal": "exchange names", "opener": "Ciao! Come ti chiami?", "options": "Anna o un altro nome?"},
+        {"goal": "say where you live", "opener": "Piacere! E dove abiti?", "options": "In città o in campagna?"},
+        {"goal": "find a shared interest", "opener": "Cosa ti piace fare nel tempo libero?", "options": "Sport o musica?"},
+        {"goal": "suggest another conversation", "opener": "Che bello! Ci prendiamo un caffè un giorno di questi?", "options": "Domani o la settimana prossima?"}
+      ],
+      "target_structures": [["mi chiamo", "mi piace"], ["di solito + verb", "abito qui da + time"], ["shared interests", "polite invitations"]]
+    },
+    {
+      "id": "school_day",
+      "tutor_role": "classmate",
+      "learner_role": "student",
+      "goal": "talk about subjects, a class project and after-school activities",
+      "filler": "Fammi pensare…",
+      "beats": [
+        {"goal": "name a favorite subject", "opener": "Ciao! Qual è la tua materia preferita?", "options": "Matematica o storia?"},
+        {"goal": "describe a class", "opener": "Com'è stata la lezione di oggi?", "options": "Facile o difficile?"},
+        {"goal": "describe a project or activity", "opener": "Cosa fate per il progetto di classe?", "options": "Un poster o una presentazione?"},
+        {"goal": "arrange an after-school activity", "opener": "Dopo la scuola facciamo qualcosa insieme?", "options": "Studiamo o giochiamo a calcio?"}
+      ],
+      "target_structures": [["mi piace + noun", "è + adjective"], ["preferisco… perché…", "secondo me"], ["explain an opinion", "compare learning experiences"]]
+    },
+    {
+      "id": "weekend_plans",
+      "tutor_role": "friend",
+      "learner_role": "friend",
+      "goal": "agree an activity, place and time",
+      "filler": "Fammi vedere…",
+      "beats": [
+        {"goal": "choose an activity", "opener": "Ciao! Cosa facciamo questo fine settimana?", "options": "Cinema o pizza?"},
+        {"goal": "choose a place", "opener": "Bene! E dove andiamo?", "options": "In centro o vicino a casa?"},
+        {"goal": "agree a time", "opener": "A che ora ci vediamo?", "options": "Alle sei o alle otto?"},
+        {"goal": "confirm the plan", "opener": "Perfetto! Allora è deciso?", "options": "Confermato o cambiamo?"}
+      ],
+      "target_structures": [["andiamo a + place", "alle + hour"], ["ti va di + infinitive?", "potremmo + infinitive"], ["negotiate alternatives", "hypothetical plans"]]
+    },
+    {
+      "id": "shopping",
+      "tutor_role": "shop assistant",
+      "learner_role": "customer",
+      "goal": "choose an item, compare options and buy it",
+      "filler": "Un attimo…",
+      "beats": [
+        {"goal": "identify an item", "opener": "Buongiorno! Posso aiutarla? Cosa cerca?", "options": "Una maglietta o dei pantaloni?"},
+        {"goal": "choose size and color", "opener": "Che taglia porta? E che colore Le piace?", "options": "Media o grande, blu o rosa?"},
+        {"goal": "compare an alternative", "opener": "Questo costa un po' di più, ma è di cotone. Preferisce questo o l'altro?", "options": "Questo o l'altro?"},
+        {"goal": "ask price and decide", "opener": "Allora, ha deciso? Lo prende?", "options": "Lo prende o ci pensa?"}
+      ],
+      "target_structures": [["cerco + noun", "quanto costa?"], ["posso provarlo?", "è più… di"], ["compare value", "negotiate politely"]]
+    },
+    {
+      "id": "asking_directions",
+      "tutor_role": "helpful pedestrian",
+      "learner_role": "visitor",
+      "goal": "find a destination and check the route",
+      "filler": "Mmm, vediamo…",
+      "beats": [
+        {"goal": "ask for a destination", "opener": "Buongiorno! Ha bisogno di aiuto? Dove deve andare?", "options": "Alla stazione o al museo?"},
+        {"goal": "establish a landmark", "opener": "Vede la chiesa lì in fondo alla strada?", "options": "La vede o no?"},
+        {"goal": "explain and confirm a route", "opener": "Vada dritto fino alla chiesa e poi giri a sinistra. Ha capito?", "options": "A sinistra o a destra?"},
+        {"goal": "check understanding and finish", "opener": "Perfetto! Vuole che ripeta o è tutto chiaro?", "options": "Ripeto o è chiaro?"}
+      ],
+      "target_structures": [["dov'è + noun?", "a destra / a sinistra"], ["scusi, potrebbe dirmi…?", "quanto ci vuole a piedi?"], ["clarify ambiguous directions", "compare routes"]]
+    },
+    {
+      "id": "hotel_checkin",
+      "tutor_role": "hotel receptionist",
+      "learner_role": "guest",
+      "goal": "check in, ask about facilities and agree checkout",
+      "filler": "Un attimo…",
+      "beats": [
+        {"goal": "greet and confirm reservation", "opener": "Buonasera! Ha una prenotazione?", "options": "A nome Rossi o un altro nome?"},
+        {"goal": "choose a room", "opener": "Bene. Che camera preferisce?", "options": "Singola o doppia?"},
+        {"goal": "ask about facilities", "opener": "Vuole sapere qualcosa sui nostri servizi?", "options": "La colazione o il Wi-Fi?"},
+        {"goal": "agree checkout and finish", "opener": "Ultima cosa: a che ora pensa di fare il check-out?", "options": "Presto la mattina o verso mezzogiorno?"}
+      ],
+      "target_structures": [["ho una prenotazione", "c'è + noun?"], ["è possibile + infinitive?", "a che ora si può…?"], ["request an accommodation", "resolve a reservation problem"]]
+    },
+    {
+      "id": "planning_party",
+      "tutor_role": "friend helping organize",
+      "learner_role": "party organizer",
+      "goal": "plan guests, food, activities and timing",
+      "filler": "Fammi pensare…",
+      "beats": [
+        {"goal": "decide who is invited", "opener": "Ciao! Allora, chi invitiamo alla festa?", "options": "Solo gli amici o anche la famiglia?"},
+        {"goal": "choose food", "opener": "E da mangiare cosa prepariamo?", "options": "Pizza o panini?"},
+        {"goal": "choose an activity", "opener": "Cosa facciamo durante la festa?", "options": "Musica e balli o giochi?"},
+        {"goal": "confirm when and finish", "opener": "Ultima cosa: quando la facciamo?", "options": "Sabato o domenica?"}
+      ],
+      "target_structures": [["invitiamo + noun", "facciamo + noun"], ["preferisco… piuttosto che…", "dovremmo + infinitive"], ["coordinate preferences", "negotiate constraints"]]
+    }
+  ]
+}

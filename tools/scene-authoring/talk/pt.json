@@ -1,0 +1,134 @@
+{
+  "language_id": "pt",
+  "closing": "Muito bem, terminamos! Quer praticar de novo ou falar de outro assunto?",
+  "talk_fallback": "O que você gosta de fazer no seu tempo livre?",
+  "scaffold_fallback": "Quer falar de comida ou de jogos?",
+  "dial_instructions": [
+    "ONE short question only (max 10 words), present tense, one clause, addressed with você. Nothing before the question.",
+    "At most two short sentences with familiar vocabulary (present tense or simple pretérito perfeito; 'a gente' is fine); end with a question.",
+    "Natural Brazilian sentences; invite reasons and past experiences (pretérito perfeito and imperfeito, 'por quê?', 'como foi?').",
+    "Natural Brazilian idiom and nuanced follow-up questions; use hypotheticals and the conditional (futuro do pretérito, 'e se…?', 'o que você faria?')."
+  ],
+  "topics": [
+    {
+      "id": "family",
+      "openers": [
+        [
+          "O que você gosta de fazer com a sua família?",
+          "Com quem você mais conversa em casa?",
+          "O que vocês fazem juntos no fim de semana?"
+        ],
+        [
+          "O que você fez com a sua família no fim de semana passado?",
+          "Qual tradição da sua família você mais gosta?",
+          "Como a sua família mudou com o tempo?"
+        ],
+        [
+          "Que costume da sua família você gostaria de manter para sempre?",
+          "Como você resolveria uma diferença de opinião em casa?",
+          "O que você aprendeu com alguém da sua família?"
+        ]
+      ]
+    },
+    {
+      "id": "school",
+      "openers": [
+        [
+          "Qual matéria você mais gosta?",
+          "O que você faz no recreio?",
+          "Como é a sua turma?"
+        ],
+        [
+          "O que você aprendeu esta semana?",
+          "O que você mudaria no seu horário?",
+          "Como você se prepara para um trabalho da escola?"
+        ],
+        [
+          "O que faz uma aula ser interessante?",
+          "Como você montaria a sua escola ideal?",
+          "É mais importante decorar ou entender?"
+        ]
+      ]
+    },
+    {
+      "id": "sports",
+      "openers": [
+        [
+          "Que esporte você gosta?",
+          "Você prefere jogar ou assistir aos jogos?",
+          "Onde você faz exercício?"
+        ],
+        [
+          "Quando você começou a praticar esse esporte?",
+          "Como foi o último jogo que você assistiu?",
+          "Que esporte você gostaria de experimentar?"
+        ],
+        [
+          "O que você mais valoriza em um time?",
+          "O que você mudaria nas regras do seu esporte favorito?",
+          "Como o esporte influencia a sua vida?"
+        ]
+      ]
+    },
+    {
+      "id": "food",
+      "openers": [
+        [
+          "Qual é a sua comida favorita?",
+          "O que você costuma comer no café da manhã?",
+          "Você prefere doce ou salgado?"
+        ],
+        [
+          "O que você cozinhou ou comeu ontem?",
+          "Que prato você gostaria de aprender a fazer?",
+          "Que comida você experimentou pela primeira vez recentemente?"
+        ],
+        [
+          "Que prato representa melhor um lugar que você conhece?",
+          "Como o seu gosto mudou com os anos?",
+          "O que faz uma refeição ser memorável?"
+        ]
+      ]
+    },
+    {
+      "id": "travel",
+      "openers": [
+        [
+          "Para onde você quer viajar?",
+          "Você prefere praia ou montanha?",
+          "O que você leva na sua mochila?"
+        ],
+        [
+          "Como foram as suas últimas férias?",
+          "Que lugar mais te surpreendeu?",
+          "Como você prepararia uma viagem curta?"
+        ],
+        [
+          "O que você aprendeu viajando que não esperava?",
+          "Como você escolheria entre conforto e aventura?",
+          "O que faz você se sentir em casa em outro lugar?"
+        ]
+      ]
+    },
+    {
+      "id": "games",
+      "openers": [
+        [
+          "Qual é o seu jogo favorito?",
+          "Com quem você gosta de jogar?",
+          "Você prefere jogo de tabuleiro ou videogame?"
+        ],
+        [
+          "Como você aprendeu a jogar o seu jogo favorito?",
+          "O que aconteceu na sua última partida?",
+          "Que jogo você recomendaria para um amigo?"
+        ],
+        [
+          "O que faz um jogo continuar interessante?",
+          "Como você criaria um jogo cooperativo?",
+          "O que você mudaria no seu jogo favorito e por quê?"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+{
+  "language_id": "en",
+  "scenes": [
+    {
+      "id": "ordering_food",
+      "tutor_role": "waiter",
+      "learner_role": "customer",
+      "goal": "order food and a drink, then ask for the bill",
+      "filler": "Hmm, let me see…",
+      "beats": [
+        {"goal": "greet and choose a drink", "opener": "Hi! What would you like to drink?", "options": "Water or juice?"},
+        {"goal": "order food; offer a dish", "opener": "We've got pizza and tacos. What would you like to eat?", "options": "Pizza or tacos?"},
+        {"goal": "ask how the food tastes", "opener": "How's the food?", "options": "Really good, or just okay?"},
+        {"goal": "ask for the bill and finish", "opener": "Would you like anything else, or shall I bring the bill?", "options": "Anything else, or the bill?"}
+      ],
+      "target_structures": [
+        ["I'd like + noun", "Do you have…?"],
+        ["Could I have…?", "Could you bring me…?"],
+        ["conditional politeness", "complaining politely"]
+      ]
+    },
+    {
+      "id": "meeting_someone",
+      "tutor_role": "new acquaintance",
+      "learner_role": "new acquaintance",
+      "goal": "introduce yourself and find a shared interest",
+      "filler": "Just a moment…",
+      "beats": [
+        {"goal": "exchange names", "opener": "Hi! What's your name?", "options": "Is it Anna, or something else?"},
+        {"goal": "say where you live", "opener": "Where do you live?", "options": "In a city or in a small town?"},
+        {"goal": "find a shared interest", "opener": "What do you like doing in your free time?", "options": "Sports or music?"},
+        {"goal": "suggest another conversation", "opener": "It was lovely meeting you! Shall we talk again another day?", "options": "Tomorrow or this weekend?"}
+      ],
+      "target_structures": [
+        ["my name is", "I like + -ing"],
+        ["I usually + verb", "I've been living + for/since"],
+        ["shared interests", "polite invitations"]
+      ]
+    },
+    {
+      "id": "school_day",
+      "tutor_role": "classmate",
+      "learner_role": "student",
+      "goal": "talk about subjects, a class project and after-school activities",
+      "filler": "Hmm, let me see…",
+      "beats": [
+        {"goal": "name a favorite subject", "opener": "What's your favorite subject?", "options": "Science or art?"},
+        {"goal": "describe a class", "opener": "What do you do in that class?", "options": "Do you read, or do projects?"},
+        {"goal": "describe a project or activity", "opener": "What project do you want to do?", "options": "A drawing or a model?"},
+        {"goal": "arrange an after-school activity", "opener": "What do you want to do after school?", "options": "Play a game or just relax?"}
+      ],
+      "target_structures": [
+        ["I like + subject", "I have + class"],
+        ["Today we + past simple", "I've learned how to…"],
+        ["explain an opinion", "compare learning experiences"]
+      ]
+    },
+    {
+      "id": "weekend_plans",
+      "tutor_role": "friend",
+      "learner_role": "friend",
+      "goal": "agree an activity, place and time",
+      "filler": "Let me think…",
+      "beats": [
+        {"goal": "choose an activity", "opener": "What do you want to do this weekend?", "options": "Go to the park or watch a film?"},
+        {"goal": "choose a place", "opener": "Where shall we meet?", "options": "At the park or at my place?"},
+        {"goal": "agree a time", "opener": "What time works for you?", "options": "In the morning or in the afternoon?"},
+        {"goal": "confirm the plan", "opener": "Great, that's a plan! What shall we bring?", "options": "Some food or a ball?"}
+      ],
+      "target_structures": [
+        ["I want to + verb", "at + time"],
+        ["I'm going to + verb", "Shall we…?"],
+        ["negotiate alternatives", "hypothetical plans"]
+      ]
+    },
+    {
+      "id": "shopping",
+      "tutor_role": "shop assistant",
+      "learner_role": "customer",
+      "goal": "choose an item, compare options and buy it",
+      "filler": "Hmm, let me see…",
+      "beats": [
+        {"goal": "identify an item", "opener": "Hi! What are you looking for?", "options": "A T-shirt or some shoes?"},
+        {"goal": "choose size and color", "opener": "What color would you like?", "options": "Blue or red?"},
+        {"goal": "compare an alternative", "opener": "I've got another one. Would you like to see it?", "options": "This one or the other one?"},
+        {"goal": "ask price and decide", "opener": "Will you take this one, or would you like to keep looking?", "options": "Buy it, or keep looking?"}
+      ],
+      "target_structures": [
+        ["I'd like this one", "How much is…?"],
+        ["bigger than / more + adjective + than", "I'm looking for…"],
+        ["compare value", "negotiate politely"]
+      ]
+    },
+    {
+      "id": "asking_directions",
+      "tutor_role": "helpful pedestrian",
+      "learner_role": "visitor",
+      "goal": "find a destination and check the route",
+      "filler": "Just a moment…",
+      "beats": [
+        {"goal": "ask for a destination", "opener": "Hi! Where are you trying to get to?", "options": "The park or the station?"},
+        {"goal": "establish a landmark", "opener": "Can you see the building across the road?", "options": "The white one or the blue one?"},
+        {"goal": "explain and confirm a route", "opener": "Go straight ahead and then turn right. What do you do first?", "options": "Go straight or turn?"},
+        {"goal": "check understanding and finish", "opener": "Do you know how to get there, or shall I say it again?", "options": "All good, or say it again?"}
+      ],
+      "target_structures": [
+        ["Where is…?", "on the right / on the left"],
+        ["I have to turn…", "How long does it take?"],
+        ["clarify ambiguous directions", "compare routes"]
+      ]
+    },
+    {
+      "id": "hotel_checkin",
+      "tutor_role": "hotel receptionist",
+      "learner_role": "guest",
+      "goal": "check in, ask about facilities and agree checkout",
+      "filler": "Let me see…",
+      "beats": [
+        {"goal": "greet and confirm reservation", "opener": "Welcome! Do you have a reservation?", "options": "With a reservation, or without?"},
+        {"goal": "choose a room", "opener": "What kind of room do you need?", "options": "A single or a double?"},
+        {"goal": "ask about facilities", "opener": "What would you like to know about the hotel?", "options": "Breakfast or the pool?"},
+        {"goal": "agree checkout and finish", "opener": "What time would you like to check out tomorrow?", "options": "Early, or after breakfast?"}
+      ],
+      "target_structures": [
+        ["I have a reservation", "Is there…?"],
+        ["I'd like to know…", "Is it possible to…?"],
+        ["request an accommodation", "resolve a reservation problem"]
+      ]
+    },
+    {
+      "id": "planning_party",
+      "tutor_role": "friend helping organize",
+      "learner_role": "party organizer",
+      "goal": "plan guests, food, activities and timing",
+      "filler": "Hmm, let me see…",
+      "beats": [
+        {"goal": "decide who is invited", "opener": "Who do you want to invite to the party?", "options": "Family or friends?"},
+        {"goal": "choose food", "opener": "What are we going to eat?", "options": "Pizza or sandwiches?"},
+        {"goal": "choose an activity", "opener": "What shall we do at the party?", "options": "Music or games?"},
+        {"goal": "confirm when and finish", "opener": "Everything's ready! What time does it start?", "options": "Four o'clock or five?"}
+      ],
+      "target_structures": [
+        ["I want to invite…", "we're going to eat…"],
+        ["I'd like to organize…", "we could + verb"],
+        ["coordinate preferences", "negotiate constraints"]
+      ]
+    }
+  ]
+}

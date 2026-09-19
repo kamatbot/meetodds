@@ -1,0 +1,62 @@
+{
+  "language_id": "en",
+  "closing": "Great job, we're done! Do you want to practice again or talk about something else?",
+  "talk_fallback": "What do you like doing in your free time?",
+  "scaffold_fallback": "Do you want to talk about food or games?",
+  "dial_instructions": [
+    "ONE short question only (max 10 words), present simple, a single clause. Nothing before the question.",
+    "At most two short sentences using familiar, everyday vocabulary; end with a question.",
+    "Natural sentences; invite reasons and past experiences, drawing on past simple and present perfect.",
+    "Natural idioms, phrasal verbs and nuanced follow-up questions; conditionals and comparisons welcome."
+  ],
+  "topics": [
+    {
+      "id": "family",
+      "openers": [
+        ["What do you like doing with your family?", "Who do you talk to most at home?", "What do you do together on weekends?"],
+        ["What did you do with your family last weekend?", "Which family tradition do you like best?", "How has your family changed over time?"],
+        ["Which family custom would you like to keep forever?", "How would you settle a difference of opinion at home?", "What have you learned from someone in your family?"]
+      ]
+    },
+    {
+      "id": "school",
+      "openers": [
+        ["Which subject do you like best?", "What do you do during break?", "What's your class like?"],
+        ["What did you learn this week?", "What would you change about your schedule?", "How do you get ready for a project?"],
+        ["What makes a class interesting?", "How would you design your ideal school?", "Is it more important to memorize or to understand?"]
+      ]
+    },
+    {
+      "id": "sports",
+      "openers": [
+        ["Which sport do you like?", "Do you prefer playing or watching games?", "Where do you exercise?"],
+        ["When did you start playing that sport?", "How was the last game you watched?", "Which sport would you like to try?"],
+        ["What do you value most in a team?", "What would you change about the rules of your favorite sport?", "How do sports shape your life?"]
+      ]
+    },
+    {
+      "id": "food",
+      "openers": [
+        ["What's your favorite food?", "What do you usually have for breakfast?", "Do you prefer sweet or savory?"],
+        ["What did you cook or eat yesterday?", "Which dish would you like to learn to make?", "What food have you tried for the first time recently?"],
+        ["Which dish best represents a place you know?", "How have your tastes changed over the years?", "What makes a meal memorable?"]
+      ]
+    },
+    {
+      "id": "travel",
+      "openers": [
+        ["Where do you want to travel?", "Do you prefer the beach or the mountains?", "What do you carry in your backpack?"],
+        ["How was your last vacation?", "Which place surprised you the most?", "How would you plan a short trip?"],
+        ["What did you learn while traveling that you didn't expect?", "How would you choose between comfort and adventure?", "What makes you feel at home somewhere else?"]
+      ]
+    },
+    {
+      "id": "games",
+      "openers": [
+        ["What's your favorite game?", "Who do you like playing with?", "Do you prefer board games or video games?"],
+        ["How did you learn to play your favorite game?", "What happened the last time you played?", "Which game would you recommend to a friend?"],
+        ["What keeps a game interesting?", "How would you design a cooperative game?", "What would you change about your favorite game, and why?"]
+      ]
+    }
+  ]
+}
