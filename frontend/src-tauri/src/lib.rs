@@ -699,6 +699,7 @@ pub fn run() {
             spanish::commands::spanish_start_listening,
             spanish::commands::spanish_stop_listening,
             spanish::commands::spanish_speak,
+            spanish::commands::spanish_display_text,
             spanish::commands::spanish_stop_speaking,
             spanish::commands::spanish_tutor_turn,
             spanish::commands::spanish_practice_attempt,

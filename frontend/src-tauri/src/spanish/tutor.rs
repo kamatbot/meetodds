@@ -50,6 +50,9 @@ pub struct TutorResponse {
 #[serde(rename_all = "camelCase")]
 pub struct TutorReplyEvent {
     pub text: String,
+    /// Native-script voice channel. Display/history continue to use `text`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech_text: Option<String>,
     pub repeat: bool,
     /// Optional additions; old consumers can still read {text, repeat}.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -216,6 +219,7 @@ impl<M: Model> TutorEngine<M> {
                 }
                 sink.reply(TutorReplyEvent {
                     text: text.into(),
+                    speech_text: None,
                     repeat,
                     rate,
                     filler,
@@ -383,14 +387,15 @@ impl<M: Model> TutorEngine<M> {
                 _=&mut filler,if !filled && !s.previous_turn_filler=>{
                     if cancel.is_cancelled(){return Err(TutorError::Cancelled);}
                     let text=scenes::filler(lang,s);
-                    sink.reply(TutorReplyEvent{text:text.into(),repeat:false,rate:None,filler:true,request_id:request.request_id.clone(),session_id:s.session_id.clone()}).map_err(|_|TutorError::DeliveryFailed)?;filled=true;
+                    sink.reply(TutorReplyEvent{text:text.into(),speech_text:None,repeat:false,rate:None,filler:true,request_id:request.request_id.clone(),session_id:s.session_id.clone()}).map_err(|_|TutorError::DeliveryFailed)?;filled=true;
                 }
             }
         };
         if cancel.is_cancelled() {
             return Err(TutorError::Cancelled);
         }
-        let (mut text, next) = text::clean_reply(lang, &raw, scenes::fallback(lang, s));
+        let (source, native) = super::speech::split_reply(lang, &raw);
+        let (mut text, next) = text::clean_reply(lang, &source, scenes::fallback(lang, s));
         text = text::limit_sentences(
             &text,
             match s.dial {
@@ -412,6 +417,7 @@ impl<M: Model> TutorEngine<M> {
         }
         sink.reply(TutorReplyEvent {
             text: text.clone(),
+            speech_text: super::speech::matching_speech(&source, &text, native),
             repeat: false,
             rate: None,
             filler: false,
@@ -585,9 +591,12 @@ pub fn reply_prompt<M: Model>(
         kind: CallKind::Reply,
         system,
         user,
-        max_tokens: match s.dial {
-            0 => 40,
-            1 => 64,
+        max_tokens: match (lang, s.dial) {
+            ("hi", 0) => 192,
+            ("hi", 1) => 256,
+            ("hi", _) => 320,
+            (_, 0) => 40,
+            (_, 1) => 64,
             _ => 96,
         },
         temperature: 0.65,
@@ -1055,4 +1064,40 @@ mod tests {
         .unwrap();
         assert_eq!(sink.events.lock().unwrap()[0].text, "¡Hola! ¿Qué quieres tomar?");
     }
+    struct PairedHindi;
+    impl Model for PairedHindi {
+        fn generate<'a>(&'a self, _prompt: Prompt, _cancel: CancellationToken) -> ModelFuture<'a> {
+            Box::pin(async { Ok(r#"{"text":"Aap kaise hain?","speechText":"आप कैसे हैं?"}"#.into()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn hindi_reply_emits_two_channels_without_changing_display_history() {
+        let profile = SpanishProfile { language: "hi".into(), ..Default::default() };
+        let session = SessionState::new("s", "just_talk", super::super::Level::Beginner);
+        let request = request("Main theek hoon");
+        let model = Arc::new(PairedHindi);
+        let prompt = reply_prompt(model.as_ref(), &profile, &session, &request).unwrap();
+        assert!(prompt.system.contains("speechText"));
+        assert!(prompt.max_tokens >= 192);
+        let sink = Sink::default();
+        let engine = TutorEngine::new(model);
+        let reply = engine.reply("hi", prompt, &session, &request, &sink, &CancellationToken::new()).await.unwrap();
+        assert_eq!(reply.0, "Aap kaise hain?");
+        let events = sink.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].text, "Aap kaise hain?");
+        assert_eq!(events[0].speech_text.as_deref(), Some("आप कैसे हैं?"));
+        let wire = serde_json::to_value(&events[0]).unwrap();
+        assert_eq!(wire["speechText"], "आप कैसे हैं?");
+    }
+
+    #[test]
+    fn old_reply_events_remain_readable() {
+        let old = r#"{"text":"Namaste!","repeat":false,"requestId":"r","sessionId":"s"}"#;
+        let event: TutorReplyEvent = serde_json::from_str(old).unwrap();
+        assert!(event.speech_text.is_none());
+        assert_eq!(event.text, "Namaste!");
+    }
+
 }

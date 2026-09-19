@@ -863,68 +863,162 @@ fn preferred_voice(language: &str, variety: &str) -> Option<&'static str> {
 // macOS `say` playback
 // ============================================================================
 
+// Cache both authored/legacy Roman phrases and same-response native speech.
+// It is bounded and in memory only; no learner text is logged or sent to cloud.
+static SPEECH_CACHE: Lazy<Mutex<core::speech::SpeechCache>> =
+    Lazy::new(|| Mutex::new(core::speech::SpeechCache::default()));
+
+#[derive(Default)]
 #[cfg(target_os = "macos")]
-static SAY_PID: Lazy<Mutex<Option<u32>>> = Lazy::new(|| Mutex::new(None));
+struct SayControl {
+    pid: Option<u32>,
+    generation: u64,
+    cancel: Option<CancellationToken>,
+}
+#[cfg(target_os = "macos")]
+static SAY_CONTROL: Lazy<Mutex<SayControl>> = Lazy::new(|| Mutex::new(SayControl::default()));
 
 #[cfg(target_os = "macos")]
-fn kill_running_say() {
-    if let Ok(mut guard) = SAY_PID.lock() {
-        if let Some(pid) = guard.take() {
-            unsafe {
-                libc::kill(pid as i32, libc::SIGTERM);
-            }
-        }
+fn cancel_say(control: &mut SayControl) {
+    if let Some(cancel) = control.cancel.take() { cancel.cancel(); }
+    if let Some(pid) = control.pid.take() {
+        // The PID belongs only to our currently registered child.
+        unsafe { libc::kill(pid as i32, libc::SIGTERM); }
     }
 }
 
 #[cfg(target_os = "macos")]
+async fn prepare_speech<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    language: &str,
+    text: &str,
+    speech_text: Option<&str>,
+    cancel: &CancellationToken,
+) -> Result<core::speech::SpeechText, String> {
+    use crate::spanish::tutor::Model;
+    core::speech::validate_input(text)?;
+    let supplied = speech_text.filter(|native| core::speech::is_speakable_native(language, native));
+    let native = supplied.map(str::to_owned)
+        .or_else(|| core::speech::is_speakable_native(language, text).then(|| text.to_owned()))
+        .or_else(|| SPEECH_CACHE.lock().ok().and_then(|cache| cache.get(language, text)));
+    if let Some(native) = native {
+        return Ok(core::speech::SpeechText { display_text: text.into(), speech_text: native });
+    }
+    let system = core::speech::conversion_system(language)
+        .ok_or("This phrase cannot be spoken safely.")?;
+    let app_data_dir = app.path().app_data_dir().map_err(|_| "App storage unavailable.")?;
+    let llm = resolve_local_llm(state.db_manager.pool(), &app_data_dir).await?;
+    let model = crate::spanish_provider::MeetOddsModel::new(
+        TUTOR_HTTP_CLIENT.clone(),
+        crate::spanish_provider::ProviderConfig {
+            provider: llm.provider,
+            model: llm.model,
+            api_key: String::new(),
+            app_data_dir,
+            ollama_endpoint: llm.ollama_endpoint,
+            custom_endpoint: llm.custom_endpoint,
+            allow_external_text: false,
+            cloud_sampling_supported: false,
+        },
+    )?;
+    let child = cancel.child_token();
+    let prompt = core::tutor::Prompt {
+        kind: core::tutor::CallKind::Reply,
+        system: system.into(),
+        user: serde_json::json!({"text": text}).to_string(),
+        max_tokens: 512,
+        temperature: 0.0,
+        top_p: 1.0,
+    };
+    let result = tokio::select! { biased;
+        _ = cancel.cancelled() => Err("Speech cancelled.".to_string()),
+        result = tokio::time::timeout(std::time::Duration::from_secs(20), model.generate(prompt, child.clone())) =>
+            result.map_err(|_| "Native pronunciation preparation timed out. Try replaying the phrase.".to_string()).and_then(|r| r),
+    };
+    child.cancel();
+    core::speech::from_conversion(language, text, &result?)
+}
+
+/// Presentation only. Callers retain the original text for speech and scoring.
 #[tauri::command]
-pub async fn spanish_speak(
+pub fn spanish_display_text(text: String, language: Option<String>) -> Result<String, String> {
+    core::romanization::display_text(resolve_language(language.as_deref().unwrap_or("")), &text)
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn spanish_speak<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
     text: String,
     variety: String,
     rate: u32,
     language: Option<String>,
+    speech_text: Option<String>,
 ) -> Result<(), String> {
-    kill_running_say();
-    let voice = preferred_voice(language.as_deref().unwrap_or(""), &variety);
-    let generation = SPEAK_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-
-    SPEAKING.store(true, Ordering::SeqCst);
-    let mut command = tokio::process::Command::new("/usr/bin/say");
-    if let Some(voice) = voice {
-        command.arg("-v").arg(voice);
-    }
-    let spawned = command.arg("-r").arg(rate.to_string()).arg(&text).spawn();
-    let mut child = match spawned {
-        Ok(child) => child,
-        Err(e) => {
-            SPEAKING.store(false, Ordering::SeqCst);
-            return Err(format!("Failed to start say: {e}"));
-        }
+    use tokio::io::AsyncWriteExt;
+    let language = resolve_language(language.as_deref().unwrap_or(""));
+    core::speech::validate_input(&text)?;
+    let cancel = CancellationToken::new();
+    let generation = {
+        let mut control = SAY_CONTROL.lock().map_err(|_| "Voice state unavailable.")?;
+        cancel_say(&mut control);
+        let generation = SPEAK_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+        control.generation = generation;
+        control.cancel = Some(cancel.clone());
+        SPEAKING.store(true, Ordering::SeqCst);
+        generation
     };
-    if let Some(pid) = child.id() {
-        if let Ok(mut guard) = SAY_PID.lock() {
-            *guard = Some(pid);
+    let result: Result<(), String> = async {
+        let prepared = prepare_speech(&app, &state, language, &text, speech_text.as_deref(), &cancel).await?;
+        if cancel.is_cancelled() { return Ok(()); }
+        if let Ok(mut cache) = SPEECH_CACHE.lock() {
+            cache.insert(language, &prepared.display_text, &prepared.speech_text);
         }
-    }
-
-    let wait_result = child.wait().await;
-    if SPEAK_GEN.load(Ordering::SeqCst) == generation {
-        if let Ok(mut guard) = SAY_PID.lock() {
-            guard.take();
+        let mut command = tokio::process::Command::new("/usr/bin/say");
+        if let Some(voice) = preferred_voice(language, &variety) {
+            command.arg("-v").arg(voice);
         }
-        // Let the room's echo tail settle before re-enabling the listening loop.
+        // Stdin avoids interpreting phrase text as command-line options. Do not
+        // fall back to the system/English voice if the target voice is absent.
+        command.arg("-r").arg(rate.clamp(80, 240).to_string()).arg("-f").arg("-")
+            .stdin(std::process::Stdio::piped()).kill_on_drop(true);
+        let mut child = {
+            // Stop/new playback and spawning share this lock. A cancelled slow
+            // conversion cannot start speaking after navigation or a new turn.
+            let mut control = SAY_CONTROL.lock().map_err(|_| "Voice state unavailable.")?;
+            if control.generation != generation || cancel.is_cancelled() { return Ok(()); }
+            let child = command.spawn().map_err(|_| "Could not start the selected language voice.")?;
+            control.pid = child.id();
+            child
+        };
+        let mut stdin = child.stdin.take().ok_or("Could not write the speech phrase.")?;
+        // This is the ONLY text that reaches the synthesizer, never display_text.
+        stdin.write_all(prepared.speech_text.as_bytes()).await
+            .map_err(|_| "Could not send the native-script phrase to the voice.")?;
+        drop(stdin);
+        let status = child.wait().await.map_err(|_| "Language voice failed.")?;
+        // Clear before the echo-tail delay so no stale PID remains registered.
+        if let Ok(mut control) = SAY_CONTROL.lock() {
+            if control.generation == generation { control.pid = None; }
+        }
+        if cancel.is_cancelled() { return Ok(()); }
+        if !status.success() {
+            return Err("The selected language voice is unavailable. Install its voice in macOS Settings, then retry. No English voice was substituted.".into());
+        }
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        if SPEAK_GEN.load(Ordering::SeqCst) == generation {
+        Ok(())
+    }.await;
+    if let Ok(mut control) = SAY_CONTROL.lock() {
+        if control.generation == generation {
+            // An early pipe/spawn failure still cancels its owned child/request.
+            cancel_say(&mut control);
             SPEAKING.store(false, Ordering::SeqCst);
         }
     }
-
-    match wait_result {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(format!("say exited with {status}")),
-        Err(e) => Err(format!("say failed: {e}")),
-    }
+    // Cancellation is expected, not a learner-facing pronunciation failure.
+    if cancel.is_cancelled() && SPEAK_GEN.load(Ordering::SeqCst) != generation { Ok(()) } else { result }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -934,6 +1028,7 @@ pub async fn spanish_speak(
     _variety: String,
     _rate: u32,
     _language: Option<String>,
+    _speech_text: Option<String>,
 ) -> Result<(), String> {
     Err("Language practice voice is Mac-only for now".to_string())
 }
@@ -941,8 +1036,9 @@ pub async fn spanish_speak(
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn spanish_stop_speaking() -> Result<(), String> {
-    SPEAK_GEN.fetch_add(1, Ordering::SeqCst);
-    kill_running_say();
+    let mut control = SAY_CONTROL.lock().map_err(|_| "Voice state unavailable.")?;
+    control.generation = SPEAK_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    cancel_say(&mut control);
     SPEAKING.store(false, Ordering::SeqCst);
     Ok(())
 }
@@ -1069,11 +1165,15 @@ impl core::tutor::Model for SessionModel {
 }
 
 struct JournalSink<R: Runtime> {
+    language: &'static str,
     window: crate::spanish_provider::WindowSink<R>,
     events: Arc<Mutex<Vec<core::tutor::TutorReplyEvent>>>,
 }
 impl<R: Runtime> core::tutor::EventSink for JournalSink<R> {
     fn reply(&self, event: core::tutor::TutorReplyEvent) -> Result<(), String> {
+        if let Some(native) = &event.speech_text {
+            if let Ok(mut cache) = SPEECH_CACHE.lock() { cache.insert(self.language, &event.text, native); }
+        }
         self.window.reply(event.clone())?;
         self.events.lock().map_err(|_| "Speech journal unavailable.")?.push(event);
         Ok(())
@@ -1192,6 +1292,7 @@ pub async fn spanish_tutor_turn<R: Runtime>(
     let engine = core::tutor::TutorEngine::new(Arc::new(model));
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink = JournalSink {
+        language: resolve_language(&profile.language),
         window: crate::spanish_provider::WindowSink { window, sensitive_diagnostics: None },
         events: events.clone(),
     };
