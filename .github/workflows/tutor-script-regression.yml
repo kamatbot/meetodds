@@ -2,39 +2,50 @@ name: Tutor script regression
 on:
   push:
     branches: [fix/tutor-native-speech-romanized-display]
+  pull_request:
+    paths:
+      - 'frontend/src-tauri/src/spanish/**'
+      - 'frontend/src-tauri/src/languages/**'
+      - 'frontend/src/components/Spanish/**'
+      - 'frontend/src/lib/spanish.ts'
+      - 'frontend/src/lib/practice-script.ts'
+      - 'frontend/tests/lib/practice-script.test.cjs'
+      - '.github/workflows/tutor-script-regression.yml'
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: tutor-script-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  integrate:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test tutor, speech validation and platform romanization
+        run: cargo test --manifest-path tools/tutoring-core-tests/Cargo.toml --locked
+  frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fix/tutor-native-speech-romanized-display
           fetch-depth: 0
-      - name: Apply reviewed text-channel change and commit source checkpoint
-        shell: bash
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install existing dependency graph
+        run: cd frontend && npx --yes pnpm@9.15.9 install --frozen-lockfile --ignore-scripts
+      - name: Script-routing regression tests
+        run: NODE_PATH="$PWD/frontend/node_modules" node --test frontend/tests/lib/practice-script.test.cjs
+      - name: Lint changed frontend files
+        run: cd frontend && npx next lint --file src/components/Spanish/SpanishPractice.tsx --file src/components/Spanish/PracticeText.tsx --file src/lib/spanish.ts --file src/lib/practice-script.ts
+      - name: Typecheck against the unchanged main baseline
         run: |
-          set -euo pipefail
-          test "$GITHUB_REF_NAME" = 'fix/tutor-native-speech-romanized-display'
-          python3 - <<'PY'
-          import base64, gzip, hashlib, pathlib, os
-          parts = sorted(pathlib.Path('tools/recovery').glob('tutor-speech.part*'))
-          assert len(parts) == 4
-          patch = gzip.decompress(base64.b64decode(''.join(p.read_text() for p in parts), validate=True))
-          assert hashlib.sha256(patch).hexdigest() == '053df5a72b59a51ec34d2fde05995f1fc34727e063c5af38c07828b2907ed0d2'
-          pathlib.Path(os.environ['RUNNER_TEMP'], 'tutor-speech.patch').write_bytes(patch)
-          PY
-          git apply --exclude='.github/workflows/tutor-script-regression.yml' --check "$RUNNER_TEMP/tutor-speech.patch"
-          git apply --exclude='.github/workflows/tutor-script-regression.yml' "$RUNNER_TEMP/tutor-speech.patch"
-          rm tools/recovery/tutor-speech.part*
-          git add -A frontend docs/NATIVE-SPEECH-DISPLAY.md tools/recovery
-          git diff --cached --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'fix: separate native Hindi speech from romanized tutor display'
-          git push origin HEAD:refs/heads/fix/tutor-native-speech-romanized-display
+          git worktree add --detach "$RUNNER_TEMP/meetodds-main" origin/main
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/meetodds-main/frontend/node_modules"
+          NODE_PATH="$PWD/frontend/node_modules" node tools/recovery/check-types.cjs "$RUNNER_TEMP/meetodds-main/frontend" frontend
