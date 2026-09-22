@@ -239,6 +239,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
 
+    transcription::preview_control::get_live_preview_enabled(app.clone()).await?;
     let apple = transcription::apple::PreparedApple::from_config(&app, microphone_device.is_some(), system_device.is_some()).await?;
     if let Some(prepared) = &apple { manager.set_apple_speech_sender(prepared.sender.clone()); }
 
@@ -258,6 +259,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Set recording flag and reset speech detection flag
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    transcription::preview_control::PREVIEW_GATE.set_active(true);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
@@ -412,6 +414,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
 
+    transcription::preview_control::get_live_preview_enabled(app.clone()).await?;
     let apple = transcription::apple::PreparedApple::from_config(&app, mic_device.is_some(), system_device.is_some()).await?;
     if let Some(prepared) = &apple { manager.set_apple_speech_sender(prepared.sender.clone()); }
 
@@ -431,6 +434,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Set recording flag and reset speech detection flag
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    transcription::preview_control::PREVIEW_GATE.set_active(true);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
@@ -496,7 +500,7 @@ fn start_selected_transcription<R: Runtime>(
     app: &AppHandle<R>,
     apple: Option<transcription::apple::PreparedApple>,
     receiver: tokio::sync::mpsc::UnboundedReceiver<super::AudioChunk>,
-    previews: tokio::sync::watch::Receiver<Option<super::AudioChunk>>,
+    previews: tokio::sync::watch::Receiver<Option<transcription::live_preview::PreviewAudio>>,
     separated: bool,
 ) {
     let task = if let Some(prepared) = apple {
@@ -526,6 +530,8 @@ pub async fn stop_recording<R: Runtime>(
         return Ok(());
     }
 
+    // Stop speculative decoding immediately; canonical finalization remains active.
+    transcription::preview_control::PREVIEW_GATE.set_active(false);
     // Emit shutdown progress to frontend
     let _ = app.emit(
         "recording-shutdown-progress",
@@ -989,6 +995,7 @@ pub async fn pause_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String
     let manager_guard = RECORDING_MANAGER.lock().unwrap();
     if let Some(manager) = manager_guard.as_ref() {
         manager.pause_recording().map_err(|e| e.to_string())?;
+        transcription::preview_control::PREVIEW_GATE.set_active(false);
 
         // Emit pause event to frontend
         app.emit(
@@ -1023,6 +1030,7 @@ pub async fn resume_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), Strin
     let manager_guard = RECORDING_MANAGER.lock().unwrap();
     if let Some(manager) = manager_guard.as_ref() {
         manager.resume_recording().map_err(|e| e.to_string())?;
+        transcription::preview_control::PREVIEW_GATE.set_active(true);
 
         // Emit resume event to frontend
         app.emit(

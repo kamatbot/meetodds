@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
+if [[ "$(node --version)" != v24.* ]]; then
+  echo "MeetOdds builds require Node.js 24.x." >&2
+  exit 1
+fi
+
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
   echo "tauri:build:m5 must run on an Apple Silicon Mac." >&2
   exit 1
@@ -13,21 +19,31 @@ if (( logical_cores > 4 )); then
 fi
 
 chip_name="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)"
-echo "Building Notes for ${chip_name:-Apple Silicon} with ${build_jobs} parallel jobs"
+echo "Building MeetOdds for Apple Silicon (${chip_name:-unknown host}) with ${build_jobs} parallel jobs"
 
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$build_jobs}"
 export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$build_jobs}"
 export NEXT_TELEMETRY_DISABLED="${NEXT_TELEMETRY_DISABLED:-1}"
-export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-cpu=native"
+# Distributed apps must also run on the user's other Apple Silicon Mac. Native
+# instruction tuning is an explicit host-only experiment, never the release default.
+if [[ "${LOCAL_CPU_NATIVE:-0}" == "1" ]]; then
+  export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-cpu=native"
+elif [[ "${RUSTFLAGS:-}" == *target-cpu=native* ]]; then
+  echo "Refusing host-specific RUSTFLAGS for a portable release. Unset them or explicitly opt into LOCAL_CPU_NATIVE=1." >&2
+  exit 1
+fi
 
 workspace_root="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$workspace_root/frontend"
+helper_target_dir="${CARGO_TARGET_DIR:-$workspace_root/target}"
+if [[ "$helper_target_dir" != /* ]]; then helper_target_dir="$PWD/$helper_target_dir"; fi
 target_triple="$(rustc -vV | awk '/^host:/{print $2}')"
 sidecar_path="src-tauri/binaries/llama-helper-${target_triple}"
 
 echo "Building llama-helper sidecar for ${target_triple}"
 cargo build --manifest-path "$workspace_root/llama-helper/Cargo.toml" --release --features metal
 mkdir -p "$(dirname "$sidecar_path")"
-install -m 755 "$workspace_root/target/release/llama-helper" "$sidecar_path"
+install -m 755 "$helper_target_dir/release/llama-helper" "$sidecar_path"
 
 # Auto-detect or allow override of macOS codesigning identity
 signing_identity="${APPLE_SIGNING_IDENTITY:-}"

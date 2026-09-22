@@ -10,6 +10,7 @@ import { recordingService } from '@/services/recordingService';
 import { withSpeakerPrefix } from '@/lib/speaker-labels';
 import { indexedDBService } from '@/services/indexedDBService';
 import { closeManualNotesWindow } from '@/services/manualNotesService';
+import { retryLivePreviewPreferenceHydration, setLivePreviewPreference } from '@/services/livePreviewPreference';
 
 export interface TranscriptSessionContextType {
   currentMeetingId: string | null;
@@ -18,7 +19,8 @@ export interface TranscriptSessionContextType {
   clearTranscripts: () => void;
   markMeetingAsSaved: () => Promise<void>;
   captionsVisible: boolean;
-  setCaptionsVisible: (value: boolean) => void;
+  captionsHydrated: boolean;
+  setCaptionsVisible: (value: boolean) => Promise<void>;
 }
 
 export interface TranscriptHistoryContextType {
@@ -50,26 +52,57 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
   const [captionsVisible, setCaptionsVisibleState] = useState(true);
+  const [captionsHydrated, setCaptionsHydrated] = useState(false);
   const [previewSettled, setPreviewSettled] = useState(false);
+  const confirmedCaptionsVisibleRef = useRef<boolean | null>(null);
+  const captionsRequestRef = useRef(0);
 
-  const setCaptionsVisible = useCallback((value: boolean) => {
+  const reportCaptionSyncFailure = useCallback((retry: () => void) => {
+    toast.error('Live captions preference could not sync', {
+      description: 'Recording stays blocked until this preference is confirmed.',
+      action: { label: 'Retry', onClick: retry },
+    });
+  }, []);
+
+  const retryCaptionHydration = useCallback(async () => {
+    const request = ++captionsRequestRef.current;
+    setCaptionsHydrated(false);
+    try {
+      const enabled = await retryLivePreviewPreferenceHydration();
+      if (request !== captionsRequestRef.current) return;
+      confirmedCaptionsVisibleRef.current = enabled;
+      setCaptionsVisibleState(enabled);
+      setCaptionsHydrated(true);
+    } catch {
+      if (request !== captionsRequestRef.current) return;
+      const confirmed = confirmedCaptionsVisibleRef.current;
+      if (confirmed !== null) setCaptionsVisibleState(confirmed);
+      reportCaptionSyncFailure(() => { void retryCaptionHydration(); });
+    }
+  }, [reportCaptionSyncFailure]);
+
+  const setCaptionsVisible = useCallback(async (value: boolean) => {
+    const request = ++captionsRequestRef.current;
     setCaptionsVisibleState(value);
     try {
-      localStorage.setItem('meetodds.liveCaptions.visible', value ? 'true' : 'false');
+      const actual = await setLivePreviewPreference(value);
+      if (request === captionsRequestRef.current) {
+        confirmedCaptionsVisibleRef.current = actual;
+        setCaptionsVisibleState(actual);
+        setCaptionsHydrated(true);
+      }
     } catch {
-      // Ignore storage failures (e.g. private mode)
+      if (request !== captionsRequestRef.current) return;
+      const confirmed = confirmedCaptionsVisibleRef.current;
+      if (confirmed !== null) setCaptionsVisibleState(confirmed);
+      setCaptionsHydrated(false);
+      reportCaptionSyncFailure(() => { void retryCaptionHydration(); });
     }
-  }, []);
+  }, [reportCaptionSyncFailure, retryCaptionHydration]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = localStorage.getItem('meetodds.liveCaptions.visible');
-      if (stored === 'false') setCaptionsVisibleState(false);
-    } catch {
-      // Ignore storage failures (e.g. private mode)
-    }
-  }, []);
+    void retryCaptionHydration();
+  }, [retryCaptionHydration]);
 
   // Recording state context - provides backend-synced state
   const recordingState = useRecordingState();
@@ -610,6 +643,7 @@ useEffect(() => {
     clearTranscripts,
     markMeetingAsSaved,
     captionsVisible,
+    captionsHydrated,
     setCaptionsVisible,
   }), [
     currentMeetingId,
@@ -618,6 +652,7 @@ useEffect(() => {
     clearTranscripts,
     markMeetingAsSaved,
     captionsVisible,
+    captionsHydrated,
     setCaptionsVisible,
   ]);
 

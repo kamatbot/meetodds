@@ -1,5 +1,3 @@
-use super::batch_processor::AudioMetricsBatcher;
-use crate::batch_audio_metric;
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use rubato::{
@@ -18,6 +16,7 @@ use super::recording_state::{
     AudioChunk, AudioError, DeviceType, RecordingState, SendAudioChunkError,
 };
 use super::vad::{ContinuousVadProcessor, SpeechSegment};
+use super::transcription::{live_preview::PreviewAudio, preview_control::PREVIEW_GATE};
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -56,24 +55,11 @@ impl AudioMixerRingBuffer {
         }
     }
 
-    fn add_samples(&mut self, device_type: DeviceType, samples: Vec<f32>) {
+    fn add_samples(&mut self, device_type: DeviceType, samples: &[f32]) {
         // Log buffer health periodically for diagnostics
-        static mut SAMPLE_COUNTER: u64 = 0;
-        unsafe {
-            SAMPLE_COUNTER += 1;
-            if SAMPLE_COUNTER % 200 == 0 {
-                debug!(
-                    "📊 Ring buffer status: mic={} samples, sys={} samples (max={})",
-                    self.mic_buffer.len(),
-                    self.system_buffer.len(),
-                    self.max_buffer_size
-                );
-            }
-        }
-
         match device_type {
-            DeviceType::Microphone => self.mic_buffer.extend(samples),
-            DeviceType::System => self.system_buffer.extend(samples),
+            DeviceType::Microphone => self.mic_buffer.extend(samples.iter().copied()),
+            DeviceType::System => self.system_buffer.extend(samples.iter().copied()),
         }
 
         // CRITICAL FIX: Add warnings before dropping samples
@@ -434,7 +420,7 @@ impl AudioCapture {
     /// Process audio data directly from callback
     pub fn process_audio_data(&self, data: &[f32]) {
         // Check if still recording
-        if !self.state.is_recording() {
+        if !self.state.is_active() {
             return;
         }
 
@@ -764,8 +750,6 @@ pub struct AudioPipeline {
     // Performance optimization: reduce logging frequency
     last_summary_time: std::time::Instant,
     processed_chunks: u64,
-    // Smart batching for audio metrics
-    metrics_batcher: Option<AudioMetricsBatcher>,
     // PROFESSIONAL AUDIO MIXING: Ring buffer + RMS-based mixer
     ring_buffer: AudioMixerRingBuffer,
     mixer: ProfessionalAudioMixer,
@@ -773,7 +757,7 @@ pub struct AudioPipeline {
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::Sender<AudioChunk>>,
     // Latest-only speculative subtitle lane. `watch` intentionally drops old snapshots.
-    live_preview_sender: Option<watch::Sender<Option<AudioChunk>>>,
+    live_preview_sender: Option<watch::Sender<Option<PreviewAudio>>>,
     mic_live_preview_last_emit: Option<std::time::Instant>,
     system_live_preview_last_emit: Option<std::time::Instant>,
     live_preview_revision: u64,
@@ -857,8 +841,6 @@ impl AudioPipeline {
             // Performance optimization: reduce logging frequency
             last_summary_time: std::time::Instant::now(),
             processed_chunks: 0,
-            // Initialize metrics batcher for smart batching
-            metrics_batcher: Some(AudioMetricsBatcher::new()),
             // Initialize professional audio mixing
             ring_buffer,
 
@@ -880,14 +862,10 @@ impl AudioPipeline {
         // Previous bug: Loop checked `while self.state.is_recording()` which caused early exit when
         // stop_recording() was called, losing flush signals and remaining chunks in the pipeline
         loop {
-            // Receive audio chunks with timeout
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(50), // Shorter timeout for responsiveness
-                self.receiver.recv(),
-            )
-            .await
-            {
-                Ok(Some(chunk)) => {
+            // Closing the sender and explicit flush messages already wake this
+            // receiver. A 50ms timeout did no work except waking idle/paused sessions.
+            match self.receiver.recv().await {
+                Some(chunk) => {
                     // PERFORMANCE: Check for flush signal (special chunk with ID >= u64::MAX - 10)
                     // Multiple flush signals may be sent to ensure processing
                     if chunk.chunk_id >= u64::MAX - 10 {
@@ -904,21 +882,7 @@ impl AudioPipeline {
                     // Logging in hot paths causes severe performance degradation
                     self.processed_chunks += 1;
 
-                    // Smart batching: collect metrics instead of logging every chunk
-                    if let Some(ref batcher) = self.metrics_batcher {
-                        let avg_level = chunk.data.iter().map(|&x| x.abs()).sum::<f32>()
-                            / chunk.data.len() as f32;
-                        let duration_ms =
-                            chunk.data.len() as f64 / chunk.sample_rate as f64 * 1000.0;
-
-                        batch_audio_metric!(
-                            Some(batcher),
-                            chunk.chunk_id,
-                            chunk.data.len(),
-                            duration_ms,
-                            avg_level
-                        );
-                    }
+                    // Do not collect an unconsumed diagnostic history on the audio path.
 
                     // CRITICAL: Log summary only every 200 chunks OR every 60 seconds (99.5% reduction)
                     // This eliminates I/O overhead in the audio processing hot path
@@ -939,7 +903,7 @@ impl AudioPipeline {
                     // Microphone audio is already normalized at capture level (AudioCapture)
                     // System audio remains raw
                     self.ring_buffer
-                        .add_samples(chunk.device_type.clone(), chunk.data.clone());
+                        .add_samples(chunk.device_type.clone(), &chunk.data);
 
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
@@ -956,7 +920,7 @@ impl AudioPipeline {
                             // STEP 3: Send mixed audio for recording (WAV file)
                             if let Some(ref sender) = self.recording_sender_for_mixed {
                                 let recording_chunk = AudioChunk {
-                                    data: mixed_with_gain.clone(),
+                                    data: mixed_with_gain,
                                     sample_rate: self.sample_rate,
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,
@@ -984,16 +948,12 @@ impl AudioPipeline {
                         warn!("Transcription processing failed; recording audio was retained: {}", error);
                     }
                 }
-                Ok(None) => {
+                None => {
                     info!(
                         "Audio pipeline: sender closed after processing {} chunks",
                         self.processed_chunks
                     );
                     break;
-                }
-                Err(_) => {
-                    // Timeout - just continue, VAD handles all segmentation
-                    continue;
                 }
             }
         }
@@ -1044,7 +1004,7 @@ impl AudioPipeline {
     }
 
     fn live_preview_due(&self, device_type: &DeviceType) -> bool {
-        if self.live_preview_sender.is_none() {
+        if self.live_preview_sender.is_none() || PREVIEW_GATE.epoch().is_none() {
             return false;
         }
         let last = match device_type {
@@ -1055,6 +1015,7 @@ impl AudioPipeline {
     }
 
     fn send_live_preview_snapshot(&mut self, device_type: DeviceType, snapshot: SpeechSegment) {
+        let Some(epoch) = PREVIEW_GATE.epoch() else { return; };
         let Some(sender) = self.live_preview_sender.as_ref().cloned() else {
             return;
         };
@@ -1070,7 +1031,7 @@ impl AudioPipeline {
 
         // `watch` retains exactly one value. If ASR is slower than capture, stale
         // snapshots disappear automatically instead of building subtitle backlog.
-        if sender.send(Some(preview_chunk)).is_ok() {
+        if sender.send(Some(PreviewAudio { audio: preview_chunk, epoch })).is_ok() {
             let now = std::time::Instant::now();
             match device_type {
                 DeviceType::Microphone => self.mic_live_preview_last_emit = Some(now),
@@ -1160,7 +1121,7 @@ impl AudioPipelineManager {
         &mut self,
         state: Arc<RecordingState>,
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
-        live_preview_sender: Option<watch::Sender<Option<AudioChunk>>>,
+        live_preview_sender: Option<watch::Sender<Option<PreviewAudio>>>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::Sender<AudioChunk>>,
@@ -1285,5 +1246,62 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod performance_regression_tests {
+    use super::*;
+    use super::super::device_detection::InputDeviceKind;
+    static GATE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn pipeline(receiver: mpsc::UnboundedReceiver<AudioChunk>, finals: mpsc::UnboundedSender<AudioChunk>) -> AudioPipeline {
+        AudioPipeline::new(receiver, finals, RecordingState::new(), 0, 48_000,
+            "test microphone".into(), InputDeviceKind::Wired,
+            "test system".into(), InputDeviceKind::Wired, None)
+    }
+
+    #[tokio::test]
+    async fn captions_off_blocks_preview_but_keeps_final_transcripts() {
+        let _guard = GATE_TEST.lock().unwrap();
+        PREVIEW_GATE.set_active(true);
+        PREVIEW_GATE.set_enabled(false);
+        let (_input, receiver) = mpsc::unbounded_channel();
+        let (finals, mut output) = mpsc::unbounded_channel();
+        let mut pipeline = pipeline(receiver, finals);
+        let (previews, preview_output) = watch::channel(None);
+        pipeline.live_preview_sender = Some(previews);
+        let segment = SpeechSegment { samples: vec![0.1; 1600], start_timestamp_ms: 0.0, end_timestamp_ms: 100.0, confidence: 0.9 };
+        assert!(!pipeline.live_preview_due(&DeviceType::Microphone));
+        pipeline.send_live_preview_snapshot(DeviceType::Microphone, segment.clone());
+        assert!(preview_output.borrow().is_none());
+        pipeline.send_speech_segments(DeviceType::Microphone, vec![segment.clone()]);
+        assert_eq!(output.try_recv().unwrap().data, segment.samples);
+        PREVIEW_GATE.set_enabled(true);
+        pipeline.send_live_preview_snapshot(DeviceType::Microphone, segment);
+        let epoch = preview_output.borrow().as_ref().unwrap().epoch;
+        assert!(PREVIEW_GATE.accepts(epoch));
+        PREVIEW_GATE.set_enabled(false);
+        PREVIEW_GATE.set_enabled(true);
+        assert!(!PREVIEW_GATE.accepts(epoch));
+        PREVIEW_GATE.set_active(false);
+    }
+
+    #[tokio::test]
+    async fn channel_close_drains_saved_audio_and_preserves_tail() {
+        let (input, receiver) = mpsc::unbounded_channel();
+        let (finals, _output) = mpsc::unbounded_channel();
+        let mut pipeline = pipeline(receiver, finals);
+        let (saved, mut audio) = mpsc::channel(4);
+        pipeline.recording_sender_for_mixed = Some(saved);
+        // 640ms: one normal mixing window plus a 40ms final window.
+        input.send(AudioChunk { data: vec![0.1; 30_720], sample_rate: 48_000,
+            timestamp: 0.64, chunk_id: 1, device_type: DeviceType::Microphone }).unwrap();
+        drop(input);
+        tokio::time::timeout(std::time::Duration::from_secs(5), pipeline.run()).await.unwrap().unwrap();
+        let mut samples = Vec::new();
+        while let Some(chunk) = audio.recv().await { samples.extend(chunk.data); }
+        assert_eq!(samples.len(), 30_720);
+        assert!(samples.iter().all(|sample| sample.is_finite() && *sample > 0.0));
     }
 }

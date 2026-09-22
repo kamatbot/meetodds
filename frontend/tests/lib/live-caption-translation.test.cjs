@@ -122,4 +122,3 @@ test('instant preview-to-final handoff seeds translation immediately without lat
   assert.equal(h.value.translations['sequence-9']?.translatedText, 'Good morning everyone');
   assert.equal(h.value.translations['sequence-9']?.status, 'translated');
 });
-

@@ -7,6 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { ensureLivePreviewPreferenceSynced } from './livePreviewPreference';
 
 export interface RecordingState {
   is_recording: boolean;
@@ -56,6 +57,7 @@ export class RecordingService {
    * @returns Promise<void>
    */
   async startRecording(): Promise<void> {
+    await ensureLivePreviewPreferenceSynced();
     return invoke('start_recording');
   }
 
@@ -71,6 +73,7 @@ export class RecordingService {
     systemDeviceName: string | null,
     meetingName: string
   ): Promise<void> {
+    await ensureLivePreviewPreferenceSynced();
     return invoke('start_recording_with_devices_and_meeting', {
       mic_device_name: micDeviceName,
       system_device_name: systemDeviceName,

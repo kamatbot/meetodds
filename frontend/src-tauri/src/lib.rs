@@ -761,6 +761,8 @@ pub fn run() {
             api::api_save_transcript_config,
             apple_speech::apple_speech_capabilities,
             apple_speech::apple_speech_prepare,
+            audio::transcription::preview_control::get_live_preview_enabled,
+            audio::transcription::preview_control::set_live_preview_enabled,
             api::api_get_transcript_api_key,
             api::api_delete_meeting,
             api::api_get_meeting,

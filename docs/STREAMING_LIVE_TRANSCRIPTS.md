@@ -10,6 +10,12 @@ VAD closes the utterance. This remains the source of truth.
 
 ## 2. Speculative subtitle preview
 
+The native preview preference now gates this entire lane, not only its window.
+Captions off means no new snapshots or speculative decoding; canonical transcription
+and recording continue. See [the performance correction](perf/captions-off-2026-09.md)
+for lifecycle, measurement, and release-acceptance details. Apple Speech instead uses
+one continuous native recognizer per source and suppresses only provisional events.
+
 While VAD is still inside an utterance, the audio pipeline takes a non-destructive rolling
 snapshot of the active speech buffer roughly every 450 ms after at least 700 ms of speech.
 Only the newest snapshot is retained. A separate preview task decodes a capped ~2.8 second

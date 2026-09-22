@@ -53,11 +53,11 @@ impl RecordingManager {
         self.apple_speech_sender = Some(sender);
     }
 
-    pub async fn start_recording(&mut self, microphone_device: Option<Arc<AudioDevice>>, system_device: Option<Arc<AudioDevice>>, auto_save: bool) -> Result<(mpsc::UnboundedReceiver<AudioChunk>, watch::Receiver<Option<AudioChunk>>)> {
+    pub async fn start_recording(&mut self, microphone_device: Option<Arc<AudioDevice>>, system_device: Option<Arc<AudioDevice>>, auto_save: bool) -> Result<(mpsc::UnboundedReceiver<AudioChunk>, watch::Receiver<Option<super::transcription::live_preview::PreviewAudio>>)> {
         if microphone_device.is_none() && system_device.is_none() { return Err(anyhow::anyhow!("No audio source available")); }
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
         // Preserve main's latest-only preview lane; speculative work cannot queue behind canonical audio.
-        let (live_preview_sender, live_preview_receiver) = watch::channel::<Option<AudioChunk>>(None);
+        let (live_preview_sender, live_preview_receiver) = watch::channel::<Option<super::transcription::live_preview::PreviewAudio>>(None);
         let recording_sender = self.recording_saver.start_accumulation(auto_save);
         // Do not open capture streams or show RECORDING when the recovery folder cannot be written.
         self.recording_saver.ensure_initialized()?;
@@ -94,7 +94,7 @@ impl RecordingManager {
     }
 
     /// Retains the existing macOS safe-device/Bluetooth fallback and other-platform defaults.
-    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<(mpsc::UnboundedReceiver<AudioChunk>, watch::Receiver<Option<AudioChunk>>)> {
+    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<(mpsc::UnboundedReceiver<AudioChunk>, watch::Receiver<Option<super::transcription::live_preview::PreviewAudio>>)> {
         #[cfg(target_os = "macos")]
         let (microphone_device, system_device) = {
             let (mic, system) = get_safe_recording_devices_macos()?;

@@ -3,6 +3,7 @@
 // Transcription module: Provider abstraction, engine management, and worker pool.
 
 pub mod apple;
+pub mod preview_control;
 pub mod engine;
 pub mod live_preview;
 pub mod parakeet_provider;

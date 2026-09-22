@@ -13,11 +13,11 @@ const Context = createContext<ReturnType<typeof useLiveTranslation> | null>(null
 export function LiveMeetingTranslationProvider({ children }: { children: ReactNode }) {
   const { transcripts } = useTranscriptHistory();
   const { livePreview } = useTranscriptPreview();
-  const { captionsVisible, currentMeetingId } = useTranscriptSession();
+  const { captionsVisible, captionsHydrated, currentMeetingId } = useTranscriptSession();
   const { isRecording, isPaused } = useRecordingState();
   const translation = useLiveTranslation(
     transcripts,
-    isRecording && !isPaused && captionsVisible ? livePreview : null,
+    isRecording && !isPaused && captionsHydrated && captionsVisible ? livePreview : null,
     currentMeetingId,
   );
   const pathname = usePathname();

@@ -241,7 +241,7 @@ fn handle_event<R: Runtime>(
                     "live-transcript-preview-clear",
                     serde_json::json!({"source": source}),
                 );
-            } else {
+            } else if super::preview_control::PREVIEW_GATE.epoch().is_some() {
                 // Existing presentation/translation consumers receive the same partial-event contract.
                 let _ = app.emit(
                     "live-transcript-preview",

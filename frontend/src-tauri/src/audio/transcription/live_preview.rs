@@ -1,4 +1,5 @@
 use super::engine::{get_or_init_transcription_engine, TranscriptionEngine};
+use super::preview_control::PREVIEW_GATE;
 use super::worker::{canonical_transcription_busy, try_acquire_preview_permit};
 use crate::audio::recording_state::{AudioChunk, DeviceType};
 use log::{debug, warn};
@@ -7,6 +8,12 @@ use std::collections::HashMap;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::watch;
+
+#[derive(Clone)]
+pub struct PreviewAudio {
+    pub audio: AudioChunk,
+    pub epoch: u64,
+}
 
 #[derive(Debug)]
 struct LastEmittedPreview {
@@ -41,31 +48,55 @@ pub struct LiveTranscriptPreviewUpdate {
 
 pub fn start_live_preview_task<R: Runtime>(
     app: AppHandle<R>,
-    mut receiver: watch::Receiver<Option<AudioChunk>>,
+    mut receiver: watch::Receiver<Option<PreviewAudio>>,
     channel_separated: bool,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let engine = match get_or_init_transcription_engine(&app).await {
-            Ok(engine) => engine,
-            Err(error) => {
-                warn!("Live subtitle preview unavailable: {}", error);
-                return;
-            }
-        };
+        // Lazy initialization: a captions-off recording must not load an extra engine.
+        let mut engine = None;
         let mut last_emitted: HashMap<String, LastEmittedPreview> = HashMap::new();
+        let mut last_epoch = None;
 
         while receiver.changed().await.is_ok() {
-            let Some(chunk) = ({ receiver.borrow_and_update().clone() }) else {
+            let Some(snapshot) = ({
+                receiver
+                    .borrow_and_update()
+                    .as_ref()
+                    .filter(|snapshot| PREVIEW_GATE.accepts(snapshot.epoch))
+                    .cloned()
+            }) else {
                 continue;
             };
+            let epoch = snapshot.epoch;
+            if last_epoch != Some(epoch) {
+                last_emitted.clear();
+                last_epoch = Some(epoch);
+            }
+            let mut chunk = snapshot.audio;
+            if engine.is_none() {
+                match get_or_init_transcription_engine(&app).await {
+                    Ok(loaded) => engine = Some(loaded),
+                    Err(error) => {
+                        warn!("Live subtitle preview unavailable: {}", error);
+                        return;
+                    }
+                }
+            }
+            if !PREVIEW_GATE.accepts(epoch) {
+                continue;
+            }
 
             // Preview work is admitted only when it can hold the local-inference
             // permit immediately. Canonical work queues fairly ahead of new previews.
             let Some(permit) = try_acquire_preview_permit() else {
                 continue;
             };
+            if !PREVIEW_GATE.accepts(epoch) {
+                continue;
+            }
 
             let revision = chunk.chunk_id;
+            let duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
             let source = match &chunk.device_type {
                 DeviceType::Microphone => "microphone",
                 DeviceType::System => "system",
@@ -73,13 +104,16 @@ pub fn start_live_preview_task<R: Runtime>(
             let started = Instant::now();
             // Inference blocks; keep it off the tokio worker threads.
             let decoded = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(decode_preview(&engine, &chunk))
+                tokio::runtime::Handle::current()
+                    .block_on(decode_preview(engine.as_ref().unwrap(), &mut chunk))
             });
             let decode_time = started.elapsed();
             drop(permit);
 
             let text = match decoded {
-                Ok(text) if !canonical_transcription_busy() => text.trim().to_string(),
+                Ok(text) if PREVIEW_GATE.accepts(epoch) && !canonical_transcription_busy() => {
+                    text.trim().to_string()
+                }
                 Err(error) => {
                     debug!("Speculative subtitle decode skipped: {}", error);
                     String::new()
@@ -88,7 +122,6 @@ pub fn start_live_preview_task<R: Runtime>(
             };
 
             if !text.is_empty() {
-                let duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
                 let audio_end_time = chunk.timestamp + duration;
                 if should_emit_preview(&last_emitted, source, &text, chunk.timestamp) {
                     last_emitted.insert(
@@ -162,20 +195,21 @@ mod tests {
 
 async fn decode_preview(
     engine: &TranscriptionEngine,
-    chunk: &AudioChunk,
+    chunk: &mut AudioChunk,
 ) -> Result<String, String> {
     let language = crate::get_language_preference_internal();
+    let audio = std::mem::take(&mut chunk.data);
     match engine {
         TranscriptionEngine::Whisper(engine) => engine
-            .transcribe_audio_preview(chunk.data.clone(), language)
+            .transcribe_audio_preview(audio, language)
             .await
             .map_err(|error| error.to_string()),
         TranscriptionEngine::Parakeet(engine) => engine
-            .transcribe_audio(chunk.data.clone())
+            .transcribe_audio(audio)
             .await
             .map_err(|error| error.to_string()),
         TranscriptionEngine::Provider(provider) => provider
-            .transcribe(chunk.data.clone(), language)
+            .transcribe(audio, language)
             .await
             .map(|result| result.text)
             .map_err(|error| error.to_string()),
