@@ -26,6 +26,12 @@ codegen-units = 1
 panic = "abort"
 strip = "symbols"
 
+# macOS 27 rejects misaligned LINKEDIT tables emitted when Rust strips some
+# proc-macro dylibs (rust-lang/rust#157750). They run only while compiling, so
+# leave build-time dependencies intact; the shipped binaries remain stripped.
+[profile.release.build-override]
+strip = "none"
+
 # Dev builds: keep our crate quick to compile but optimize dependencies, so
 # whisper.cpp / ONNX Runtime / DSP crates run at release speed under `tauri dev`.
 [profile.dev]
