@@ -81,4 +81,9 @@ pub fn compile() {
     println!("cargo:rustc-link-lib=framework=CoreMedia");
     println!("cargo:rustc-link-lib=swiftCore");
     println!("cargo:rustc-link-lib=swift_Concurrency");
+    // Rust's linker does not add swiftc's runtime search path automatically.
+    // Swift concurrency is supplied by macOS, including in the dyld shared
+    // cache. Use its system path, not an Xcode/developer-machine directory, so
+    // test binaries and the distributed app launch without DYLD overrides.
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
 }
