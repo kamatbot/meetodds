@@ -742,6 +742,11 @@ pub async fn spanish_start_listening<R: Runtime>(
 
     validate_transcription_model_ready(&app).await?;
     let engine = get_or_init_transcription_engine(&app).await?;
+    if engine.provider_name() == "Apple Speech" {
+        // Fail before opening the microphone if this practice language needs assets.
+        // Preparation is explicit in Settings; listening never downloads a model.
+        crate::apple_speech::prepare(asr_language_code(language), false).await?;
+    }
     if let Some(model) = engine.get_current_model().await {
         if !is_multilingual_model(&model) {
             return Err(

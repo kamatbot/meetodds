@@ -755,8 +755,10 @@ pub struct AudioPipeline {
     receiver: mpsc::UnboundedReceiver<AudioChunk>,
     transcription_sender: mpsc::UnboundedSender<AudioChunk>,
     state: Arc<RecordingState>,
-    mic_vad_processor: ContinuousVadProcessor,
-    system_vad_processor: ContinuousVadProcessor,
+    mic_vad_processor: Option<ContinuousVadProcessor>,
+    system_vad_processor: Option<ContinuousVadProcessor>,
+    apple_speech_sender: Option<super::transcription::apple::AppleAudioSender>,
+    apple_speech_enabled: bool,
     sample_rate: u32,
     chunk_id_counter: u64,
     // Performance optimization: reduce logging frequency
@@ -788,6 +790,7 @@ impl AudioPipeline {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
+        apple_speech_sender: Option<super::transcription::apple::AppleAudioSender>,
     ) -> Self {
         // Log device characteristics for adaptive buffering
         info!("🎛️ AudioPipeline initializing with device characteristics:");
@@ -829,8 +832,10 @@ impl AudioPipeline {
                     panic!("{} VAD processor creation failed: {}", source, e);
                 }
             };
-        let mic_vad_processor = create_vad_processor("microphone");
-        let system_vad_processor = create_vad_processor("system audio");
+        let apple_speech_enabled = apple_speech_sender.is_some();
+        // Apple has its own continuous recognition/detection. Do not load or run Silero too.
+        let mic_vad_processor = (!apple_speech_enabled).then(|| create_vad_processor("microphone"));
+        let system_vad_processor = (!apple_speech_enabled).then(|| create_vad_processor("system audio"));
 
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
@@ -845,6 +850,8 @@ impl AudioPipeline {
             state,
             mic_vad_processor,
             system_vad_processor,
+            apple_speech_sender,
+            apple_speech_enabled,
             sample_rate,
             chunk_id_counter: 0,
             // Performance optimization: reduce logging frequency
@@ -963,7 +970,17 @@ impl AudioPipeline {
                             }
                         }
                     }
-                    if let Err(error) = self.process_source_audio(chunk.device_type, &chunk.data) {
+                    if self.apple_speech_enabled {
+                        // Mixed audio above is already queued for durable recording. Never block it
+                        // on ASR, silently discard overflow, or fall back to another engine mid-call.
+                        if let Some(sender) = &self.apple_speech_sender {
+                            if sender.try_send(chunk).is_err() {
+                                self.apple_speech_sender = None;
+                                self.state.report_error(AudioError::TranscriptionFailed);
+                                warn!("Apple Speech input stopped/overflowed; audio recording continues. Retry from saved audio.");
+                            }
+                        }
+                    } else if let Err(error) = self.process_source_audio(chunk.device_type, &chunk.data) {
                         warn!("Transcription processing failed; recording audio was retained: {}", error);
                     }
                 }
@@ -992,9 +1009,10 @@ impl AudioPipeline {
         let preview_due = self.live_preview_due(&device_type);
         let (segments, live_snapshot) = match &device_type {
             DeviceType::Microphone => {
-                let segments = self.mic_vad_processor.process_audio(samples)?;
+                let Some(processor) = self.mic_vad_processor.as_mut() else { return Ok(()); };
+                let segments = processor.process_audio(samples)?;
                 let preview = if preview_due {
-                    self.mic_vad_processor.live_speech_snapshot(
+                    processor.live_speech_snapshot(
                         LIVE_PREVIEW_MIN_SPEECH_MS,
                         LIVE_PREVIEW_MAX_WINDOW_MS,
                     )
@@ -1004,9 +1022,10 @@ impl AudioPipeline {
                 (segments, preview)
             }
             DeviceType::System => {
-                let segments = self.system_vad_processor.process_audio(samples)?;
+                let Some(processor) = self.system_vad_processor.as_mut() else { return Ok(()); };
+                let segments = processor.process_audio(samples)?;
                 let preview = if preview_due {
-                    self.system_vad_processor.live_speech_snapshot(
+                    processor.live_speech_snapshot(
                         LIVE_PREVIEW_MIN_SPEECH_MS,
                         LIVE_PREVIEW_MAX_WINDOW_MS,
                     )
@@ -1109,14 +1128,14 @@ impl AudioPipeline {
             self.processed_chunks
         );
 
-        match self.mic_vad_processor.flush() {
+        if let Some(processor) = self.mic_vad_processor.as_mut() { match processor.flush() {
             Ok(segments) => self.send_speech_segments(DeviceType::Microphone, segments),
             Err(e) => warn!("Failed to flush microphone VAD processor: {}", e),
-        }
-        match self.system_vad_processor.flush() {
+        } }
+        if let Some(processor) = self.system_vad_processor.as_mut() { match processor.flush() {
             Ok(segments) => self.send_speech_segments(DeviceType::System, segments),
             Err(e) => warn!("Failed to flush system-audio VAD processor: {}", e),
-        }
+        } }
 
         Ok(())
     }
@@ -1149,6 +1168,7 @@ impl AudioPipelineManager {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
+        apple_speech_sender: Option<super::transcription::apple::AppleAudioSender>,
     ) -> Result<()> {
         // Log device information for adaptive buffering
         info!("🎙️ Starting pipeline with device info:");
@@ -1178,6 +1198,7 @@ impl AudioPipelineManager {
             mic_device_kind,
             system_device_name,
             system_device_kind,
+            apple_speech_sender,
         );
 
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio

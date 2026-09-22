@@ -38,6 +38,7 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod anthropic;
 pub mod api;
+pub mod apple_speech;
 pub mod audio;
 pub mod calendar;
 pub mod config;
@@ -758,6 +759,8 @@ pub fn run() {
             // api::api_save_auto_generate_setting,
             api::api_get_transcript_config,
             api::api_save_transcript_config,
+            apple_speech::apple_speech_capabilities,
+            apple_speech::apple_speech_prepare,
             api::api_get_transcript_api_key,
             api::api_delete_meeting,
             api::api_get_meeting,

@@ -671,6 +671,10 @@ pub async fn api_save_transcript_config<R: Runtime>(
     api_key: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let _engine_guard = crate::audio::common::acquire_engine_lifecycle_lock().await;
+    if crate::audio::recording_commands::is_recording().await {
+        return Err("Stop recording before changing the transcription engine or language.".into());
+    }
     log_info!(
         "api_save_transcript_config called (native) for provider '{}'",
         &provider

@@ -190,6 +190,9 @@ useEffect(() => {
 
         // Listen for recording-started event
         unlistenRecordingStarted = await recordingService.onRecordingStarted(async () => {
+          // Engines use independent preview counters. A new meeting must accept its
+          // first caption even when the previous meeting used another engine.
+          latestPreviewRevisionRef.current = 0;
           setLivePreview(null);
           setPreviewSettled(false);
           try {

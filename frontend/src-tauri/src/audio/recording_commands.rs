@@ -239,12 +239,16 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
 
+    let apple = transcription::apple::PreparedApple::from_config(&app, microphone_device.is_some(), system_device.is_some()).await?;
+    if let Some(prepared) = &apple { manager.set_apple_speech_sender(prepared.sender.clone()); }
+
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let (transcription_receiver, live_preview_receiver) = manager
         .start_recording(microphone_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
+    let transcript_writer = manager.transcript_writer();
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
@@ -256,29 +260,6 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     IS_RECORDING.store(true, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
-
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(
-        app.clone(),
-        transcription_receiver,
-        has_separate_system_audio,
-    );
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
-
-    // The subtitle preview task is disposable and latest-only. It never writes to
-    // transcript history and is aborted before canonical shutdown processing.
-    let preview_task = transcription::start_live_preview_task(
-        app.clone(),
-        live_preview_receiver,
-        has_separate_system_audio,
-    );
-    {
-        let mut global_preview_task = LIVE_PREVIEW_TASK.lock().unwrap();
-        *global_preview_task = Some(preview_task);
-    }
 
     // CRITICAL: Listen for transcript-update events and save to recording manager
     // This enables transcript history persistence for page reload sync
@@ -304,18 +285,17 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                     speaker_confidence: Some(update.speaker_confidence),
                 };
 
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
-                }
+                // Journal independently of manager extraction during asynchronous stop.
+                transcript_writer.add_segment(segment);
             }
         });
         let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
         *global_listener = Some(listener_id);
         info!("✅ Transcript-update event listener registered for history persistence");
     }
+
+    // Register persistence before any ASR task can emit its first final result.
+    start_selected_transcription(&app, apple, transcription_receiver, live_preview_receiver, has_separate_system_audio);
 
     // Emit success event
     app.emit(
@@ -432,12 +412,16 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
 
+    let apple = transcription::apple::PreparedApple::from_config(&app, mic_device.is_some(), system_device.is_some()).await?;
+    if let Some(prepared) = &apple { manager.set_apple_speech_sender(prepared.sender.clone()); }
+
     // Start recording with specified devices and auto_save setting
     let (transcription_receiver, live_preview_receiver) = manager
         .start_recording(mic_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
+    let transcript_writer = manager.transcript_writer();
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
@@ -449,29 +433,6 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     IS_RECORDING.store(true, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
-
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(
-        app.clone(),
-        transcription_receiver,
-        has_separate_system_audio,
-    );
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
-
-    // The subtitle preview task is disposable and latest-only. It never writes to
-    // transcript history and is aborted before canonical shutdown processing.
-    let preview_task = transcription::start_live_preview_task(
-        app.clone(),
-        live_preview_receiver,
-        has_separate_system_audio,
-    );
-    {
-        let mut global_preview_task = LIVE_PREVIEW_TASK.lock().unwrap();
-        *global_preview_task = Some(preview_task);
-    }
 
     // CRITICAL: Listen for transcript-update events and save to recording manager
     // This enables transcript history persistence for page reload sync
@@ -497,18 +458,17 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                     speaker_confidence: Some(update.speaker_confidence),
                 };
 
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
-                }
+                // Journal independently of manager extraction during asynchronous stop.
+                transcript_writer.add_segment(segment);
             }
         });
         let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
         *global_listener = Some(listener_id);
         info!("✅ Transcript-update event listener registered for history persistence");
     }
+
+    // Register persistence before any ASR task can emit its first final result.
+    start_selected_transcription(&app, apple, transcription_receiver, live_preview_receiver, has_separate_system_audio);
 
     // Emit success event
     app.emit(
@@ -530,6 +490,25 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     info!("✅ Recording started with custom devices using async-first approach");
 
     Ok(())
+}
+
+fn start_selected_transcription<R: Runtime>(
+    app: &AppHandle<R>,
+    apple: Option<transcription::apple::PreparedApple>,
+    receiver: tokio::sync::mpsc::UnboundedReceiver<super::AudioChunk>,
+    previews: tokio::sync::watch::Receiver<Option<super::AudioChunk>>,
+    separated: bool,
+) {
+    let task = if let Some(prepared) = apple {
+        drop(receiver);
+        drop(previews);
+        prepared.spawn(app.clone(), separated)
+    } else {
+        let preview = transcription::start_live_preview_task(app.clone(), previews, separated);
+        *LIVE_PREVIEW_TASK.lock().unwrap() = Some(preview);
+        transcription::start_transcription_task(app.clone(), receiver, separated)
+    };
+    *TRANSCRIPTION_TASK.lock().unwrap() = Some(task);
 }
 
 /// Stop recording with optimized graceful shutdown ensuring NO transcript chunks are lost
@@ -718,6 +697,10 @@ pub async fn stop_recording<R: Runtime>(
     };
 
     match config.as_deref() {
+        Some("appleSpeech") => {
+            // Continuous sessions finalized and released before the transcript listener was removed.
+            info!("Apple Speech sessions finished");
+        }
         Some("parakeet") => {
             info!("🦜 Unloading Parakeet model...");
             let engine_clone = {

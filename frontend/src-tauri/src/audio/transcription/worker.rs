@@ -17,6 +17,16 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn next_sequence_id() -> u64 {
+    SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst)
+}
+
+pub(crate) fn emit_speech_detected<R: Runtime>(app: &AppHandle<R>) {
+    if !SPEECH_DETECTED_EMITTED.swap(true, Ordering::SeqCst) {
+        let _ = app.emit("speech-detected", serde_json::json!({"message": "Speech activity detected"}));
+    }
+}
+
 // Speech detection flag - reset per recording session
 
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);

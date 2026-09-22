@@ -23,7 +23,7 @@ function formatDate(date: Date) { return new Intl.DateTimeFormat(undefined, { we
 function formatDuration(ms: number | null) { if (ms == null || !Number.isFinite(ms)) return ''; const mins = Math.max(1, Math.round(ms / 60000)); return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60 ? `${mins % 60}m` : ''}`.trim() }
 function formatMeetingTime(value: string) { const date = new Date(value); if (Number.isNaN(date.getTime())) return ''; const same = date.toDateString() === new Date().toDateString(); return new Intl.DateTimeFormat(undefined, same ? { hour: 'numeric', minute: '2-digit' } : { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(date) }
 function displayMeetingTitle(title: string) { const v = title.trim(); return !v || /^Meeting\s+\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}$/i.test(v) ? 'Untitled meeting' : v }
-function providerLabel(value: string) { return value.split(/[-_]/g).map(p => p ? `${p[0].toUpperCase()}${p.slice(1)}` : p).join(' ') }
+function providerLabel(value: string) { return value === 'appleSpeech' ? 'Apple Speech' : value.split(/[-_]/g).map(p => p ? `${p[0].toUpperCase()}${p.slice(1)}` : p).join(' ') }
 function statusLabel(status: MeetingListItem['summaryStatus']) { return status === 'ready' ? ['Summarised', 'text-success'] : status === 'generating' ? ['Generating summary…', 'text-warn'] : status === 'failed' ? ['Summary failed', 'text-danger'] : ['No summary', 'text-3'] }
 
 function RecentMeetingRow({ item, onOpen }: { item: MeetingListItem; onOpen: () => void }) {
@@ -47,7 +47,7 @@ export default function HomeDashboard(props: HomeDashboardProps) {
   const readiness = [
     { label: 'Microphone', ok: props.hasMicrophone, loading: props.permissionsLoading, text: props.permissionsLoading ? 'Checking…' : props.hasMicrophone ? selectedDevices.micDevice || 'Available · default device' : 'No available microphone', href: '/settings?section=recording', icon: 'audio' },
     { label: 'System audio', ok: props.hasSystemAudio, loading: props.permissionsLoading, text: props.permissionsLoading ? 'Checking…' : props.hasSystemAudio ? selectedDevices.systemDevice || 'Available · default device' : 'No available system-audio device', href: '/settings?section=recording', icon: 'audio' },
-    { label: 'Transcription', ok: true, loading: false, text: `${providerLabel(transcriptModelConfig.provider)} · ${transcriptModelConfig.model} · ${selectedLanguage}`, href: '/settings?section=transcription', icon: 'transcription' },
+    { label: 'Transcription', ok: true, loading: false, text: transcriptModelConfig.provider === 'appleSpeech' ? `${providerLabel(transcriptModelConfig.provider)} · ${transcriptModelConfig.model}` : `${providerLabel(transcriptModelConfig.provider)} · ${transcriptModelConfig.model} · ${selectedLanguage}`, href: '/settings?section=transcription', icon: 'transcription' },
     { label: 'Summary', ok: !configError, loading: false, text: configError ? 'Verify the configured provider' : `${providerLabel(modelConfig.provider)} · ${modelConfig.model}`, href: '/settings?section=summary', icon: 'summary' },
   ];
 

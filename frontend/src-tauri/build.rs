@@ -1,5 +1,7 @@
 #[path = "build/ffmpeg.rs"]
 mod ffmpeg;
+#[path = "build/apple_speech.rs"]
+mod apple_speech;
 
 fn main() {
     // GPU Acceleration Detection and Build Guidance
@@ -7,6 +9,7 @@ fn main() {
 
     #[cfg(target_os = "macos")]
     {
+        apple_speech::compile();
         println!("cargo:rustc-link-lib=framework=AVFoundation");
         println!("cargo:rustc-link-lib=framework=Cocoa");
         println!("cargo:rustc-link-lib=framework=Foundation");

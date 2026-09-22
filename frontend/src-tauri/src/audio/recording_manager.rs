@@ -25,6 +25,7 @@ pub struct RecordingManager {
     device_monitor: Option<AudioDeviceMonitor>,
     device_event_receiver: Option<mpsc::UnboundedReceiver<DeviceEvent>>,
     stopped_duration: Option<f64>,
+    apple_speech_sender: Option<super::transcription::apple::AppleAudioSender>,
 }
 // SAFETY: Retains the existing platform audio-wrapper Send contract.
 unsafe impl Send for RecordingManager {}
@@ -45,7 +46,11 @@ impl RecordingManager {
             }
         });
         Self { state, stream_manager, pipeline_manager: AudioPipelineManager::new(), recording_saver,
-            device_monitor: Some(device_monitor), device_event_receiver: Some(device_event_receiver), stopped_duration: None }
+            device_monitor: Some(device_monitor), device_event_receiver: Some(device_event_receiver), stopped_duration: None, apple_speech_sender: None }
+    }
+
+    pub fn set_apple_speech_sender(&mut self, sender: super::transcription::apple::AppleAudioSender) {
+        self.apple_speech_sender = Some(sender);
     }
 
     pub async fn start_recording(&mut self, microphone_device: Option<Arc<AudioDevice>>, system_device: Option<Arc<AudioDevice>>, auto_save: bool) -> Result<(mpsc::UnboundedReceiver<AudioChunk>, watch::Receiver<Option<AudioChunk>>)> {
@@ -66,7 +71,8 @@ impl RecordingManager {
         )).unwrap_or_else(|| ("No System Audio".to_string(), super::device_detection::InputDeviceKind::Unknown));
         self.recording_saver.set_device_info(microphone_device.as_ref().map(|d| d.name.clone()), system_device.as_ref().map(|d| d.name.clone()));
         self.recording_saver.ensure_initialized()?;
-        if let Err(failure) = self.pipeline_manager.start(self.state.clone(), transcription_sender, Some(live_preview_sender), 0, 48000, Some(recording_sender), mic_name, mic_kind, sys_name, sys_kind) {
+        let preview_sender = if self.apple_speech_sender.is_some() { None } else { Some(live_preview_sender) };
+        if let Err(failure) = self.pipeline_manager.start(self.state.clone(), transcription_sender, preview_sender, 0, 48000, Some(recording_sender), mic_name, mic_kind, sys_name, sys_kind, self.apple_speech_sender.take()) {
             self.state.stop_recording();
             self.recording_saver.mark_incomplete("The audio pipeline could not start. The recovery folder is preserved.");
             return Err(failure);
@@ -175,6 +181,7 @@ impl RecordingManager {
     pub fn set_meeting_name(&mut self, name: Option<String>) { self.recording_saver.set_meeting_name(name); }
     pub fn set_recording_folder(&mut self, folder: std::path::PathBuf) { self.recording_saver.set_recording_folder(folder); }
     pub fn add_transcript_segment(&self, segment: super::recording_saver::TranscriptSegment) { self.recording_saver.add_transcript_segment(segment); }
+    pub fn transcript_writer(&self) -> super::recording_saver::TranscriptWriter { self.recording_saver.transcript_writer() }
     pub fn add_transcript_chunk(&self, text: String) { self.recording_saver.add_transcript_chunk(text); }
     pub fn get_transcript_segments(&self) -> Vec<super::recording_saver::TranscriptSegment> { self.recording_saver.get_transcript_segments() }
     pub fn get_meeting_name(&self) -> Option<String> { self.recording_saver.get_meeting_name() }

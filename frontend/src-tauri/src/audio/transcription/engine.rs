@@ -90,6 +90,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
 
     // Validate based on provider
     match config.provider.as_str() {
+        "appleSpeech" => crate::apple_speech::prepare(&config.model, false).await.map(|_| ()),
         "localWhisper" => {
             info!("🔍 Validating Whisper model...");
             // Ensure whisper engine is initialized first
@@ -153,7 +154,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
                 other
             );
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for local transcription. Please select Whisper, Parakeet, or Apple Speech.",
                 other
             ))
         }
@@ -199,6 +200,7 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
 
     // Initialize the appropriate engine based on provider
     match config.provider.as_str() {
+        "appleSpeech" => Ok(TranscriptionEngine::Provider(Arc::new(crate::apple_speech::AppleSpeechProvider { locale: config.model }))),
         "parakeet" => {
             info!("🦜 Initializing Parakeet transcription engine");
 

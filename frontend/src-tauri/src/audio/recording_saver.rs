@@ -72,7 +72,7 @@ pub struct RecordingSaver {
     incremental_saver: Option<Arc<AsyncMutex<IncrementalAudioSaver>>>,
     meeting_folder: Option<PathBuf>, meeting_name: Option<String>, metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
-    transcript_write_lock: Mutex<()>,
+    transcript_write_lock: Arc<Mutex<()>>,
     last_snapshot_at: Arc<Mutex<Instant>>,
     last_snapshot_count: Arc<Mutex<usize>>,
     failure: Arc<Mutex<Option<String>>>,
@@ -87,7 +87,7 @@ impl RecordingSaver {
     pub fn new() -> Self {
         Self {
             incremental_saver: None, meeting_folder: None, meeting_name: None, metadata: None,
-            transcript_segments: Arc::new(Mutex::new(Vec::new())), transcript_write_lock: Mutex::new(()),
+            transcript_segments: Arc::new(Mutex::new(Vec::new())), transcript_write_lock: Arc::new(Mutex::new(())),
             last_snapshot_at: Arc::new(Mutex::new(Instant::now())),
             last_snapshot_count: Arc::new(Mutex::new(0)),
             failure: Arc::new(Mutex::new(None)), failure_callback: Arc::new(Mutex::new(None)),
@@ -119,6 +119,44 @@ impl RecordingSaver {
         }
     }
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {
+        self.transcript_writer().add_segment(segment);
+    }
+
+    /// Session-owned journal access remains valid while the manager is moved out
+    /// of global storage to stop capture. It shares exactly the same write lock,
+    /// history and failure state; no second recorder or snapshot store is created.
+    pub fn transcript_writer(&self) -> TranscriptWriter {
+        TranscriptWriter {
+            meeting_folder: self.meeting_folder.clone(),
+            transcript_segments: self.transcript_segments.clone(),
+            transcript_write_lock: self.transcript_write_lock.clone(),
+            last_snapshot_at: self.last_snapshot_at.clone(),
+            last_snapshot_count: self.last_snapshot_count.clone(),
+            failure: self.failure.clone(),
+            failure_callback: self.failure_callback.clone(),
+        }
+    }
+    pub fn add_transcript_chunk(&self, text: String) {
+        self.add_transcript_segment(TranscriptSegment {
+            id: format!("seg_{}", chrono::Utc::now().timestamp_millis()), text,
+            audio_start_time: 0.0, audio_end_time: 0.0, duration: 0.0, display_time: "[00:00]".to_string(),
+            confidence: 1.0, sequence_id: 0, speaker: None, speaker_label: None, speaker_source: None, speaker_confidence: None,
+        });
+    }
+}
+
+pub struct TranscriptWriter {
+    meeting_folder: Option<PathBuf>,
+    transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
+    transcript_write_lock: Arc<Mutex<()>>,
+    last_snapshot_at: Arc<Mutex<Instant>>,
+    last_snapshot_count: Arc<Mutex<usize>>,
+    failure: Arc<Mutex<Option<String>>>,
+    failure_callback: Arc<Mutex<Option<FailureCallback>>>,
+}
+
+impl TranscriptWriter {
+    pub fn add_segment(&self, segment: TranscriptSegment) {
         // Incremental append-only persistence to journal: O(1) disk write without rewriting full history or syncing directory.
         // Guarantees durability and crash-recovery without O(N^2) I/O overhead.
         let result = (|| -> Result<()> {
@@ -159,23 +197,25 @@ impl RecordingSaver {
                 };
 
                 if should_snapshot {
-                    self.write_transcripts_json(folder)?;
+                    write_transcript_snapshot(&self.transcript_segments, folder)?;
                 }
             }
             Ok(())
         })();
         if result.is_err() {
-            self.fail("Transcript checkpoint could not be saved. Check disk space and folder permissions; stop and recover this recording.");
+            remember_failure(&self.failure, &self.failure_callback, "Transcript checkpoint could not be saved. Check disk space and folder permissions; stop and recover this recording.");
         }
     }
-    pub fn add_transcript_chunk(&self, text: String) {
-        self.add_transcript_segment(TranscriptSegment {
-            id: format!("seg_{}", chrono::Utc::now().timestamp_millis()), text,
-            audio_start_time: 0.0, audio_end_time: 0.0, duration: 0.0, display_time: "[00:00]".to_string(),
-            confidence: 1.0, sequence_id: 0, speaker: None, speaker_label: None, speaker_source: None, speaker_confidence: None,
-        });
-    }
+}
 
+fn write_transcript_snapshot(segments: &Mutex<Vec<TranscriptSegment>>, folder: &Path) -> Result<()> {
+    let segments = segments.lock().map_err(|_| anyhow!("Transcript state unavailable"))?.clone();
+    durable_json(&folder.join("transcripts.json"), &serde_json::json!({
+        "version": "1.0", "segments": segments, "last_updated": chrono::Utc::now().to_rfc3339(), "total_segments": segments.len(),
+    }))
+}
+
+impl RecordingSaver {
     /// Existing sender type is preserved. The manager must call ensure_initialized before opening streams.
     pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::Sender<AudioChunk> {
         let (sender, receiver) = mpsc::channel(64);
@@ -234,10 +274,7 @@ impl RecordingSaver {
         durable_json(&folder.join("metadata.json"), &value)
     }
     fn write_transcripts_json(&self, folder: &Path) -> Result<()> {
-        let segments = self.transcript_segments.lock().map_err(|_| anyhow!("Transcript state unavailable"))?.clone();
-        durable_json(&folder.join("transcripts.json"), &serde_json::json!({
-            "version": "1.0", "segments": segments, "last_updated": chrono::Utc::now().to_rfc3339(), "total_segments": segments.len(),
-        }))
+        write_transcript_snapshot(&self.transcript_segments, folder)
     }
     pub fn get_stats(&self) -> (usize, u32) {
         (self.incremental_saver.as_ref().and_then(|saver| saver.try_lock().ok().map(|s| s.get_checkpoint_count() as usize)).unwrap_or(0), 48000)
@@ -384,5 +421,46 @@ mod tests {
         assert!(snapshot_path.exists(), "Snapshot file transcripts.json must exist");
         let snapshot_val: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(snapshot_path).unwrap()).unwrap();
         assert_eq!(snapshot_val["total_segments"], 2);
+    }
+
+    #[test]
+    fn apple_final_flush_persists_while_manager_is_extracted() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut saver = RecordingSaver::new();
+        saver.meeting_folder = Some(dir.path().to_path_buf());
+        let writer = saver.transcript_writer();
+        // Model stop_recording taking the manager out of its global slot while
+        // the event listener remains alive and Apple finishes the final words.
+        let mut global_slot = Some(saver);
+        let extracted = global_slot.take().unwrap();
+        writer.add_segment(TranscriptSegment {
+            id: "seg_final".into(), text: "Final words after stop".into(),
+            audio_start_time: 1.0, audio_end_time: 2.0, duration: 1.0,
+            display_time: "00:02".into(), confidence: 0.85, sequence_id: 1,
+            speaker: None, speaker_label: None, speaker_source: None, speaker_confidence: None,
+        });
+        assert!(global_slot.is_none());
+        assert_eq!(extracted.get_transcript_segments().len(), 1);
+        let journal = std::fs::read_to_string(dir.path().join("transcripts.jsonl")).unwrap();
+        assert!(journal.contains("Final words after stop"));
+        extracted.write_transcripts_json(dir.path()).unwrap();
+        let snapshot: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.path().join("transcripts.json")).unwrap()).unwrap();
+        assert_eq!(snapshot["total_segments"], 1);
+        assert!(extracted.last_failure().is_none());
+    }
+
+    #[test]
+    fn apple_final_writer_shares_storage_failure_with_saver() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut saver = RecordingSaver::new();
+        saver.meeting_folder = Some(dir.path().join("missing-parent"));
+        let writer = saver.transcript_writer();
+        writer.add_segment(TranscriptSegment {
+            id: "seg_final".into(), text: "Unsaved final".into(),
+            audio_start_time: 0.0, audio_end_time: 1.0, duration: 1.0,
+            display_time: "00:01".into(), confidence: 0.85, sequence_id: 1,
+            speaker: None, speaker_label: None, speaker_source: None, speaker_confidence: None,
+        });
+        assert!(saver.last_failure().unwrap().contains("Transcript checkpoint"));
     }
 }
