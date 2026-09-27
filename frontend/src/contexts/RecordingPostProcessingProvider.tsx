@@ -1,8 +1,16 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { createContext, useContext, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
+
+const RecordingPostProcessingContext = createContext<((callApi: boolean) => Promise<void>) | null>(null);
+
+export function useRecordingPostProcessing() {
+  const finish = useContext(RecordingPostProcessingContext);
+  if (!finish) throw new Error('Recording controls must be inside RecordingPostProcessingProvider');
+  return finish;
+}
 
 /**
  * RecordingPostProcessingProvider
@@ -29,17 +37,21 @@ export function RecordingPostProcessingProvider({ children }: { children: React.
 
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
+    let disposed = false;
 
     const setupListener = async () => {
       try {
         // Listen for recording-stop-complete event from Rust
-        unlistenFn = await listen<boolean>('recording-stop-complete', (event) => {
+        const unlisten = await listen<boolean>('recording-stop-complete', (event) => {
+          if (disposed) return;
           console.log('[RecordingPostProcessing] Received recording-stop-complete event:', event.payload);
 
           // Call the post-processing handler
           // event.payload is the callApi boolean (true for normal stops)
-          handleRecordingStop(event.payload);
+          void handleRecordingStop(event.payload);
         });
+        if (disposed) unlisten();
+        else unlistenFn = unlisten;
 
         console.log('[RecordingPostProcessing] Event listener set up successfully');
       } catch (error) {
@@ -50,6 +62,7 @@ export function RecordingPostProcessingProvider({ children }: { children: React.
     setupListener();
 
     return () => {
+      disposed = true;
       if (unlistenFn) {
         console.log('[RecordingPostProcessing] Cleaning up event listener');
         unlistenFn();
@@ -57,5 +70,5 @@ export function RecordingPostProcessingProvider({ children }: { children: React.
     };
   }, [handleRecordingStop]);
 
-  return <>{children}</>;
+  return <RecordingPostProcessingContext.Provider value={handleRecordingStop}>{children}</RecordingPostProcessingContext.Provider>;
 }

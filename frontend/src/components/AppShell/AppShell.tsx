@@ -9,7 +9,9 @@ import Toolbar from './Toolbar';
 import RecordingSaveStatus from './RecordingSaveStatus';
 import './app-shell.css';
 
-const SIDEBAR_VISIBLE_KEY = 'meetodds.shell.sidebar.visible';
+// Conversation desk starts with the meeting, not three persistent columns.
+// Keep the previous layout preference intact for compatibility/rollback.
+const SIDEBAR_VISIBLE_KEY = 'meetodds.conversationDesk.sidebar.visible';
 const SIDEBAR_WIDTH_KEY = 'meetodds.shell.sidebar.width';
 const APPEARANCE_KEY = 'meetodds.appearance';
 const DEFAULT_SIDEBAR_WIDTH = 260;
@@ -29,7 +31,7 @@ function restoreAppearance() {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarVisible, setSidebarVisible] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [storageReady, setStorageReady] = useState(false);
   const drag = useRef<{ x: number; width: number; cursor: string; selection: string } | null>(null);

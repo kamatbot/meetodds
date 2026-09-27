@@ -1,3 +1,36 @@
+/* Conversation desk: native reading typography and quiet, opaque surfaces.
+   Scope to the desktop shell; standalone practice/caption windows keep their
+   own appearance. Theme selection still follows the existing app preference. */
+.meetodds-shell {
+  --bg: #f3f4f2;
+  --surface: #fff;
+  --panel: #fff;
+  --panel-2: #edf0eb;
+  --sidebar-bg: #f3f4f2;
+  --border: #e0e5df;
+  --text: #202522;
+  --text-2: #606861;
+  --text-3: #606861;
+  --accent: #b6470e;
+  --accent-soft: #fff0e6;
+  --font-space-grotesk: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-family: var(--font-space-grotesk);
+  font-variant-numeric: normal;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .meetodds-shell {
+    --bg: #181a19; --surface: #202120; --panel: #202120;
+    --panel-2: #2a302b; --sidebar-bg: #181a19; --border: #383e38;
+    --text: #ebeee9; --text-2: #acb5ad; --text-3: #acb5ad;
+    --accent: #ffad7e; --accent-soft: #39291f;
+  }
+}
+:root[data-theme='dark'] .meetodds-shell {
+  --bg: #181a19; --surface: #202120; --panel: #202120;
+  --panel-2: #2a302b; --sidebar-bg: #181a19; --border: #383e38;
+  --text: #ebeee9; --text-2: #acb5ad; --text-3: #acb5ad;
+  --accent: #ffad7e; --accent-soft: #39291f;
+}
 /* Native keyboard focus remains visible on icon-only and legacy controls. */
 .meetodds-shell :is(button, a, input, textarea, select, [tabindex]):focus-visible {
   outline: 2px solid Highlight;

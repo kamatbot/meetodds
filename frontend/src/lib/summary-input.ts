@@ -51,6 +51,7 @@ export function approveSummaryInput(input: SummaryReviewInput, includeNotes: boo
 
 export function summaryFailureMessage(error: unknown): string {
   const value = error instanceof Error ? error.message : String(error);
+  if (/^(?:Error: )?SUMMARY_APPROVAL_REQUIRED$/.test(value)) return 'Approve your selected AI once to enable automatic summaries. Choose Generate summary to review it; nothing has been sent.';
   if (value.startsWith('NOTES_NOT_SAVED:')) return value.replace('NOTES_NOT_SAVED:', '').trim();
   if (/summary is already running/i.test(value)) return 'A summary is already running for this meeting. Check its progress or cancel that job before retrying. No duplicate was started.';
   if (/finish recording before/i.test(value)) return 'Finish recording before starting a local summary. The recording has priority.';

@@ -95,7 +95,7 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
         await invoke('api_refresh_meeting_intelligence', { meetingId: id });
         window.dispatchEvent(new CustomEvent('meetodds:meeting-intelligence-updated', { detail: { meetingId: id } }));
       } catch {
-        if (ownsView()) toast.warning('Summary saved; actions could not be loaded yet', { description: 'Use Refresh in the outcome panel to retry. Your AI summary is safe.' });
+        if (ownsView()) toast.warning('Summary saved; actions could not be loaded yet', { description: 'Reopen this meeting to retry loading actions. Your AI summary is safe.' });
       }
       if (ownsView()) {
         propsRef.current.setAiSummary(parsed as unknown as Summary);
@@ -174,13 +174,17 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
         setSummaryStatus(previousSummary ? 'completed' : previousStatus); release(); return;
       }
       const target = await savedTarget();
+      // Background work must never interrupt a meeting with a consent dialog.
+      // A changed provider/model remains blocked until the user approves it.
+      const approval = readAutoSummaryApproval(localStorage, target);
+      if (automatic && !approval) throw new Error('SUMMARY_APPROVAL_REQUIRED');
       if (target.local && await invoke<boolean>('is_recording')) throw new Error('Finish recording before starting a local summary.');
       if (target.provider === 'builtin-ai' && !await invoke<boolean>('builtin_ai_is_model_ready', { modelName: target.model, refresh: true })) {
         current.onOpenModelSettings?.(); throw new Error('The selected built-in model is not ready.');
       }
       const turns = await allTranscripts(id);
       if (!turns.length) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
-      if (automatic && (!automaticEnabled() || !claimAutomaticSummary(localStorage, id))) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
+      if (automatic && !automaticEnabled()) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
       await flushOpenNotes();
       let notes = ''; let notesUnavailable = false;
       try { notes = (await invoke<{ notesMarkdown: string }>('api_get_meeting_notes', { meetingId: id })).notesMarkdown; } catch { notesUnavailable = true; }
@@ -195,7 +199,6 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
         prompt: [customPrompt.trim(), POST_MEETING_INSTRUCTIONS].filter(Boolean).join('\n\n'), template: current.selectedTemplate,
       };
       if (automatic && !automaticEnabled()) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
-      const approval = automatic ? readAutoSummaryApproval(localStorage, target) : null;
       const approved = approval
         ? approveSummaryInput(input, false, '', approval.includeManualNotes)
         : await (await import('@/components/Meeting/SummaryInputReview')).reviewSummaryInput(input, abort.signal);
@@ -210,7 +213,12 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       // Recheck remembered consent after every asynchronous preparation step.
       // Turning automatic generation off (or excluding notes) must revoke bypass.
       const currentApproval = approval ? readAutoSummaryApproval(localStorage, target) : null;
-      if (automatic && (!automaticEnabled() || (approval && (!currentApproval || currentApproval.includeManualNotes !== approval.includeManualNotes)))) {
+      if ((automatic && !automaticEnabled()) || (approval && (!currentApproval || currentApproval.includeManualNotes !== approval.includeManualNotes))) {
+        setSummaryStatus(previousStatus); release(); return;
+      }
+      // Claim only once preparation is complete. Leaving the page or rejecting
+      // consent before dispatch must not permanently consume this meeting's job.
+      if (automatic && !claimAutomaticSummary(localStorage, id)) {
         setSummaryStatus(previousStatus); release(); return;
       }
       request.current!.dispatched = true;

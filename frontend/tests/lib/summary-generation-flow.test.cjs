@@ -106,9 +106,29 @@ test('automatic meeting notes are included only under their remembered approval'
   const h = harness(); h.approveAuto(true); await h.flush(); await h.start(true);
   assert.match(h.jobs[0].args.text, /MEETING NOTE/); assert.doesNotMatch(h.jobs[0].args.text, /PRIVATE OBSERVATION/);
 });
-test('changed destination/model requires a new review and cancel sends nothing', async () => {
+test('changed destination/model blocks automatic work inline, without opening a review dialog', async () => {
   const h = harness({ review: async () => null }); h.approveAuto(); h.config.model = 'new-model';
-  await h.flush(); await h.start(true); assert.equal(h.reviews.length, 1); assert.equal(h.jobs.length, 0);
+  await h.flush(); await h.start(true); assert.equal(h.reviews.length, 0); assert.equal(h.jobs.length, 0);
+  assert.equal(h.value.summaryStatus, 'error');
+  assert.match(h.value.summaryError, /Approve your selected AI once/);
+  assert.equal(h.storage.getItem('meetodds.autoSummaryAttempt.v1:meeting-a'), null);
+  await h.start(); assert.equal(h.reviews.length, 1); assert.equal(h.jobs.length, 0);
+});
+test('manual retry uses the already approved target without another meeting-input dialog', async () => {
+  const h = harness(); h.approveAuto(true); await h.flush(); await h.start();
+  assert.equal(h.jobs.length, 1); assert.equal(h.reviews.length, 0);
+  assert.match(h.jobs[0].args.text, /MEETING NOTE/);
+  assert.doesNotMatch(h.jobs[0].args.text, /PRIVATE OBSERVATION/);
+});
+test('manual retry cannot use remembered consent revoked during preparation', async () => {
+  const h = harness({ beforeLanguage: async storage => storage.setItem('meetodds.autoSummaryApproval.v1', 'null') });
+  h.approveAuto(true); await h.flush(); await h.start();
+  assert.equal(h.jobs.length, 0); assert.equal(h.reviews.length, 0);
+});
+test('failed preparation does not consume the automatic dispatch attempt', async () => {
+  const h = harness({ notesError: true }); h.approveAuto(true); await h.flush(); await h.start(true);
+  assert.equal(h.jobs.length, 0); assert.equal(h.value.summaryStatus, 'error');
+  assert.equal(h.storage.getItem('meetodds.autoSummaryAttempt.v1:meeting-a'), null);
 });
 test('revoking automatic choice during preparation sends nothing', async () => {
   const h = harness({ flushNotes: async storage => storage.setItem('isAutoSummary', 'false') });
