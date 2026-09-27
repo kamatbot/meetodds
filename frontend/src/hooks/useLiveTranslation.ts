@@ -615,6 +615,46 @@ export function useLiveTranslation(
     settings.contextHint, cancelNativeRequest, previewRetryNonce,
   ]);
 
+  // Instant handoff: if the preview translation already produced target text for
+  // the latest utterance, seed it into the finalized segment immediately so neither
+  // the transcript panel nor the live captions suffer a multi-second delay.
+  // Re-runs on every translations change (cheap: one segment) because the queued
+  // canonical job's 'translating' placeholder overwrites the seed until it answers.
+  useEffect(() => {
+    if (!settings.enabled || transcripts.length === 0) return;
+    const transcript = transcripts[transcripts.length - 1];
+    const text = transcript.text.trim();
+    if (!text) return;
+    const previewKey = `live-preview-${transcript.speaker_source === 'system' ? 'system' : 'microphone'}`;
+    const previewEntry = translations[previewKey];
+    if (
+      !previewEntry ||
+      previewEntry.targetLanguage !== settings.targetLanguage ||
+      !previewEntry.translatedText?.trim()
+    ) return;
+    const segmentKey = liveTranslationSegmentKey(transcript);
+    setTranslations((previous) => {
+      if (previous[segmentKey]?.translatedText) return previous;
+      return {
+        ...previous,
+        [segmentKey]: {
+          segmentKey,
+          sourceText: text,
+          translatedText: previewEntry.translatedText,
+          targetLanguage: settings.targetLanguage,
+          status: previewEntry.sourceText?.trim() === text ? 'translated' : 'translating',
+          provider: previewEntry.provider,
+          model: previewEntry.model,
+          latencyMs: 0,
+          firstWordLatencyMs: 0,
+          cached: true,
+        },
+      };
+    });
+  }, [transcripts, settings.enabled, settings.targetLanguage, translations]);
+
+  // Backfill the last turns. Deliberately independent of translations: streaming
+  // deltas must not rescan up to BACKFILL_SEGMENT_LIMIT turns.
   useEffect(() => {
     if (!settings.enabled || transcripts.length === 0) return;
     const start = Math.max(0, transcripts.length - BACKFILL_SEGMENT_LIMIT);
@@ -626,37 +666,6 @@ export function useLiveTranslation(
       const index = start + offset;
       const isLive = index === lastIndex;
       const segmentKey = liveTranslationSegmentKey(transcript);
-
-      // Instant handoff: if the preview translation already produced target text for
-      // this utterance, seed it into the finalized segment immediately so neither
-      // the transcript panel nor the live captions suffer a multi-second delay.
-      const previewKey = `live-preview-${transcript.speaker_source === 'system' ? 'system' : 'microphone'}`;
-      const previewEntry = translations[previewKey];
-      if (
-        isLive &&
-        previewEntry &&
-        previewEntry.targetLanguage === settings.targetLanguage &&
-        previewEntry.translatedText?.trim()
-      ) {
-        setTranslations((previous) => {
-          if (previous[segmentKey]?.translatedText) return previous;
-          return {
-            ...previous,
-            [segmentKey]: {
-              segmentKey,
-              sourceText: text,
-              translatedText: previewEntry.translatedText,
-              targetLanguage: settings.targetLanguage,
-              status: previewEntry.sourceText?.trim() === text ? 'translated' : 'translating',
-              provider: previewEntry.provider,
-              model: previewEntry.model,
-              latencyMs: 0,
-              firstWordLatencyMs: 0,
-              cached: true,
-            },
-          };
-        });
-      }
 
       const contextText = contextForTurn(transcripts, index, settings.contextTurns);
       const revision = [
@@ -685,7 +694,7 @@ export function useLiveTranslation(
         isLive,
       });
     });
-  }, [sessionId, transcripts, settings, translations, cancelNativeRequest, enqueueJob]);
+  }, [sessionId, transcripts, settings, cancelNativeRequest, enqueueJob]);
 
   const translatedCount = useMemo(
     () => Object.entries(translations).filter(
