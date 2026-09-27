@@ -22,6 +22,15 @@ use super::models;
 // Sidecar State Management
 // ============================================================================
 
+/// Set once live translation uses the built-in model: while a recording runs the idle
+/// shutdown is deferred, so a quiet stretch of the meeting doesn't unload the model.
+/// Cleared by the next idle shutdown (idle timeout after the recording stops).
+static HOLD_WARM_WHILE_RECORDING: AtomicBool = AtomicBool::new(false);
+
+pub fn hold_warm_while_recording() {
+    HOLD_WARM_WHILE_RECORDING.store(true, Ordering::SeqCst);
+}
+
 /// Sidecar process manager with keep-alive and health monitoring
 pub struct SidecarManager {
     /// Child process handle
@@ -648,8 +657,12 @@ impl SidecarManager {
                     break;
                 }
 
-                // Don't shutdown if we are busy
-                if manager.active_request_count.load(Ordering::SeqCst) > 0 {
+                // Don't shutdown if we are busy, or live translation needs the model for
+                // the rest of this recording
+                if manager.active_request_count.load(Ordering::SeqCst) > 0
+                    || (HOLD_WARM_WHILE_RECORDING.load(Ordering::SeqCst)
+                        && crate::audio::recording_commands::is_recording().await)
+                {
                     // Update activity to prevent timeout immediately after request finishes
                     manager.update_activity().await;
                     continue;
@@ -665,6 +678,7 @@ impl SidecarManager {
                         manager.idle_timeout_secs
                     );
 
+                    HOLD_WARM_WHILE_RECORDING.store(false, Ordering::SeqCst);
                     if let Err(e) = manager.shutdown().await {
                         log::error!("Failed to shutdown idle sidecar: {}", e);
                     }

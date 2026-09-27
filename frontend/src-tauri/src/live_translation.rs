@@ -991,6 +991,34 @@ async fn warm_ollama_candidate(config: &TranslationProviderConfig) -> Result<(),
     Ok(())
 }
 
+/// Loads the built-in model and runs a one-token translation, so the first caption skips
+/// the model load and GPU warm-up. Also keeps the model loaded for the recording.
+async fn warm_builtin_candidate<R: Runtime>(
+    app: &AppHandle<R>,
+    config: &TranslationProviderConfig,
+) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data dir: {error}"))?;
+    crate::summary::summary_engine::sidecar::hold_warm_while_recording();
+    let english = resolve_language("en")?;
+    let (system_prompt, user_prompt) =
+        build_translation_prompts("Hola", None, english, None, None, None);
+    crate::summary::summary_engine::translate_with_builtin(
+        &app_data_dir,
+        &config.model_name,
+        &system_prompt,
+        &user_prompt,
+        Some(1),
+        &CancellationToken::new(),
+        &mut |_| {},
+    )
+    .await
+    .map_err(|error| format!("Failed to warm the built-in model: {error}"))?;
+    Ok(())
+}
+
 async fn translate_with_candidate<R: Runtime>(
     app: &AppHandle<R>,
     config: &TranslationProviderConfig,
@@ -1057,6 +1085,7 @@ async fn translate_with_candidate<R: Runtime>(
         let app_data_dir = app_data_dir
             .as_ref()
             .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
+        crate::summary::summary_engine::sidecar::hold_warm_while_recording();
         // Streams like the cloud providers. Cancelling (superseded caption) aborts only this
         // generation in the helper and frees the permit.
         let mut streamed = String::new();
@@ -1275,7 +1304,8 @@ pub async fn api_cancel_live_translation(request_id: String) -> Result<bool, Str
 
 /// Pre-load the local model so the first live segment is not served cold.
 /// Ollama unloads idle models after ~5 minutes; a request with an empty prompt
-/// loads it and returns immediately. Cloud providers need nothing.
+/// loads it and returns immediately. The built-in helper runs a one-token translation.
+/// Cloud providers need nothing.
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1304,11 +1334,16 @@ pub async fn api_prepare_live_translation<R: Runtime>(
     )
     .await?;
     let preferred = &candidates[0];
-    let warmed = if preferred.provider == LLMProvider::Ollama {
-        warm_ollama_candidate(preferred).await?;
-        true
-    } else {
-        false
+    let warmed = match preferred.provider {
+        LLMProvider::Ollama => {
+            warm_ollama_candidate(preferred).await?;
+            true
+        }
+        LLMProvider::BuiltInAI => {
+            warm_builtin_candidate(&app, preferred).await?;
+            true
+        }
+        _ => false,
     };
     Ok(LiveTranslationPreparation {
         provider: preferred.provider_name.clone(),
