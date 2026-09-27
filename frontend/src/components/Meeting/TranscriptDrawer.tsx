@@ -13,6 +13,7 @@ import { CAPTION_WINDOW_LABEL, CAPTION_RESET_EVENT } from '@/lib/live-captions';
 import NotedTranscriptView from '@/components/Notes/NotedTranscriptView';
 import { LiveTranslationControl } from '@/components/LiveTranslationControl';
 import type { ModalType } from '@/hooks/useModalState';
+import type { TranscriptSegmentData } from '@/types';
 import './live-meeting.css';
 
 const DRAWER_VISIBLE_KEY = 'meetodds.meeting.transcriptDrawer.visible';
@@ -63,16 +64,29 @@ export default function TranscriptDrawer({ isProcessingStop, isStopping, showMod
     return () => window.removeEventListener('meetodds:toggle-transcript-drawer', toggle);
   }, []);
 
-  const segments = useMemo(() => transcripts.map(transcript => {
-    const translation = liveTranslation.translations[liveTranslationSegmentKey(transcript)];
-    return {
-      id: transcript.id, timestamp: transcript.audio_start_time ?? 0, endTime: transcript.audio_end_time,
-      text: transcript.text, confidence: transcript.confidence, speaker: transcript.speaker,
-      speaker_label: transcript.speaker_label, speaker_source: transcript.speaker_source, speaker_confidence: transcript.speaker_confidence,
-      translated_text: translation?.translatedText, translation_status: translation?.status,
-      translation_error: translation?.error, translation_latency_ms: translation?.latencyMs,
-    };
-  }), [transcripts, liveTranslation.translations]);
+  // Reuse the previous row object when none of its fields changed, so a translation
+  // delta re-renders only the memoized transcript row it belongs to.
+  const segmentCacheRef = useRef(new Map<string, TranscriptSegmentData>());
+  const segments = useMemo(() => {
+    const previous = segmentCacheRef.current;
+    const next = new Map<string, TranscriptSegmentData>();
+    const rows = transcripts.map(transcript => {
+      const translation = liveTranslation.translations[liveTranslationSegmentKey(transcript)];
+      const segment: TranscriptSegmentData = {
+        id: transcript.id, timestamp: transcript.audio_start_time ?? 0, endTime: transcript.audio_end_time,
+        text: transcript.text, confidence: transcript.confidence, speaker: transcript.speaker,
+        speaker_label: transcript.speaker_label, speaker_source: transcript.speaker_source, speaker_confidence: transcript.speaker_confidence,
+        translated_text: translation?.translatedText, translation_status: translation?.status,
+        translation_error: translation?.error, translation_latency_ms: translation?.latencyMs,
+      };
+      const cached = previous.get(segment.id);
+      const row = cached && (Object.keys(segment) as (keyof TranscriptSegmentData)[]).every(key => Object.is(cached[key], segment[key])) ? cached : segment;
+      next.set(row.id, row);
+      return row;
+    });
+    segmentCacheRef.current = next;
+    return rows;
+  }, [transcripts, liveTranslation.translations]);
 
   const beginResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
