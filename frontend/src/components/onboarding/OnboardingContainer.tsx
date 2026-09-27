@@ -40,7 +40,10 @@ export function OnboardingContainer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-bg text-text">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-bg text-text"
+      style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif' }}
+    >
       <div className={cn('flex h-full max-h-screen w-full max-w-[720px] flex-col px-6 py-6 md:px-10 md:py-8', className)}>
         {step && !hideProgress && (
           <div className="relative mb-5 shrink-0">

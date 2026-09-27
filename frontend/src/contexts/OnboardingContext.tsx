@@ -2,11 +2,24 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 import type { PermissionStatus, OnboardingPermissions } from '@/types/onboarding';
+import { DEFAULT_PARAKEET_MODEL } from '@/constants/modelDefaults';
 import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-model';
+import {
+  ONBOARDING_STATUS_VERSION,
+  createDownloadStartGate,
+  hasSavedSummaryApproval,
+  isExactModelAvailable,
+  onboardingModelsReady,
+  readSummaryDestination,
+  resolveOnboardingProgress,
+  saveSummaryDestination,
+  type SummaryDestination,
+} from '@/lib/onboarding-setup';
+import type { ModelConfig } from '@/services/configService';
 
-const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
+const PARAKEET_MODEL = DEFAULT_PARAKEET_MODEL;
 
 interface OnboardingStatus {
   version: string;
@@ -25,6 +38,7 @@ interface SummaryModelProgressInfo {
   downloadedMb: number;
   totalMb: number;
   speedMbps: number;
+  error?: string;
 }
 
 interface ParakeetProgressInfo {
@@ -32,10 +46,12 @@ interface ParakeetProgressInfo {
   downloadedMb: number;
   totalMb: number;
   speedMbps: number;
+  error?: string;
 }
 
 interface OnboardingContextType {
   currentStep: number;
+  summaryDestination: SummaryDestination;
   parakeetDownloaded: boolean;
   parakeetProgress: number;
   parakeetProgressInfo: ParakeetProgressInfo;
@@ -60,9 +76,11 @@ interface OnboardingContextType {
   setDatabaseExists: (value: boolean) => void;
   setPermissionStatus: (permission: keyof OnboardingPermissions, status: PermissionStatus) => void;
   setPermissionsSkipped: (skipped: boolean) => void;
-  completeOnboarding: () => Promise<void>;
+  selectSummaryDestination: (destination: SummaryDestination) => void;
+  completeOnboarding: (onTranscriptConfigSaved?: () => void) => Promise<void>;
   startBackgroundDownloads: (options: StartBackgroundDownloadsOptions) => Promise<void>;
   retryParakeetDownload: () => Promise<void>;
+  retrySummaryModelDownload: () => Promise<void>;
 }
 
 interface StartBackgroundDownloadsOptions {
@@ -73,9 +91,26 @@ interface StartBackgroundDownloadsOptions {
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
 
+function initialSummaryDestination(): SummaryDestination {
+  if (typeof window === 'undefined') return 'local';
+  try {
+    return readSummaryDestination(window.localStorage) ?? 'local';
+  } catch {
+    return 'local';
+  }
+}
+
+async function isParakeetModelReady(): Promise<boolean> {
+  await invoke('parakeet_init');
+  const models = await invoke<Array<{ name?: unknown; status?: unknown }>>('parakeet_get_available_models');
+  return isExactModelAvailable(models, PARAKEET_MODEL);
+}
+
 export function OnboardingProvider({ children }: { children: React.ReactNode }) {
   const [currentStep, setCurrentStep] = useState(1);
+  const [summaryDestination, setSummaryDestination] = useState<SummaryDestination>(initialSummaryDestination);
   const [completed, setCompleted] = useState(false);
+  const [statusLoaded, setStatusLoaded] = useState(false);
   const [parakeetDownloaded, setParakeetDownloaded] = useState(false);
   const [parakeetProgress, setParakeetProgress] = useState(0);
   const [parakeetProgressInfo, setParakeetProgressInfo] = useState<ParakeetProgressInfo>({
@@ -96,6 +131,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const [recommendedSummaryModel, setRecommendedSummaryModel] = useState<string>('');
   const [databaseExists, setDatabaseExists] = useState(false);
   const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
+  const parakeetDownloadRequestedRef = useRef(false);
+  const summaryDownloadRequestedRef = useRef(new Set<string>());
+  const downloadStartGateRef = useRef<ReturnType<typeof createDownloadStartGate> | null>(null);
+  if (!downloadStartGateRef.current) downloadStartGateRef.current = createDownloadStartGate();
 
   // Permissions state
   const [permissions, setPermissions] = useState<OnboardingPermissions>({
@@ -106,6 +145,11 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const [permissionsSkipped, setPermissionsSkipped] = useState(false);
 
   const saveTimeoutRef = useRef<NodeJS.Timeout>();
+
+  const selectSummaryDestination = useCallback((destination: SummaryDestination) => {
+    setSummaryDestination(destination);
+    if (typeof window !== 'undefined') saveSummaryDestination(window.localStorage, destination);
+  }, []);
 
   const initializeSummaryModelSelection = async (preferredModel = selectedSummaryModel) => {
     try {
@@ -126,6 +170,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
       setSelectedSummaryModel(resolved.selectedSummaryModel);
       setSummaryModelDownloaded(resolved.summaryModelDownloaded);
+      setSummaryModelProgressInfo((previous) => ({ ...previous, error: undefined }));
       console.log('[OnboardingContext] Set recommended model:', resolved.selectedSummaryModel);
 
       return resolved;
@@ -135,20 +180,64 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  const requestSummaryModelDownload = (modelName: string) => {
+  const requestSummaryModelDownload = useCallback(async (modelName: string) => {
+    if (!modelName || summaryDownloadRequestedRef.current.has(modelName)) return;
+    summaryDownloadRequestedRef.current.add(modelName);
+    setSummaryModelProgressInfo((previous) => ({ ...previous, error: undefined }));
     console.log('[OnboardingContext] Starting Summary Model download');
-    invoke('builtin_ai_download_model', { modelName })
-      .catch(err => {
-        if (String(err).includes('Download already in progress')) {
-          return;
-        }
-        console.error('[OnboardingContext] Summary Model download failed:', err);
+    try {
+      await invoke('builtin_ai_download_model', { modelName });
+    } catch (err) {
+      if (String(err).includes('Download already in progress')) return;
+      summaryDownloadRequestedRef.current.delete(modelName);
+      setSummaryModelProgressInfo((previous) => ({ ...previous, error: 'download_failed' }));
+      console.error('[OnboardingContext] Summary Model download failed:', err);
+      throw err;
+    }
+  }, []);
+
+  const verifyParakeetReadiness = useCallback(async () => {
+    try {
+      const ready = await isParakeetModelReady();
+      setParakeetDownloaded(ready);
+      if (ready) {
+        parakeetDownloadRequestedRef.current = false;
+        setParakeetProgress(100);
+        setParakeetProgressInfo((previous) => ({ ...previous, percent: 100, error: undefined }));
+      } else {
+        setParakeetProgressInfo((previous) => ({ ...previous, error: previous.error || 'model_not_ready' }));
+      }
+    } catch (error) {
+      setParakeetDownloaded(false);
+      setParakeetProgressInfo((previous) => ({ ...previous, error: previous.error || 'model_not_ready' }));
+      console.warn('[OnboardingContext] Failed to verify Parakeet readiness:', error);
+    }
+  }, []);
+
+  const verifySummaryModelReadiness = async (modelName: string) => {
+    try {
+      const ready = await invoke<boolean>('builtin_ai_is_model_ready', {
+        modelName,
+        refresh: true,
       });
+      setSummaryModelDownloaded(ready);
+      if (ready) {
+        summaryDownloadRequestedRef.current.delete(modelName);
+        setSummaryModelProgress(100);
+        setSummaryModelProgressInfo((previous) => ({ ...previous, percent: 100, error: undefined }));
+      } else {
+        setSummaryModelProgressInfo((previous) => ({ ...previous, error: previous.error || 'model_not_ready' }));
+      }
+    } catch (error) {
+      setSummaryModelDownloaded(false);
+      setSummaryModelProgressInfo((previous) => ({ ...previous, error: previous.error || 'model_not_ready' }));
+      console.warn('[OnboardingContext] Failed to verify summary model readiness:', error);
+    }
   };
 
   // Load status on mount and initialize database
   useEffect(() => {
-    loadOnboardingStatus();
+    void loadOnboardingStatus().then((loaded) => setStatusLoaded(loaded));
     checkDatabaseStatus();
     initializeDatabaseInBackground();
   }, []);
@@ -219,6 +308,8 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
+    // A delayed native read must never be overwritten by the initial empty state.
+    if (!statusLoaded) return;
     // Don't auto-save if completed (to avoid overwriting completion status)
     // Also don't auto-save if we are currently in the process of completing
     if (completed || isCompletingRef.current) return;
@@ -230,7 +321,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [currentStep, parakeetDownloaded, summaryModelDownloaded, completed]);
+  }, [currentStep, parakeetDownloaded, summaryModelDownloaded, completed, statusLoaded]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -252,9 +343,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
             downloadedMb: downloaded_mb ?? 0,
             totalMb: total_mb ?? 0,
             speedMbps: speed_mbps ?? 0,
+            error: status === 'error' ? 'download_failed' : undefined,
           });
           if (status === 'completed' || progress >= 100) {
-            setParakeetDownloaded(true);
+            void verifyParakeetReadiness();
           }
         }
       }
@@ -265,8 +357,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       (event) => {
         const { modelName } = event.payload;
         if (modelName === PARAKEET_MODEL) {
-          setParakeetDownloaded(true);
-          setParakeetProgress(100);
+          void verifyParakeetReadiness();
         }
       }
     );
@@ -276,6 +367,8 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       (event) => {
         const { modelName } = event.payload;
         if (modelName === PARAKEET_MODEL) {
+          parakeetDownloadRequestedRef.current = false;
+          setParakeetProgressInfo((previous) => ({ ...previous, error: 'download_failed' }));
           console.error('Parakeet download error:', event.payload.error);
         }
       }
@@ -286,7 +379,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       unlistenComplete.then(fn => fn());
       unlistenError.then(fn => fn());
     };
-  }, []);
+  }, [verifyParakeetReadiness]);
 
   // Listen to summary model (Built-in AI) download progress
   useEffect(() => {
@@ -308,9 +401,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
             downloadedMb: downloaded_mb ?? 0,
             totalMb: total_mb ?? 0,
             speedMbps: speed_mbps ?? 0,
+            error: status === 'error' ? 'download_failed' : undefined,
           });
           if (status === 'completed' || progress >= 100) {
-            setSummaryModelDownloaded(true);
+            void verifySummaryModelReadiness(model);
           }
         }
       }
@@ -332,14 +426,26 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  const loadOnboardingStatus = async () => {
+  const loadOnboardingStatus = async (): Promise<boolean> => {
     try {
       const status = await invoke<OnboardingStatus | null>('get_onboarding_status');
+      if (!readSummaryDestination(window.localStorage)) {
+        try {
+          const savedConfig = await invoke<ModelConfig | null>('api_get_model_config');
+          if (savedConfig?.provider === 'openai-codex') {
+            setSummaryDestination('chatgpt');
+            saveSummaryDestination(window.localStorage, 'chatgpt');
+          }
+        } catch {
+          // Provider choice remains local by default until the user selects it.
+        }
+      }
       if (status) {
         console.log('[OnboardingContext] Loaded saved status:', status);
+        const progress = resolveOnboardingProgress(status);
 
         if (status.completed) {
-          setCurrentStep(status.current_step);
+          setCurrentStep(progress.currentStep);
           setCompleted(true);
           setParakeetDownloaded(status.model_status.parakeet === 'downloaded');
           setSummaryModelDownloaded(status.model_status.summary === 'downloaded');
@@ -347,7 +453,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
             setSelectedSummaryModel(status.model_status.selected_summary_model);
           }
           console.log('[OnboardingContext] Restored completed onboarding status without model verification');
-          return;
+          return true;
         }
 
         // Don't trust saved status - verify actual model status on disk
@@ -368,8 +474,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       } else {
         await initializeSummaryModelSelection();
       }
+      return true;
     } catch (error) {
       console.error('[OnboardingContext] Failed to load onboarding status:', error);
+      return false;
     }
   };
 
@@ -381,8 +489,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
     // Verify Parakeet model exists on disk
     try {
-      await invoke('parakeet_init');
-      parakeetDownloaded = await invoke<boolean>('parakeet_has_available_models');
+      parakeetDownloaded = await isParakeetModelReady();
       console.log('[OnboardingContext] Parakeet verified on disk:', parakeetDownloaded);
     } catch (error) {
       console.warn('[OnboardingContext] Failed to verify Parakeet:', error);
@@ -393,14 +500,15 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     try {
       const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
       setRecommendedSummaryModel(recommendedModel);
-      const savedSelectedModel = savedStatus.model_status.selected_summary_model || '';
-      const modelToCheck = savedSelectedModel || recommendedModel;
+      // New onboarding uses the built-in recommendation, not an obsolete
+      // selection left behind by the four-step wizard.
+      const modelToCheck = recommendedModel;
       const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
         modelName: modelToCheck,
         refresh: true,
       });
       const resolved = resolveOnboardingSummaryModelStatus({
-        selectedModel: savedSelectedModel,
+        selectedModel: modelToCheck,
         recommendedModel,
         selectedModelReady,
       });
@@ -412,21 +520,13 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       summaryModelDownloaded = false;
     }
 
-    // Determine the correct step based on verified status
-    // New simplified flow: Step 1: Welcome, Step 2: Setup Overview, Step 3: Download Progress, Step 4: Permissions (macOS)
-    let currentStep = savedStatus.current_step;
-    let completed = savedStatus.completed;
-
-    // Clamp step to new max (4)
-    if (currentStep > 4) {
-      currentStep = 3; // Go to download progress step
-    }
+    const progress = resolveOnboardingProgress(savedStatus);
 
     // Trust the completed status - don't revert based on model downloads
     // Downloads continue in background; user stays in main app regardless
     return {
-      currentStep,
-      completed,
+      currentStep: progress.currentStep,
+      completed: progress.completed,
       parakeetDownloaded,
       summaryModelDownloaded,
       selectedSummaryModel,
@@ -445,9 +545,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     try {
       await invoke('save_onboarding_status_cmd', {
         status: {
-          version: '1.0',
+          version: ONBOARDING_STATUS_VERSION,
           completed: completed,
-          current_step: currentStep,
+          current_step: Math.max(1, Math.min(currentStep, 2)),
           model_status: {
             parakeet: parakeetDownloaded ? 'downloaded' : 'not_downloaded',
             summary: summaryModelDownloaded ? 'downloaded' : 'not_downloaded',
@@ -461,7 +561,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  const completeOnboarding = async () => {
+  const completeOnboarding = async (onTranscriptConfigSaved?: () => void) => {
     try {
       // Set completion flag to prevent race conditions with auto-save
       isCompletingRef.current = true;
@@ -472,27 +572,96 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         saveTimeoutRef.current = undefined;
       }
 
-      let modelToSave = selectedSummaryModel;
-      if (!modelToSave) {
-        modelToSave = await invoke<string>('builtin_ai_get_recommended_model');
-        setSelectedSummaryModel(modelToSave);
+      const expectedProvider = summaryDestination === 'local' ? 'builtin-ai' : 'openai-codex';
+      const savedConfig = await invoke<ModelConfig | null>('api_get_model_config');
+      if (!savedConfig?.model?.trim() || savedConfig.provider !== expectedProvider) {
+        throw new Error('Save the selected summary provider before finishing setup.');
       }
 
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToSave,
-        refresh: true,
-      });
-      setSummaryModelDownloaded(selectedModelReady);
-      if (!selectedModelReady) {
-        requestSummaryModelDownload(modelToSave);
+      const modelToCheck = summaryDestination === 'local'
+        ? recommendedSummaryModel || selectedSummaryModel
+        : savedConfig.model;
+      if (!modelToCheck || (summaryDestination === 'local' && savedConfig.model !== modelToCheck)) {
+        throw new Error('The saved summary model no longer matches your choice. Go back and confirm your summary setup.');
       }
 
-      // Onboarding always uses builtin-ai with selected model
-      await invoke('complete_onboarding', {
-        model: modelToSave,
+      let hasExplicitApproval = false;
+      try {
+        hasExplicitApproval = typeof window !== 'undefined' && hasSavedSummaryApproval(
+          window.localStorage,
+          savedConfig.provider,
+          savedConfig.model,
+          savedConfig.ollamaEndpoint,
+        );
+      } catch {
+        hasExplicitApproval = false;
+      }
+      if (!hasExplicitApproval) {
+        throw new Error('Confirm your summary destination on the first step before finishing setup.');
+      }
+
+      let selectedModelReady = false;
+      if (summaryDestination === 'local') {
+        try {
+          selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
+            modelName: savedConfig.model,
+            refresh: true,
+          });
+        } catch {
+          selectedModelReady = false;
+        }
+        setSummaryModelDownloaded(selectedModelReady);
+        setSummaryModelProgressInfo((previous) => ({
+          ...previous,
+          error: selectedModelReady ? undefined : 'model_not_ready',
+        }));
+        if (!selectedModelReady) {
+          throw new Error(`The selected local summary model (${savedConfig.model}) is not ready yet. Wait for it to finish or retry its download.`);
+        }
+      }
+
+      let transcriptionModelReady = false;
+      try {
+        transcriptionModelReady = await isParakeetModelReady();
+      } catch {
+        transcriptionModelReady = false;
+      }
+      setParakeetDownloaded(transcriptionModelReady);
+      setParakeetProgressInfo((previous) => ({
+        ...previous,
+        error: transcriptionModelReady ? undefined : 'model_not_ready',
+      }));
+      if (!onboardingModelsReady(summaryDestination, transcriptionModelReady, selectedModelReady)) {
+        throw new Error(`The selected transcription model (${PARAKEET_MODEL}) is not ready yet. Wait for it to finish or retry its download.`);
+      }
+
+      await invoke('api_save_transcript_config', {
+        provider: 'parakeet',
+        model: PARAKEET_MODEL,
       });
+      const savedTranscriptConfig = await invoke<{ provider?: string; model?: string } | null>('api_get_transcript_config');
+      if (savedTranscriptConfig?.provider !== 'parakeet' || savedTranscriptConfig.model !== PARAKEET_MODEL) {
+        throw new Error('The transcription model could not be verified after saving. Retry setup before continuing.');
+      }
+      onTranscriptConfigSaved?.();
+
+      await invoke('save_onboarding_status_cmd', {
+        status: {
+          version: ONBOARDING_STATUS_VERSION,
+          completed: true,
+          current_step: 2,
+          model_status: {
+            parakeet: transcriptionModelReady ? 'downloaded' : 'not_downloaded',
+            summary: summaryDestination === 'local' && selectedModelReady ? 'downloaded' : 'not_downloaded',
+            selected_summary_model: modelToCheck || undefined,
+          },
+          last_updated: new Date().toISOString(),
+        },
+      });
+
       setCompleted(true);
-      console.log('[OnboardingContext] Onboarding completed with model:', modelToSave);
+      setCurrentStep(2);
+      console.log('[OnboardingContext] Onboarding completed with provider:', expectedProvider);
 
       // Reset the flag so subsequent state updates can be saved
       isCompletingRef.current = false;
@@ -503,8 +672,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  // Start background downloads for models.
-  const startBackgroundDownloads = async ({
+  // Start background downloads at most once for each concrete model target.
+  // Failures remain visible but cannot make a render-driven effect retry itself.
+  const startBackgroundDownloads = useCallback(async ({
     includeParakeet,
     includeSummary,
     summaryModel,
@@ -515,36 +685,36 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       summaryModel,
     });
 
-    try {
-      const shouldStartParakeet = includeParakeet && !parakeetDownloaded;
-      const shouldStartSummary = includeSummary && !summaryModelDownloaded && !!summaryModel;
-
-      if (!shouldStartParakeet && !shouldStartSummary) {
-        if (includeSummary && !summaryModelDownloaded && !summaryModel) {
-          console.warn('[OnboardingContext] Summary Model download skipped until recommendation is loaded');
-        }
-        return;
-      }
-
-      setIsBackgroundDownloading(true);
-
-      // Start Parakeet download first (speech recognition - always required)
-      if (shouldStartParakeet) {
+    if (includeParakeet && !parakeetDownloaded && !parakeetDownloadRequestedRef.current) {
+      const start = downloadStartGateRef.current!.startOnce(`parakeet:${PARAKEET_MODEL}`, async () => {
+        parakeetDownloadRequestedRef.current = true;
+        setParakeetProgressInfo((previous) => ({ ...previous, error: undefined }));
         console.log('[OnboardingContext] Starting Parakeet download');
-        invoke('parakeet_download_model', { modelName: PARAKEET_MODEL })
-          .catch(err => console.error('[OnboardingContext] Parakeet download failed:', err));
+        try {
+          await invoke('parakeet_download_model', { modelName: PARAKEET_MODEL });
+        } catch (err) {
+          parakeetDownloadRequestedRef.current = false;
+          setParakeetProgressInfo((previous) => ({ ...previous, error: 'download_failed' }));
+          console.error('[OnboardingContext] Parakeet download failed:', err);
+          throw err;
+        }
+      });
+      if (start) {
+        setIsBackgroundDownloading(true);
+        void start.catch(() => undefined);
       }
-
-      // Start selected Summary Model download immediately so completion cannot race the request.
-      if (shouldStartSummary && summaryModel) {
-        requestSummaryModelDownload(summaryModel);
-      }
-    } catch (error) {
-      console.error('[OnboardingContext] Failed to start background downloads:', error);
-      setIsBackgroundDownloading(false);
-      throw error;
     }
-  };
+
+    if (includeSummary && !summaryModelDownloaded && summaryModel) {
+      const start = downloadStartGateRef.current!.startOnce(`builtin-ai:${summaryModel}`, () => requestSummaryModelDownload(summaryModel));
+      if (start) {
+        setIsBackgroundDownloading(true);
+        void start.catch(() => undefined);
+      }
+    } else if (includeSummary && !summaryModelDownloaded && !summaryModel) {
+      console.warn('[OnboardingContext] Summary Model download skipped until recommendation is loaded');
+    }
+  }, [parakeetDownloaded, requestSummaryModelDownload, summaryModelDownloaded]);
 
   // Check if any models are currently downloading (for re-entry)
   const checkActiveDownloads = async () => {
@@ -566,10 +736,26 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
   const retryParakeetDownload = async () => {
     console.log('[OnboardingContext] Retrying Parakeet download');
+    parakeetDownloadRequestedRef.current = true;
+    setParakeetProgressInfo((previous) => ({ ...previous, error: undefined }));
     try {
-      await invoke('parakeet_retry_download', { modelName: PARAKEET_MODEL });
+      await downloadStartGateRef.current!.retry(() => invoke('parakeet_retry_download', { modelName: PARAKEET_MODEL }));
     } catch (error) {
+      parakeetDownloadRequestedRef.current = false;
+      setParakeetProgressInfo((previous) => ({ ...previous, error: 'download_failed' }));
       console.error('[OnboardingContext] Retry failed:', error);
+      throw error;
+    }
+  };
+
+  const retrySummaryModelDownload = async () => {
+    const modelName = recommendedSummaryModel || selectedSummaryModel;
+    if (!modelName) throw new Error('The recommended summary model is not available yet.');
+    summaryDownloadRequestedRef.current.delete(modelName);
+    setSummaryModelProgressInfo((previous) => ({ ...previous, error: undefined }));
+    try {
+      await downloadStartGateRef.current!.retry(() => requestSummaryModelDownload(modelName));
+    } catch (error) {
       throw error;
     }
   };
@@ -582,14 +768,13 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const goToStep = useCallback((step: number) => {
-    setCurrentStep(Math.max(1, Math.min(step, 4)));
+    setCurrentStep(Math.max(1, Math.min(step, 2)));
   }, []);
 
   const goNext = useCallback(() => {
     setCurrentStep((prev: number) => {
       const next = prev + 1;
-      // Don't go past step 4
-      return Math.min(next, 4);
+      return Math.min(next, 2);
     });
   }, []);
 
@@ -605,6 +790,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     <OnboardingContext.Provider
       value={{
         currentStep,
+        summaryDestination,
         parakeetDownloaded,
         parakeetProgress,
         parakeetProgressInfo,
@@ -626,9 +812,11 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         setDatabaseExists,
         setPermissionStatus,
         setPermissionsSkipped,
+        selectSummaryDestination,
         completeOnboarding,
         startBackgroundDownloads,
         retryParakeetDownload,
+        retrySummaryModelDownload,
       }}
     >
       {children}

@@ -1,158 +1,269 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import Image from 'next/image';
-import { ArrowRight, Check, FileText, Lock, MessageSquareText, Sparkles, WifiOff } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowRight, Check, Cloud, LaptopMinimal, Loader2, LockKeyhole } from 'lucide-react';
+import { emit } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
-import { OnboardingContainer } from '../OnboardingContainer';
+import { OpenAICodexSettings } from '@/components/OpenAICodexSettings';
+import { useConfig } from '@/contexts/ConfigContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import type { ModelConfig } from '@/services/configService';
+import { getSummaryModelSizeLabel } from '@/lib/onboarding-summary-model';
+import { commitSummaryDestination, firstAvailableChatGPTModel, type PersistedSummaryConfiguration, type SummaryDestination } from '@/lib/onboarding-setup';
+import { OnboardingContainer } from '../OnboardingContainer';
 
-const NEW_MEETING_FOCUS_KEY = 'meetodds.newMeetingFocus';
-const TRANSCRIPT_DRAWER_VISIBLE_KEY = 'meetodds.meeting.transcriptDrawer.visible';
+interface CodexAuthStatus {
+  loggedIn: boolean;
+}
 
-type NewMeetingFocus = 'notes' | 'transcript';
+interface CodexModel {
+  id: string;
+}
+
+async function persistAndReadSummaryConfiguration(
+  provider: 'builtin-ai' | 'openai-codex',
+  model: string,
+): Promise<PersistedSummaryConfiguration> {
+  const previous = await invoke<ModelConfig | null>('api_get_model_config');
+  await invoke('api_save_model_config', {
+    provider,
+    model,
+    whisperModel: previous?.whisperModel || 'large-v3',
+    apiKey: null,
+    ollamaEndpoint: null,
+  });
+
+  const saved = await invoke<ModelConfig>('api_get_model_config');
+  if (saved.provider !== provider || saved.model !== model) {
+    throw new Error('MeetOdds could not verify the saved summary provider and model.');
+  }
+
+  await emit('model-config-updated', saved);
+  return {
+    provider: saved.provider,
+    model: saved.model,
+    endpoint: saved.ollamaEndpoint,
+  };
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return 'Could not save this summary setup. Check your connection and try again.';
+}
 
 export function WelcomeStep() {
-  const { goNext } = useOnboarding();
-  const [focusPreference, setFocusPreference] = useState<NewMeetingFocus>('notes');
+  const {
+    summaryDestination,
+    selectSummaryDestination,
+    selectedSummaryModel,
+    recommendedSummaryModel,
+    summaryModelDownloaded,
+    summaryModelProgress,
+    summaryModelProgressInfo,
+    startBackgroundDownloads,
+    goNext,
+  } = useOnboarding();
+  const { toggleIsAutoSummary } = useConfig();
+  const [isCodexConnected, setIsCodexConnected] = useState(false);
+  const [availableChatGPTModels, setAvailableChatGPTModels] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const stored = window.localStorage.getItem(NEW_MEETING_FOCUS_KEY);
-    if (stored === 'transcript' || stored === 'notes') {
-      setFocusPreference(stored);
+  const localModel = recommendedSummaryModel || selectedSummaryModel;
+  const modelSize = localModel ? getSummaryModelSizeLabel(localModel) : '';
+  const chatGPTModel = firstAvailableChatGPTModel(availableChatGPTModels);
+
+  const chooseDestination = (destination: SummaryDestination) => {
+    setError(null);
+    setSelectionError(null);
+    try {
+      selectSummaryDestination(destination);
+    } catch {
+      setSelectionError('Your choice could not be saved on this device. Continue only if you can finish setup now.');
     }
-  }, []);
-
-  const chooseFocus = (preference: NewMeetingFocus) => {
-    setFocusPreference(preference);
-    window.localStorage.setItem(NEW_MEETING_FOCUS_KEY, preference);
-    // Until the recorder has a canonical SQLite meeting route at start, this preference
-    // maps directly to whether the live transcript drawer begins visible. The value is
-    // stored separately so the future live Notes screen can adopt it without migration.
-    window.localStorage.setItem(
-      TRANSCRIPT_DRAWER_VISIBLE_KEY,
-      String(preference === 'transcript'),
-    );
   };
 
-  const highlights = [
-    { icon: Lock, label: 'Stays on your device' },
-    { icon: Sparkles, label: 'Local or cloud AI' },
-    { icon: WifiOff, label: 'Works offline' },
-  ];
+  const refreshChatGPTModels = async () => {
+    try {
+      const models = await invoke<CodexModel[]>('openai_codex_get_models');
+      setAvailableChatGPTModels(models.map((model) => model.id));
+    } catch {
+      setAvailableChatGPTModels([]);
+      setError('ChatGPT models could not be checked. Try again or reconnect your account.');
+    }
+  };
+
+  const handleContinue = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      let authenticated = false;
+      let availableModels: string[] = [];
+      let modelToCommit = localModel;
+      if (summaryDestination === 'chatgpt') {
+        const auth = await invoke<CodexAuthStatus>('openai_codex_get_auth_status');
+        authenticated = auth.loggedIn;
+        if (!authenticated) throw new Error('ChatGPT sign-in is not complete. Sign in, then try again.');
+
+        const models = await invoke<CodexModel[]>('openai_codex_get_models');
+        availableModels = models.map((model) => model.id);
+        if (!firstAvailableChatGPTModel(availableModels)) {
+          throw new Error('ChatGPT has not reported an available summary model. Refresh the model list and retry.');
+        }
+        const savedConfig = await invoke<ModelConfig | null>('api_get_model_config');
+        const savedModel = savedConfig?.provider === 'openai-codex'
+          && availableModels.includes(savedConfig.model)
+          ? savedConfig.model
+          : firstAvailableChatGPTModel(availableModels);
+        modelToCommit = savedModel ?? '';
+        setAvailableChatGPTModels([modelToCommit, ...availableModels.filter((item) => item !== modelToCommit)]);
+      }
+
+      const committed = await commitSummaryDestination({
+        storage: window.localStorage,
+        destination: summaryDestination,
+        authenticated,
+        availableModels,
+        model: modelToCommit,
+        persistAndReadConfiguration: persistAndReadSummaryConfiguration,
+        setAutoSummary: toggleIsAutoSummary,
+      });
+
+      if (summaryDestination === 'local' && !summaryModelDownloaded) {
+        await startBackgroundDownloads({
+          includeParakeet: false,
+          includeSummary: true,
+          summaryModel: committed.model,
+        });
+      }
+      goNext();
+    } catch (failure) {
+      setError(errorMessage(failure));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const isChatGPTReady = isCodexConnected && Boolean(chatGPTModel);
 
   return (
-    <OnboardingContainer title="Welcome to MeetOdds" step={1} totalSteps={4} hideProgress hero={null}>
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-[460px] overflow-hidden"
-      >
-        <div className="absolute left-1/2 top-[-160px] h-[440px] w-[760px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(91,63,217,0.18),rgba(59,110,246,0.08)_55%,transparent_78%)] blur-2xl" />
-      </div>
-
-      <div className="relative mx-auto flex w-full max-w-[640px] flex-1 flex-col justify-center">
-        <div className="flex flex-col items-center text-center animate-fade-in-up motion-reduce:animate-none">
-          <div className="relative mb-5">
-            <Image
-              src="/meetodds-icon.png"
-              alt=""
-              width={80}
-              height={80}
-              priority
-              className="h-20 w-20 rounded-[22px] shadow-[0_18px_40px_-12px_rgba(59,110,246,0.45)] animate-float motion-reduce:animate-none"
-            />
-            <span className="absolute -right-3 -top-2 inline-flex items-center rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-semibold text-2 shadow-sm">
-              Private
+    <OnboardingContainer
+      title="How would you like your summaries?"
+      description="Recording and transcription stay on your Mac. Choose where each meeting summary is written."
+      step={1}
+      totalSteps={2}
+      className="max-w-[760px]"
+    >
+      <div className="mx-auto w-full max-w-[620px] space-y-3">
+        <button
+          type="button"
+          onClick={() => chooseDestination('local')}
+          aria-pressed={summaryDestination === 'local'}
+          className={`flex w-full items-start gap-4 rounded-2xl border p-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${summaryDestination === 'local' ? 'border-text bg-bg' : 'border-border bg-surface hover:bg-bg'}`}
+        >
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-bg text-text">
+            <LaptopMinimal className="h-5 w-5" strokeWidth={1.7} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2 text-ui font-semibold text-text">
+              Local AI
+              <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-2">On this Mac</span>
             </span>
-          </div>
-          <h1 className="text-[34px] font-semibold leading-[40px] tracking-[-0.02em] text-text">
-            Meeting notes, done for you.
-          </h1>
-          <p className="mt-3 max-w-[460px] text-[15px] leading-6 text-2">
-            MeetOdds records on your Mac, transcribes on-device, and turns the conversation into notes you can share. Nothing leaves your computer unless you say so.
-          </p>
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-2 animate-fade-in-up delay-75 motion-reduce:animate-none">
-          {highlights.map((item) => {
-            const Icon = item.icon;
-            return (
-              <span
-                key={item.label}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-caption font-medium text-2 shadow-sm"
-              >
-                <Icon className="h-3.5 w-3.5 text-accent" strokeWidth={2} />
-                {item.label}
+            <span className="mt-1 block text-caption leading-5 text-2">
+              Your audio, transcript, meeting notes and summaries stay on this Mac. MeetOdds uses its recommended built-in model.
+            </span>
+            {summaryDestination === 'local' && (
+              <span className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-2">
+                <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
+                {localModel
+                  ? `Recommended model · ${localModel}${modelSize ? ` · ${modelSize}` : ''}`
+                  : 'Checking the recommended local model…'}
+                <span className="font-medium text-text">
+                  {summaryModelDownloaded
+                    ? 'Ready on this Mac'
+                    : summaryModelProgressInfo.error
+                    ? 'Download needs attention'
+                    : summaryModelProgress > 0
+                    ? `Downloading · ${Math.round(summaryModelProgress)}%`
+                    : 'Not downloaded yet'}
+                </span>
               </span>
-            );
-          })}
-        </div>
+            )}
+          </span>
+          <span className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full border ${summaryDestination === 'local' ? 'border-text bg-text text-white' : 'border-border text-transparent'}`} aria-hidden="true">
+            {summaryDestination === 'local' && <Check className="h-3 w-3" strokeWidth={2.5} />}
+          </span>
+        </button>
 
-        <section aria-labelledby="meeting-style-title" className="mt-7 animate-fade-in-up delay-100 motion-reduce:animate-none">
-          <h2 id="meeting-style-title" className="text-center text-ui font-medium text-3">
-            When a meeting starts, what should be in front of you?
-          </h2>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            {(
-              [
-                {
-                  key: 'notes' as const,
-                  icon: FileText,
-                  title: 'I take notes while I talk',
-                  body: 'Keep the live transcript available, but start with a quieter note-taking workspace.',
-                },
-                {
-                  key: 'transcript' as const,
-                  icon: MessageSquareText,
-                  title: 'I just want the transcript',
-                  body: 'Open the live transcript drawer automatically while recording.',
-                },
-              ]
-            ).map((option) => {
-              const Icon = option.icon;
-              const selected = focusPreference === option.key;
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => chooseFocus(option.key)}
-                  aria-pressed={selected}
-                  className={`group relative rounded-2xl border p-4 text-left transition-all duration-200 ${
-                    selected
-                      ? 'border-accent bg-accent-soft shadow-[0_0_0_3px_rgba(59,110,246,0.14)]'
-                      : 'border-border bg-surface hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-16px_rgba(27,27,27,0.28)]'
-                  }`}
-                >
-                  <span
-                    className={`inline-grid h-9 w-9 place-items-center rounded-xl transition-colors duration-200 ${
-                      selected ? 'bg-accent text-white' : 'bg-bg text-2 group-hover:text-text'
-                    }`}
-                  >
-                    <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
-                  </span>
-                  {selected && (
-                    <span className="absolute right-3 top-3 inline-grid h-5 w-5 place-items-center rounded-full bg-accent text-white">
-                      <Check className="h-3 w-3" strokeWidth={2.5} />
-                    </span>
-                  )}
-                  <div className="mt-3 text-[15px] font-semibold leading-5 text-text">{option.title}</div>
-                  <p className="mt-1 text-caption leading-4 text-3">{option.body}</p>
-                </button>
-              );
-            })}
+        <button
+          type="button"
+          onClick={() => chooseDestination('chatgpt')}
+          aria-pressed={summaryDestination === 'chatgpt'}
+          className={`flex w-full items-start gap-4 rounded-2xl border p-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${summaryDestination === 'chatgpt' ? 'border-text bg-bg' : 'border-border bg-surface hover:bg-bg'}`}
+        >
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-bg text-text">
+            <Cloud className="h-5 w-5" strokeWidth={1.7} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2 text-ui font-semibold text-text">ChatGPT</span>
+            <span className="mt-1 block text-caption leading-5 text-2">
+              After each meeting, MeetOdds sends the transcript and your meeting notes to ChatGPT for a summary. Audio stays on your Mac.
+            </span>
+            {summaryDestination === 'chatgpt' && chatGPTModel && (
+              <span className="mt-3 block text-caption text-2">Available model · <span className="font-medium text-text">{chatGPTModel}</span></span>
+            )}
+          </span>
+          <span className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full border ${summaryDestination === 'chatgpt' ? 'border-text bg-text text-white' : 'border-border text-transparent'}`} aria-hidden="true">
+            {summaryDestination === 'chatgpt' && <Check className="h-3 w-3" strokeWidth={2.5} />}
+          </span>
+        </button>
+
+        {summaryDestination === 'chatgpt' && (
+          <div className="space-y-3 rounded-2xl border border-border bg-surface p-4">
+            <OpenAICodexSettings
+              onConnectionChange={setIsCodexConnected}
+              onModelsChange={setAvailableChatGPTModels}
+            />
+            {isCodexConnected && !chatGPTModel && (
+              <div className="flex flex-wrap items-center justify-between gap-3 text-caption text-2">
+                <span>No available ChatGPT summary model has been confirmed.</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => void refreshChatGPTModels()}>
+                  Refresh model list
+                </Button>
+              </div>
+            )}
           </div>
-        </section>
+        )}
 
-        <div className="mt-7 flex flex-col items-center animate-fade-in-up delay-150 motion-reduce:animate-none">
+        {selectionError && <p role="alert" className="text-caption text-danger">{selectionError}</p>}
+        {error && <p role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-caption text-danger">{error}</p>}
+
+        <div className="flex flex-wrap items-center justify-between gap-4 pt-3">
+          <span className="text-caption text-2">1 of 2 · You can change this later</span>
           <Button
-            onClick={goNext}
-            className="h-11 w-full max-w-[300px] rounded-xl bg-accent text-[15px] font-semibold text-white shadow-[0_10px_24px_-10px_rgba(59,110,246,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:opacity-95 active:translate-y-0"
+            type="button"
+            onClick={() => void handleContinue()}
+            disabled={isSaving || (summaryDestination === 'chatgpt' && !isChatGPTReady) || (summaryDestination === 'local' && !localModel)}
+            className="h-11 min-w-[190px] rounded-xl bg-text px-5 text-ui font-semibold text-surface hover:opacity-90"
           >
-            Get started
-            <ArrowRight className="ml-1.5 h-4 w-4" strokeWidth={2} />
+            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {isSaving
+              ? 'Saving setup…'
+              : summaryDestination === 'chatgpt'
+              ? 'Connect & allow summaries'
+              : 'Continue'}
+            {!isSaving && <ArrowRight className="ml-2 h-4 w-4" strokeWidth={1.8} />}
           </Button>
-          <p className="mt-3 text-caption text-3">Step 1 of 4 · about two minutes · no account needed</p>
         </div>
+        {summaryDestination === 'chatgpt' && !isChatGPTReady && (
+          <p className="text-right text-caption text-2">
+            Sign in and confirm an available model before continuing.
+          </p>
+        )}
       </div>
     </OnboardingContainer>
   );
