@@ -321,6 +321,9 @@ useEffect(() => {
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
+    // The last array this listener produced is fully sorted and its sequence_id set is
+    // known; other writers (reload sync, addTranscript) make prev differ from it.
+    let lastMerged: { list: Transcript[]; ids: Set<number | undefined> } | null = null;
 
     const processBufferedTranscripts = (forceFlush = false) => {
       const sortedTranscripts: Transcript[] = [];
@@ -364,12 +367,13 @@ useEffect(() => {
       }
 
       // Sort both stale and recent transcripts by chunk_start_time, then by sequence_id
+      const compareTranscripts = (a: Transcript, b: Transcript) => {
+        const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
+        if (chunkTimeDiff !== 0) return chunkTimeDiff;
+        return (a.sequence_id || 0) - (b.sequence_id || 0);
+      };
       const sortTranscripts = (transcripts: Transcript[]) => {
-        return transcripts.sort((a, b) => {
-          const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
-          if (chunkTimeDiff !== 0) return chunkTimeDiff;
-          return (a.sequence_id || 0) - (b.sequence_id || 0);
-        });
+        return transcripts.sort(compareTranscripts);
       };
 
       const sortedStaleTranscripts = sortTranscripts(staleTranscripts);
@@ -380,8 +384,9 @@ useEffect(() => {
 
       if (allNewTranscripts.length > 0) {
         setTranscripts(prev => {
-          // Create a set of existing sequence_ids for deduplication
-          const existingSequenceIds = new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
+          const known = lastMerged?.list === prev ? lastMerged : null;
+          // Create a set of existing sequence_ids for deduplication (reused when prev is known)
+          const existingSequenceIds = known ? known.ids : new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
 
           // Filter out any new transcripts that already exist
           const uniqueNewTranscripts = allNewTranscripts.filter(transcript =>
@@ -397,12 +402,17 @@ useEffect(() => {
           // Merge with existing transcripts, maintaining chronological order
           const combined = [...prev, ...uniqueNewTranscripts];
 
-          // Sort by chunk_start_time first, then by sequence_id
-          return combined.sort((a, b) => {
-            const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
-            if (chunkTimeDiff !== 0) return chunkTimeDiff;
-            return (a.sequence_id || 0) - (b.sequence_id || 0);
+          // Sort by chunk_start_time first, then by sequence_id. In-order arrivals onto a
+          // known-sorted list are already sorted (a stable sort would be the identity).
+          const inOrder = known !== null && uniqueNewTranscripts.every((transcript, i) => {
+            const before = combined[prev.length + i - 1];
+            return !before || compareTranscripts(before, transcript) <= 0;
           });
+          if (!inOrder) combined.sort(compareTranscripts);
+
+          uniqueNewTranscripts.forEach(transcript => existingSequenceIds.add(transcript.sequence_id));
+          lastMerged = { list: combined, ids: existingSequenceIds };
+          return combined;
         });
 
         // Log the processing summary
