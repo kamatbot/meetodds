@@ -43,6 +43,9 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        /// Emit `delta` lines with the new text while generating (live translation).
+        #[serde(default)]
+        stream: bool,
     },
     Ping {
         id: Option<u64>,
@@ -61,6 +64,12 @@ enum Response {
         id: Option<u64>,
         text: String,
         error: Option<String>,
+    },
+    /// Text generated since the previous delta for request `id`; the final `response`
+    /// still carries the whole text.
+    Delta {
+        id: Option<u64>,
+        text: String,
     },
     Pong {
         id: Option<u64>,
@@ -378,6 +387,7 @@ impl ModelState {
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
         mut cancel_requested: impl FnMut() -> bool,
+        mut on_delta: Option<&mut dyn FnMut(&str)>,
     ) -> Result<String> {
         let start_time = Instant::now();
         let model = self.model.as_ref().context("Model not loaded")?;
@@ -438,8 +448,7 @@ impl ModelState {
 
         let n_prompt_tokens = last_index + 1;
         let mut n_cur = n_prompt_tokens;
-        let mut decoder = encoding_rs::UTF_8.new_decoder();
-        let mut output = String::new();
+        let mut output = TextStream::new(&stop_tokens);
 
         eprintln!("🔄 Starting generation (max_tokens: {})", max_tokens);
 
@@ -504,7 +513,7 @@ impl ModelState {
             if model.is_eog_token(token) {
                 eprintln!(
                     "✓ End-of-generation token reached (generated {} chars)",
-                    output.len()
+                    output.text.len()
                 );
                 break;
             }
@@ -522,27 +531,11 @@ impl ModelState {
             }
             .context("Failed to convert token to bytes")?;
 
-            let mut token_text = String::with_capacity(32);
-            let _ = decoder.decode_to_string(&output_bytes, &mut token_text, false);
-            output.push_str(&token_text);
-
-            // Check for model-specific stop tokens
-            let mut should_stop = false;
-            for stop_token in &stop_tokens {
-                if output.contains(stop_token) {
-                    eprintln!(
-                        "✓ Stop token '{}' detected (generated {} chars)",
-                        stop_token,
-                        output.len()
-                    );
-                    // Remove the stop token from output
-                    output = output.replace(stop_token, "").trim_end().to_string();
-                    should_stop = true;
-                    break;
-                }
-            }
-            if should_stop {
+            if output.push(&output_bytes) {
                 break;
+            }
+            if let (Some(on_delta), Some(delta)) = (on_delta.as_mut(), output.take_delta()) {
+                on_delta(&delta);
             }
 
             batch.clear();
@@ -574,8 +567,82 @@ impl ModelState {
         eprintln!("   • Speed: {:.2} tokens/sec", tokens_per_sec);
 
         self.update_activity();
-        Ok(output)
+        Ok(output.text)
     }
+}
+
+/// Generated text, decoded token by token. The UTF-8 decoder buffers a character split
+/// across tokens, and deltas hold back a tail that may still become a stop token.
+struct TextStream<'a> {
+    decoder: encoding_rs::Decoder,
+    text: String,
+    sent: usize,
+    stop_tokens: &'a [String],
+}
+
+impl<'a> TextStream<'a> {
+    fn new(stop_tokens: &'a [String]) -> Self {
+        Self {
+            decoder: encoding_rs::UTF_8.new_decoder(),
+            text: String::new(),
+            sent: 0,
+            stop_tokens,
+        }
+    }
+
+    /// Appends one token's bytes. On a stop token, removes it (and trailing whitespace)
+    /// and returns true.
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        // decode_to_string only writes into spare capacity; long pieces were truncated.
+        let needed = self
+            .decoder
+            .max_utf8_buffer_length(bytes.len())
+            .unwrap_or(bytes.len() * 3 + 4);
+        self.text.reserve(needed);
+        let _ = self.decoder.decode_to_string(bytes, &mut self.text, false);
+
+        for stop_token in self.stop_tokens {
+            if self.text.contains(stop_token.as_str()) {
+                eprintln!(
+                    "✓ Stop token '{}' detected (generated {} chars)",
+                    stop_token,
+                    self.text.len()
+                );
+                self.text = self.text.replace(stop_token.as_str(), "").trim_end().to_string();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Text not handed out yet, minus a tail that is a proper prefix of a stop token.
+    fn take_delta(&mut self) -> Option<String> {
+        let unsent = &self.text[self.sent..];
+        let held = self
+            .stop_tokens
+            .iter()
+            .map(|stop| stop_prefix_len(unsent, stop))
+            .max()
+            .unwrap_or(0);
+        let end = self.text.len() - held;
+        if end <= self.sent {
+            return None;
+        }
+        let delta = self.text[self.sent..end].to_string();
+        self.sent = end;
+        Some(delta)
+    }
+}
+
+/// Length of the longest suffix of `text` that is a proper prefix of `stop`.
+fn stop_prefix_len(text: &str, stop: &str) -> usize {
+    (1..stop.len().min(text.len() + 1))
+        .rev()
+        .find(|&n| {
+            let start = text.len() - n;
+            text.is_char_boundary(start) && stop.as_bytes().starts_with(&text.as_bytes()[start..])
+        })
+        .unwrap_or(0)
 }
 
 /// Context size for one request: the model's full `context_size` unless the request asks
@@ -702,6 +769,7 @@ fn main() -> Result<()> {
                 repeat_penalty,
                 penalty_last_n,
                 stop_tokens,
+                stream,
             }) => {
                 if take_cancel(&rx, &mut pending, id) {
                     eprintln!("✋ Generation cancelled before start");
@@ -740,10 +808,24 @@ fn main() -> Result<()> {
                     }
                 }
 
+                let mut send_delta = |text: &str| {
+                    let _ = send_response(&Response::Delta {
+                        id,
+                        text: text.to_string(),
+                    });
+                };
+                let on_delta: Option<&mut dyn FnMut(&str)> = if stream { Some(&mut send_delta) } else { None };
+
                 // Generate response with sampling parameters
-                match state.generate(prompt, max_tokens, n_ctx, sampling, stop_tokens, || {
-                    take_cancel(&rx, &mut pending, id)
-                }) {
+                match state.generate(
+                    prompt,
+                    max_tokens,
+                    n_ctx,
+                    sampling,
+                    stop_tokens,
+                    || take_cancel(&rx, &mut pending, id),
+                    on_delta,
+                ) {
                     Ok(text) => {
                         send_response(&Response::Response {
                             id,
@@ -829,6 +911,67 @@ mod tests {
         assert_eq!(request_n_ctx(32768, Some(2048), 120, 512), 2048, "floor");
         assert_eq!(request_n_ctx(32768, Some(2048), 1700, 512), 2560, "grown, 512-aligned");
         assert_eq!(request_n_ctx(4096, Some(2048), 9000, 512), 4096, "capped");
+    }
+
+    /// Feeds token pieces like the generate loop; returns (deltas, final text, stopped).
+    fn stream_all(pieces: &[&[u8]], stop_tokens: &[String]) -> (Vec<String>, String, bool) {
+        let mut stream = TextStream::new(stop_tokens);
+        let mut deltas = Vec::new();
+        for piece in pieces {
+            if stream.push(piece) {
+                return (deltas, stream.text, true);
+            }
+            deltas.extend(stream.take_delta());
+        }
+        (deltas, stream.text, false)
+    }
+
+    #[test]
+    fn deltas_carry_only_complete_utf8_characters() {
+        for text in ["नमस्ते, आज की बैठक", "¿Qué tal, señor Muñoz?", "会议现在开始。よろしく"] {
+            // Worst case: every byte is its own token piece.
+            let pieces: Vec<&[u8]> = text.as_bytes().chunks(1).collect();
+            let (deltas, final_text, stopped) = stream_all(&pieces, &[]);
+            assert!(!stopped);
+            assert_eq!(deltas.concat(), text);
+            assert_eq!(final_text, text);
+            assert!(deltas.iter().all(|d| !d.is_empty() && !d.contains('\u{FFFD}')), "{deltas:?}");
+            assert_eq!(deltas.len(), text.chars().count(), "one delta per completed character");
+        }
+    }
+
+    #[test]
+    fn deltas_hold_back_a_possible_stop_token() {
+        let stop = ["<|im_end|>".to_string()];
+        let (deltas, final_text, stopped) = stream_all(&[b"Hola ", b"<", b"|im", b"_end", b"|>", b"junk"], &stop);
+        assert!(stopped);
+        assert_eq!(deltas, ["Hola "]);
+        assert_eq!(final_text, "Hola", "final text drops the stop token and trailing space");
+
+        let (deltas, _, stopped) = stream_all(&[b"a <", b"b"], &stop);
+        assert!(!stopped);
+        assert_eq!(deltas.concat(), "a <b", "a false alarm is released once it can't match");
+    }
+
+    #[test]
+    fn long_token_pieces_are_not_truncated() {
+        let piece = "=".repeat(200);
+        let (deltas, final_text, _) = stream_all(&[piece.as_bytes()], &[]);
+        assert_eq!(final_text, piece);
+        assert_eq!(deltas.concat(), piece);
+    }
+
+    #[test]
+    fn stream_is_opt_in_and_deltas_echo_the_id() {
+        let request: Request = serde_json::from_str(r#"{"type":"generate","id":3,"prompt":"p"}"#).unwrap();
+        assert!(matches!(request, Request::Generate { stream: false, .. }), "summaries don't stream");
+        let request: Request =
+            serde_json::from_str(r#"{"type":"generate","id":3,"prompt":"p","stream":true}"#).unwrap();
+        assert!(matches!(request, Request::Generate { stream: true, .. }));
+        assert_eq!(
+            serde_json::to_string(&Response::Delta { id: Some(3), text: "Ho".into() }).unwrap(),
+            r#"{"type":"delta","id":3,"text":"Ho"}"#
+        );
     }
 
     #[test]

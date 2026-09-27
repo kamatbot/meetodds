@@ -43,6 +43,9 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        /// Ask for `delta` lines while generating
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        stream: bool,
     },
 }
 
@@ -196,13 +199,14 @@ pub async fn generate_with_builtin_with_sampling(
         max_tokens,
         cancellation_token,
         sampling_override,
-        false,
+        None,
     )
     .await
 }
 
-/// Live translation: cancelling aborts just this generation in the helper instead of
-/// restarting it, so a superseded caption frees the model for the next one.
+/// Live translation: streams the raw generated text to `on_delta`. Cancelling aborts just
+/// this generation in the helper instead of restarting it, so a superseded caption frees
+/// the model for the next one.
 pub async fn translate_with_builtin(
     app_data_dir: &PathBuf,
     model_name: &str,
@@ -210,6 +214,7 @@ pub async fn translate_with_builtin(
     user_prompt: &str,
     max_tokens: Option<u32>,
     cancellation_token: &CancellationToken,
+    on_delta: &mut (dyn FnMut(&str) + Send),
 ) -> Result<String> {
     generate_builtin(
         app_data_dir,
@@ -219,7 +224,7 @@ pub async fn translate_with_builtin(
         max_tokens,
         Some(cancellation_token),
         None,
-        true,
+        Some(on_delta),
     )
     .await
 }
@@ -232,7 +237,8 @@ async fn generate_builtin(
     max_tokens: Option<u32>,
     cancellation_token: Option<&CancellationToken>,
     sampling_override: Option<BuiltinSamplingOverride>,
-    live_translation: bool,
+    // Some for live translation: a small streamed request, cancelled without a restart
+    live_translation: Option<&mut (dyn FnMut(&str) + Send)>,
 ) -> Result<String> {
     let sampling_override = sampling_override
         .map(BuiltinSamplingOverride::validated)
@@ -291,7 +297,7 @@ async fn generate_builtin(
         max_tokens: Some(max_tokens.map_or(models::DEFAULT_MAX_TOKENS, |value| value as i32)),
         context_size: Some(model_def.context_size),
         // A 32k KV cache per caption dominates latency; size live translations to fit.
-        n_ctx: live_translation.then_some(models::LIVE_TRANSLATION_MIN_CTX),
+        n_ctx: live_translation.is_some().then_some(models::LIVE_TRANSLATION_MIN_CTX),
         model_path: Some(model_path.to_string_lossy().to_string()),
         temperature: Some(sampling.temperature),
         top_k: Some(sampling.top_k),
@@ -301,6 +307,7 @@ async fn generate_builtin(
         repeat_penalty: Some(sampling.repeat_penalty),
         penalty_last_n: Some(sampling.penalty_last_n),
         stop_tokens: Some(sampling.stop_tokens),
+        stream: live_translation.is_some(),
     };
 
     let request_json = serde_json::to_string(&request)?;
@@ -311,9 +318,9 @@ async fn generate_builtin(
     log::info!("Sending generation request to sidecar");
 
     // Race between send_request and cancellation token
-    let response_json = if let (true, Some(token)) = (live_translation, cancellation_token) {
+    let response_json = if let (Some(on_delta), Some(token)) = (live_translation, cancellation_token) {
         manager
-            .send_request_cancellable(request_id, request_json, timeout, token)
+            .send_request_cancellable(request_id, request_json, timeout, token, on_delta)
             .await?
     } else if let Some(token) = cancellation_token {
         tokio::select! {
@@ -431,12 +438,14 @@ mod tests {
             repeat_penalty: Some(1.05),
             penalty_last_n: Some(256),
             stop_tokens: Some(vec!["<end_of_turn>".to_string()]),
+            stream: false,
         };
 
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"type\":\"generate\""));
         assert!(json.contains("\"id\":7"));
         assert!(!json.contains("n_ctx"), "summaries use the full model context");
+        assert!(!json.contains("stream"), "summaries are not streamed");
         assert!(json.contains("\"prompt\":\"test prompt\""));
         assert!(json.contains("\"max_tokens\":512"));
         assert!(json.contains("\"temperature\":1.0"));

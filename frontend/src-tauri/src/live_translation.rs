@@ -1033,12 +1033,17 @@ async fn translate_with_candidate<R: Runtime>(
         if last_emit.is_some_and(|at| at.elapsed() < DELTA_EMIT_INTERVAL) {
             return;
         }
+        let text = clean_translation_output(translated);
+        // A lone newline or opening fence would blank the caption until real words arrive.
+        if text.is_empty() {
+            return;
+        }
         last_emit = Some(Instant::now());
         let _ = app.emit(
             "live-translation-delta",
             serde_json::json!({
                 "requestId": emit_request_id,
-                "text": clean_translation_output(translated),
+                "text": text,
                 "provider": provider_name,
                 "model": model_name,
                 "firstWordLatencyMs": first_word_ms,
@@ -1052,7 +1057,20 @@ async fn translate_with_candidate<R: Runtime>(
         let app_data_dir = app_data_dir
             .as_ref()
             .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
-        // Cancelling (superseded caption) aborts only this generation and frees the permit.
+        // Streams like the cloud providers. Cancelling (superseded caption) aborts only this
+        // generation in the helper and frees the permit.
+        let mut streamed = String::new();
+        let mut first_word_ms: Option<u64> = None;
+        let mut on_delta = |delta: &str| {
+            if delta.is_empty() {
+                return;
+            }
+            streamed.push_str(delta);
+            let first = *first_word_ms.get_or_insert_with(|| {
+                attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64
+            });
+            emit_text(&streamed, first);
+        };
         let future = crate::summary::summary_engine::translate_with_builtin(
             app_data_dir,
             &config.model_name,
@@ -1060,6 +1078,7 @@ async fn translate_with_candidate<R: Runtime>(
             &user_prompt,
             max_tokens,
             cancellation_token,
+            &mut on_delta,
         );
         let result = timeout(budgets.attempt, future)
             .await
@@ -1070,8 +1089,8 @@ async fn translate_with_candidate<R: Runtime>(
                 )
             })?
             .map_err(|error| error.to_string())?;
-        let first = attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-        emit_text(&result, first);
+        let first = first_word_ms
+            .unwrap_or_else(|| attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64);
         return Ok((result, first));
     }
 
@@ -1771,6 +1790,50 @@ mod tests {
 
         clear_provider_health().await;
         assert!(!provider_is_cooling_down(&config).await);
+    }
+
+    /// Real model and helper, e.g. `MEETODDS_LLAMA_HELPER=target/release/llama-helper
+    /// cargo test --lib -- --ignored builtin_translation_streams --nocapture`
+    #[tokio::test]
+    #[ignore = "needs a release llama-helper and the downloaded Qwen 3.5 4B model"]
+    async fn builtin_translation_streams_before_completion() {
+        let app_data_dir = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+            .join("Library/Application Support/com.meetodds.app");
+        let text = "हमें शुक्रवार से पहले रिपोर्ट पूरी करनी होगी, और फिर ग्राहक को भेजनी होगी।";
+        let (system, user) =
+            build_translation_prompts(text, None, resolve_language("en").unwrap(), None, None, None);
+        for run in ["cold", "warm"] {
+            let started = Instant::now();
+            let mut streamed = String::new();
+            let mut deltas = Vec::new();
+            let result = crate::summary::summary_engine::translate_with_builtin(
+                &app_data_dir,
+                "qwen3.5:4b",
+                &system,
+                &user,
+                Some(LIVE_TRANSLATION_MAX_TOKENS),
+                &CancellationToken::new(),
+                &mut |delta| {
+                    streamed.push_str(delta);
+                    deltas.push((clean_translation_output(&streamed), started.elapsed()));
+                },
+            )
+            .await
+            .unwrap();
+            let done = started.elapsed();
+            println!(
+                "{run}: {} deltas, first {:?} ({:?}), done {:?}: {:?}",
+                deltas.len(),
+                deltas[0].1,
+                deltas[0].0,
+                done,
+                result
+            );
+            assert!(deltas.len() > 3, "{deltas:?}");
+            assert!(deltas[0].1 + Duration::from_millis(100) < done, "first delta only at {:?}", deltas[0].1);
+            assert_eq!(deltas.last().unwrap().0, clean_translation_output(&result), "no jump at the end");
+        }
+        crate::summary::summary_engine::force_shutdown_sidecar().await.unwrap();
     }
 
     #[test]

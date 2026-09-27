@@ -364,14 +364,24 @@ impl SidecarManager {
 
     /// Send a request (whose JSON carries `id`) and wait for the reply with that id
     pub async fn send_request(&self, id: u64, request_json: String, timeout: Duration) -> Result<String> {
+        self.send_request_with_deltas(id, request_json, timeout, &mut |_| {}).await
+    }
+
+    async fn send_request_with_deltas(
+        &self,
+        id: u64,
+        request_json: String,
+        timeout: Duration,
+        on_delta: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<String> {
         // Track active request
         let _guard = RequestGuard::new(self.active_request_count.clone());
         let _exchange = self.exchange.lock().await;
 
-        self.write_line(&request_json).await?;
+        write_line(&self.stdin_writer, &request_json).await?;
 
         // Read response from stdout with timeout
-        match tokio::time::timeout(timeout, self.read_response(id)).await {
+        match tokio::time::timeout(timeout, self.read_response(id, on_delta)).await {
             Ok(Ok(response)) => {
                 self.update_activity().await;
                 Ok(response)
@@ -388,21 +398,23 @@ impl SidecarManager {
         }
     }
 
-    /// `send_request`, but cancelling `token` stops waiting at once and asks the helper
-    /// to abort just this generation; the process and its loaded model are kept.
+    /// `send_request` for a streamed request: each `delta` line's text goes to `on_delta`.
+    /// Cancelling `token` stops waiting at once and asks the helper to abort just this
+    /// generation; the process and its loaded model are kept.
     pub async fn send_request_cancellable(
         &self,
         id: u64,
         request_json: String,
         timeout: Duration,
         token: &CancellationToken,
+        on_delta: &mut (dyn FnMut(&str) + Send),
     ) -> Result<String> {
         tokio::select! {
-            result = self.send_request(id, request_json, timeout) => result,
+            result = self.send_request_with_deltas(id, request_json, timeout, on_delta) => result,
             _ = token.cancelled() => {
                 // The helper still answers `id` (as cancelled); the next reader discards it.
                 let cancel = serde_json::json!({"type": "cancel", "id": id}).to_string();
-                if let Err(e) = self.write_line(&cancel).await {
+                if let Err(e) = write_line(&self.stdin_writer, &cancel).await {
                     log::debug!("Failed to send cancel to sidecar: {}", e);
                 }
                 Err(anyhow!("Generation cancelled"))
@@ -410,32 +422,13 @@ impl SidecarManager {
         }
     }
 
-    /// Write one request line to the helper's stdin
-    async fn write_line(&self, line: &str) -> Result<()> {
-        let mut stdin_lock = self.stdin_writer.lock().await;
-        let stdin = stdin_lock
-            .as_mut()
-            .ok_or_else(|| anyhow!("Sidecar not running"))?;
-
-        stdin
-            .write_all(line.as_bytes())
-            .await
-            .context("Failed to write request to stdin")?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .context("Failed to write newline")?;
-        stdin.flush().await.context("Failed to flush stdin")?;
-        Ok(())
-    }
-
     /// Read the reply for request `id` from stdout
-    async fn read_response(&self, id: u64) -> Result<String> {
+    async fn read_response(&self, id: u64, on_delta: &mut (dyn FnMut(&str) + Send)) -> Result<String> {
         let mut stdout_lock = self.stdout_reader.lock().await;
         let reader = stdout_lock
             .as_mut()
             .ok_or_else(|| anyhow!("Sidecar not running"))?;
-        read_reply(reader, id).await
+        read_reply(reader, id, on_delta).await
     }
 
     /// Send ping to keep sidecar alive
@@ -450,10 +443,10 @@ impl SidecarManager {
 
         // Note: We don't use send_request here to avoid incrementing active_request_count
         // for internal health checks, as that would prevent graceful shutdown
-        self.write_line(&request).await?;
+        write_line(&self.stdin_writer, &request).await?;
 
         // Read response
-        let response = tokio::time::timeout(timeout, self.read_response(id)).await??;
+        let response = tokio::time::timeout(timeout, self.read_response(id, &mut |_| {})).await??;
 
         let resp: serde_json::Value = serde_json::from_str(&response)?;
         if resp.get("type").and_then(|t| t.as_str()) == Some("pong") {
@@ -685,9 +678,33 @@ impl SidecarManager {
     }
 }
 
-/// Read lines until the reply for `id`. Lines for other ids (e.g. the late reply to a
-/// request whose caller gave up) or without one are discarded.
-async fn read_reply(reader: &mut (impl AsyncBufRead + Unpin), id: u64) -> Result<String> {
+/// Write one request line to the helper's stdin
+async fn write_line(stdin_writer: &Mutex<Option<ChildStdin>>, line: &str) -> Result<()> {
+    let mut stdin_lock = stdin_writer.lock().await;
+    let stdin = stdin_lock
+        .as_mut()
+        .ok_or_else(|| anyhow!("Sidecar not running"))?;
+
+    stdin
+        .write_all(line.as_bytes())
+        .await
+        .context("Failed to write request to stdin")?;
+    stdin
+        .write_all(b"\n")
+        .await
+        .context("Failed to write newline")?;
+    stdin.flush().await.context("Failed to flush stdin")?;
+    Ok(())
+}
+
+/// Read lines until the reply for `id`, passing the text of its `delta` lines to
+/// `on_delta`. Lines for other ids (e.g. the late reply to a request whose caller gave
+/// up) or without one are discarded.
+async fn read_reply(
+    reader: &mut (impl AsyncBufRead + Unpin),
+    id: u64,
+    on_delta: &mut (dyn FnMut(&str) + Send),
+) -> Result<String> {
     loop {
         let mut line = String::new();
         reader
@@ -699,13 +716,20 @@ async fn read_reply(reader: &mut (impl AsyncBufRead + Unpin), id: u64) -> Result
             return Err(anyhow!("Sidecar closed stdout (process may have crashed)"));
         }
 
-        let reply_id = serde_json::from_str::<serde_json::Value>(&line)
-            .ok()
-            .and_then(|v| v.get("id")?.as_u64());
-        if reply_id == Some(id) {
-            return Ok(line.trim().to_string());
+        let reply = serde_json::from_str::<serde_json::Value>(&line).ok();
+        let reply_id = reply.as_ref().and_then(|v| v.get("id")?.as_u64());
+        let delta = reply
+            .as_ref()
+            .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("delta"))
+            .map(|v| v.get("text").and_then(|t| t.as_str()).unwrap_or_default());
+        match (reply_id == Some(id), delta) {
+            (true, Some(text)) => on_delta(text),
+            (true, None) => return Ok(line.trim().to_string()),
+            (false, Some(_)) => {}
+            (false, None) => {
+                log::debug!("Discarding sidecar reply for request {:?} while waiting for {}", reply_id, id)
+            }
         }
-        log::debug!("Discarding sidecar reply for request {:?} while waiting for {}", reply_id, id);
     }
 }
 
@@ -730,19 +754,41 @@ mod tests {
             {\"type\":\"goodbye\"}\n\
             not json\n\
             {\"type\":\"response\",\"id\":2,\"text\":\"mine\",\"error\":null}\n";
-        let reply = read_reply(&mut stdout, 2).await.unwrap();
+        let reply = read_reply(&mut stdout, 2, &mut |_| {}).await.unwrap();
         assert!(reply.contains("\"text\":\"mine\""));
-        assert!(read_reply(&mut stdout, 3).await.is_err(), "EOF must be an error");
+        assert!(read_reply(&mut stdout, 3, &mut |_| {}).await.is_err(), "EOF must be an error");
+    }
+
+    #[tokio::test]
+    async fn read_reply_forwards_only_its_own_deltas() {
+        let mut stdout: &[u8] = "{\"type\":\"delta\",\"id\":1,\"text\":\"stale\"}\n\
+            {\"type\":\"delta\",\"id\":2,\"text\":\"नम\"}\n\
+            {\"type\":\"delta\",\"id\":1,\"text\":\"stale\"}\n\
+            {\"type\":\"delta\",\"id\":2,\"text\":\"स्ते\"}\n\
+            {\"type\":\"response\",\"id\":2,\"text\":\"नमस्ते\",\"error\":null}\n"
+            .as_bytes();
+        let mut deltas = Vec::new();
+        let reply = read_reply(&mut stdout, 2, &mut |text| deltas.push(text.to_string()))
+            .await
+            .unwrap();
+        assert_eq!(deltas, ["नम", "स्ते"]);
+        assert!(reply.contains("\"type\":\"response\""), "{reply}");
     }
 
     /// Stand-in for llama-helper: answers requests in order, echoing their id,
-    /// taking 0.5 s per generation.
+    /// taking 0.5 s per generation. Streamed requests first get a delta for another id,
+    /// then two of their own. Every line it receives is appended to `<script>.log`.
     #[cfg(unix)]
     const FAKE_HELPER: &str = r#"#!/bin/sh
 while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$0.log"
   id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"type":"ping"'*) echo "{\"type\":\"pong\",\"id\":$id}" ;;
+    *'"stream":true'*)
+      echo '{"type":"delta","id":999,"text":"other"}'
+      for part in re ply; do sleep 0.1; echo "{\"type\":\"delta\",\"id\":$id,\"text\":\"$part\"}"; done
+      sleep 0.3; echo "{\"type\":\"response\",\"id\":$id,\"text\":\"reply-$id\",\"error\":null}" ;;
     *'"type":"generate"'*) sleep 0.5; echo "{\"type\":\"response\",\"id\":$id,\"text\":\"reply-$id\",\"error\":null}" ;;
     *'"type":"shutdown"'*) echo '{"type":"goodbye"}'; exit 0 ;;
   esac
@@ -758,6 +804,7 @@ done
             name
         ));
         std::fs::write(&script, FAKE_HELPER).unwrap();
+        let _ = std::fs::remove_file(helper_log(&script));
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let manager = SidecarManager {
             child_process: Arc::new(Mutex::new(None)),
@@ -782,6 +829,89 @@ done
     #[cfg(unix)]
     fn generate_json(id: u64) -> String {
         serde_json::json!({"type": "generate", "id": id, "prompt": "p"}).to_string()
+    }
+
+    #[cfg(unix)]
+    fn stream_json(id: u64) -> String {
+        serde_json::json!({"type": "generate", "id": id, "prompt": "p", "stream": true}).to_string()
+    }
+
+    #[cfg(unix)]
+    fn helper_log(script: &std::path::Path) -> PathBuf {
+        PathBuf::from(format!("{}.log", script.display()))
+    }
+
+    /// Waits up to 2 s for the fake helper to have received a cancel for `id`.
+    #[cfg(unix)]
+    async fn helper_got_cancel(manager: &SidecarManager, id: u64) -> bool {
+        let cancel = serde_json::json!({"type": "cancel", "id": id});
+        for _ in 0..40 {
+            let log = std::fs::read_to_string(helper_log(&manager.helper_binary_path)).unwrap_or_default();
+            if log.lines().any(|line| serde_json::from_str::<serde_json::Value>(line).ok() == Some(cancel.clone())) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn streamed_request_delivers_its_deltas_before_the_reply() {
+        let manager = spawn_fake_helper("stream").await;
+        let id = manager.next_request_id();
+        let started = Instant::now();
+        let mut deltas = Vec::new();
+        let reply = manager
+            .send_request_cancellable(id, stream_json(id), Duration::from_secs(5), &CancellationToken::new(), &mut |text| {
+                deltas.push((text.to_string(), started.elapsed()))
+            })
+            .await
+            .unwrap();
+        let done = started.elapsed();
+        assert!(reply.contains(&format!("\"text\":\"reply-{id}\"")), "{reply}");
+        assert_eq!(deltas.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["re", "ply"], "other ids' deltas ignored");
+        assert!(deltas[0].1 + Duration::from_millis(250) < done, "first delta {:?} vs reply {:?}", deltas[0].1, done);
+        assert!(!helper_got_cancel(&manager, id).await, "an answered request is not cancelled");
+        manager.shutdown().await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_mid_stream_sends_cancel_and_next_request_is_clean() {
+        let manager = Arc::new(spawn_fake_helper("stream-cancel").await);
+        let token = CancellationToken::new();
+        let id = manager.next_request_id();
+        let (first_tx, first_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn({
+            let (manager, token) = (manager.clone(), token.clone());
+            async move {
+                let mut first_tx = Some(first_tx);
+                manager
+                    .send_request_cancellable(id, stream_json(id), Duration::from_secs(5), &token, &mut |_| {
+                        if let Some(tx) = first_tx.take() {
+                            let _ = tx.send(());
+                        }
+                    })
+                    .await
+            }
+        });
+        first_rx.await.unwrap();
+        token.cancel();
+        assert!(task.await.unwrap().is_err());
+        assert!(helper_got_cancel(&manager, id).await, "helper was not told to stop {id}");
+
+        let next = manager.next_request_id();
+        let mut deltas = Vec::new();
+        let reply = manager
+            .send_request_cancellable(next, stream_json(next), Duration::from_secs(5), &CancellationToken::new(), &mut |t| {
+                deltas.push(t.to_string())
+            })
+            .await
+            .unwrap();
+        assert!(reply.contains(&format!("\"text\":\"reply-{next}\"")), "{reply}");
+        assert_eq!(deltas, ["re", "ply"], "no leftover deltas from the cancelled request");
+        manager.shutdown().await.unwrap();
     }
 
     #[cfg(unix)]
@@ -825,7 +955,7 @@ done
             async move {
                 let _permit = pool.acquire().await.unwrap();
                 manager
-                    .send_request_cancellable(id, generate_json(id), Duration::from_secs(5), &token)
+                    .send_request_cancellable(id, generate_json(id), Duration::from_secs(5), &token, &mut |_| {})
                     .await
             }
         });
