@@ -324,6 +324,9 @@ pub const DEFAULT_MAX_TOKENS: i32 = 4096;
 /// Idle timeout for sidecar (seconds) - can be overridden via LLAMA_IDLE_TIMEOUT env var
 pub const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300; // 5 minutes
 
+/// Minimum llama context for a live translation request (vs. the model's context_size)
+pub const LIVE_TRANSLATION_MIN_CTX: u32 = 2048;
+
 /// Generation timeout (how long to wait for a response)
 pub const GENERATION_TIMEOUT_SECS: u64 = 900; // 15 minutes
 

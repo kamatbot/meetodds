@@ -30,6 +30,9 @@ enum Request {
         prompt: String,
         max_tokens: Option<i32>,
         context_size: Option<u32>,
+        /// Ask for a smaller llama context than `context_size` (which stays the model
+        /// load key). Grown to fit prompt + max_tokens; see `request_n_ctx`.
+        n_ctx: Option<u32>,
         model_path: Option<String>,
         // Sampling parameters
         temperature: Option<f32>,
@@ -371,6 +374,7 @@ impl ModelState {
         &mut self,
         prompt: String,
         max_tokens: i32,
+        n_ctx: Option<u32>,
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
         mut cancel_requested: impl FnMut() -> bool,
@@ -387,11 +391,26 @@ impl ModelState {
             })
             .unwrap_or(2);
 
+        let tokens_list = model
+            .str_to_token(&prompt, AddBos::Always)
+            .with_context(|| "failed to tokenize prompt")?;
+
+        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
+
+        // Full-size requests (summaries) keep one batch as large as the context.
+        let n_ctx = request_n_ctx(self.context_size, n_ctx, tokens_list.len(), max_tokens);
+        let n_batch = if n_ctx < self.context_size {
+            n_ctx.min(512)
+        } else {
+            n_ctx
+        };
+
+        // ponytail: a fresh context (KV cache) per request. Next step is one persistent
+        // context reusing the shared prompt prefix, but LlamaContext borrows the model,
+        // so ModelState would become self-referential.
         let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(Some(
-                NonZeroU32::new(self.context_size).context("Invalid ctx size")?,
-            ))
-            .with_n_batch(self.context_size)
+            .with_n_ctx(Some(NonZeroU32::new(n_ctx).context("Invalid ctx size")?))
+            .with_n_batch(n_batch)
             .with_n_threads(threads)
             .with_n_threads_batch(threads);
 
@@ -399,28 +418,25 @@ impl ModelState {
             .new_context(&self.backend, ctx_params)
             .context("unable to create the llama_context")?;
 
-        let tokens_list = model
-            .str_to_token(&prompt, AddBos::Always)
-            .with_context(|| "failed to tokenize prompt")?;
+        let mut batch = LlamaBatch::new(n_batch as usize, 1);
 
-        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
-
-        // Use context size for batch capacity to handle long prompts
-        let batch_size = self.context_size as usize;
-        let mut batch = LlamaBatch::new(batch_size, 1);
-
+        // Decode the prompt in chunks of at most n_batch tokens.
         let last_index: i32 = (tokens_list.len() - 1) as i32;
         for (i, token) in (0_i32..).zip(tokens_list.into_iter()) {
             let is_last = i == last_index;
             batch
                 .add(token, i, &[0], is_last)
                 .context("Failed to add token to batch")?;
+            if is_last || batch.n_tokens() as u32 == n_batch {
+                ctx.decode(&mut batch).context("llama_decode() failed")?;
+                if !is_last {
+                    batch.clear();
+                }
+            }
         }
-
-        ctx.decode(&mut batch).context("llama_decode() failed")?;
         let prompt_time = start_time.elapsed();
 
-        let n_prompt_tokens = batch.n_tokens();
+        let n_prompt_tokens = last_index + 1;
         let mut n_cur = n_prompt_tokens;
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
@@ -562,6 +578,16 @@ impl ModelState {
     }
 }
 
+/// Context size for one request: the model's full `context_size` unless the request asks
+/// for less, in which case prompt + max_tokens (rounded up to 512) must still fit.
+fn request_n_ctx(context_size: u32, requested: Option<u32>, prompt_tokens: usize, max_tokens: i32) -> u32 {
+    let Some(requested) = requested else {
+        return context_size;
+    };
+    let needed = (prompt_tokens as u64 + max_tokens.max(0) as u64).div_ceil(512) * 512;
+    needed.max(requested as u64).min(context_size as u64) as u32
+}
+
 // ============================================================================
 // Main Loop with Keep-Alive Protocol
 // ============================================================================
@@ -666,6 +692,7 @@ fn main() -> Result<()> {
                 prompt,
                 max_tokens,
                 context_size,
+                n_ctx,
                 model_path,
                 temperature,
                 top_k,
@@ -714,7 +741,7 @@ fn main() -> Result<()> {
                 }
 
                 // Generate response with sampling parameters
-                match state.generate(prompt, max_tokens, sampling, stop_tokens, || {
+                match state.generate(prompt, max_tokens, n_ctx, sampling, stop_tokens, || {
                     take_cancel(&rx, &mut pending, id)
                 }) {
                     Ok(text) => {
@@ -794,6 +821,14 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.0);
         assert_eq!(sampling.penalty_last_n, 0);
         assert!(!sampling.uses_penalties());
+    }
+
+    #[test]
+    fn request_n_ctx_fits_prompt_and_output_within_model_context() {
+        assert_eq!(request_n_ctx(32768, None, 120, 512), 32768, "summaries keep full context");
+        assert_eq!(request_n_ctx(32768, Some(2048), 120, 512), 2048, "floor");
+        assert_eq!(request_n_ctx(32768, Some(2048), 1700, 512), 2560, "grown, 512-aligned");
+        assert_eq!(request_n_ctx(4096, Some(2048), 9000, 512), 4096, "capped");
     }
 
     #[test]
