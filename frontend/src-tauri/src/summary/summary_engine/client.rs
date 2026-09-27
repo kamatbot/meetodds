@@ -24,6 +24,8 @@ use super::sidecar::SidecarManager;
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Request {
     Generate {
+        /// Echoed in the reply so it can be paired with this request
+        id: u64,
         prompt: String,
         max_tokens: Option<i32>,
         context_size: Option<u32>,
@@ -232,7 +234,9 @@ pub async fn generate_with_builtin_with_sampling(
         sampling.top_p = overrides.top_p;
         sampling.top_k = overrides.top_k;
     }
+    let request_id = manager.next_request_id();
     let request = Request::Generate {
+        id: request_id,
         prompt: formatted_prompt,
         max_tokens: Some(max_tokens.map_or(models::DEFAULT_MAX_TOKENS, |value| value as i32)),
         context_size: Some(model_def.context_size),
@@ -257,7 +261,7 @@ pub async fn generate_with_builtin_with_sampling(
     // Race between send_request and cancellation token
     let response_json = if let Some(token) = cancellation_token {
         tokio::select! {
-            result = manager.send_request(request_json, timeout) => {
+            result = manager.send_request(request_id, request_json, timeout) => {
                 result?
             }
             _ = token.cancelled() => {
@@ -270,7 +274,7 @@ pub async fn generate_with_builtin_with_sampling(
             }
         }
     } else {
-        manager.send_request(request_json, timeout).await?
+        manager.send_request(request_id, request_json, timeout).await?
     };
 
     // Check cancellation before parsing response
@@ -357,6 +361,7 @@ mod tests {
     #[test]
     fn test_request_serialization() {
         let request = Request::Generate {
+            id: 7,
             prompt: "test prompt".to_string(),
             max_tokens: Some(512),
             context_size: Some(2048),
@@ -373,6 +378,7 @@ mod tests {
 
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"type\":\"generate\""));
+        assert!(json.contains("\"id\":7"));
         assert!(json.contains("\"prompt\":\"test prompt\""));
         assert!(json.contains("\"max_tokens\":512"));
         assert!(json.contains("\"temperature\":1.0"));

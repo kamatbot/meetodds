@@ -3,12 +3,12 @@
 
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::{Mutex, RwLock};
 
@@ -31,6 +31,12 @@ pub struct SidecarManager {
 
     /// Stdout reader for receiving responses
     stdout_reader: Arc<Mutex<Option<BufReader<ChildStdout>>>>,
+
+    /// Held across a request's write + read so exchanges never interleave
+    exchange: Arc<Mutex<()>>,
+
+    /// Source of request ids; the helper echoes the id in its reply
+    next_request_id: Arc<AtomicU64>,
 
     /// Last activity timestamp
     last_activity: Arc<RwLock<Instant>>,
@@ -94,6 +100,8 @@ impl SidecarManager {
             child_process: Arc::new(Mutex::new(None)),
             stdin_writer: Arc::new(Mutex::new(None)),
             stdout_reader: Arc::new(Mutex::new(None)),
+            exchange: Arc::new(Mutex::new(())),
+            next_request_id: Arc::new(AtomicU64::new(1)),
             last_activity: Arc::new(RwLock::new(Instant::now())),
             is_healthy: Arc::new(AtomicBool::new(false)),
             should_shutdown: Arc::new(AtomicBool::new(false)),
@@ -348,31 +356,21 @@ impl SidecarManager {
         Ok(())
     }
 
-    /// Send a request to the sidecar and wait for response
-    pub async fn send_request(&self, request_json: String, timeout: Duration) -> Result<String> {
+    /// Allocate an id for a request; it must be the request JSON's `id` field.
+    pub fn next_request_id(&self) -> u64 {
+        self.next_request_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Send a request (whose JSON carries `id`) and wait for the reply with that id
+    pub async fn send_request(&self, id: u64, request_json: String, timeout: Duration) -> Result<String> {
         // Track active request
         let _guard = RequestGuard::new(self.active_request_count.clone());
+        let _exchange = self.exchange.lock().await;
 
-        // Write request to stdin
-        {
-            let mut stdin_lock = self.stdin_writer.lock().await;
-            let stdin = stdin_lock
-                .as_mut()
-                .ok_or_else(|| anyhow!("Sidecar not running"))?;
-
-            stdin
-                .write_all(request_json.as_bytes())
-                .await
-                .context("Failed to write request to stdin")?;
-            stdin
-                .write_all(b"\n")
-                .await
-                .context("Failed to write newline")?;
-            stdin.flush().await.context("Failed to flush stdin")?;
-        }
+        self.write_line(&request_json).await?;
 
         // Read response from stdout with timeout
-        match tokio::time::timeout(timeout, self.read_response()).await {
+        match tokio::time::timeout(timeout, self.read_response(id)).await {
             Ok(Ok(response)) => {
                 self.update_activity().await;
                 Ok(response)
@@ -389,48 +387,50 @@ impl SidecarManager {
         }
     }
 
-    /// Read a single line response from stdout
-    async fn read_response(&self) -> Result<String> {
+    /// Write one request line to the helper's stdin
+    async fn write_line(&self, line: &str) -> Result<()> {
+        let mut stdin_lock = self.stdin_writer.lock().await;
+        let stdin = stdin_lock
+            .as_mut()
+            .ok_or_else(|| anyhow!("Sidecar not running"))?;
+
+        stdin
+            .write_all(line.as_bytes())
+            .await
+            .context("Failed to write request to stdin")?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .context("Failed to write newline")?;
+        stdin.flush().await.context("Failed to flush stdin")?;
+        Ok(())
+    }
+
+    /// Read the reply for request `id` from stdout
+    async fn read_response(&self, id: u64) -> Result<String> {
         let mut stdout_lock = self.stdout_reader.lock().await;
         let reader = stdout_lock
             .as_mut()
             .ok_or_else(|| anyhow!("Sidecar not running"))?;
-
-        let mut line = String::new();
-        reader
-            .read_line(&mut line)
-            .await
-            .context("Failed to read response from stdout")?;
-
-        if line.is_empty() {
-            return Err(anyhow!("Sidecar closed stdout (process may have crashed)"));
-        }
-
-        Ok(line.trim().to_string())
+        read_reply(reader, id).await
     }
 
     /// Send ping to keep sidecar alive
     async fn send_ping(&self) -> Result<()> {
-        let request = serde_json::json!({"type": "ping"}).to_string();
+        // A request in flight already proves the sidecar is alive; don't queue behind it.
+        let Ok(_exchange) = self.exchange.try_lock() else {
+            return Ok(());
+        };
+        let id = self.next_request_id();
+        let request = serde_json::json!({"type": "ping", "id": id}).to_string();
         let timeout = Duration::from_secs(5);
 
         // Note: We don't use send_request here to avoid incrementing active_request_count
         // for internal health checks, as that would prevent graceful shutdown
-        
-        // Write request
-        {
-            let mut stdin_lock = self.stdin_writer.lock().await;
-            if let Some(stdin) = stdin_lock.as_mut() {
-                stdin.write_all(request.as_bytes()).await?;
-                stdin.write_all(b"\n").await?;
-                stdin.flush().await?;
-            } else {
-                return Err(anyhow!("Sidecar not running"));
-            }
-        }
+        self.write_line(&request).await?;
 
         // Read response
-        let response = tokio::time::timeout(timeout, self.read_response()).await??;
+        let response = tokio::time::timeout(timeout, self.read_response(id)).await??;
 
         let resp: serde_json::Value = serde_json::from_str(&response)?;
         if resp.get("type").and_then(|t| t.as_str()) == Some("pong") {
@@ -559,6 +559,8 @@ impl SidecarManager {
             child_process: self.child_process.clone(),
             stdin_writer: self.stdin_writer.clone(),
             stdout_reader: self.stdout_reader.clone(),
+            exchange: self.exchange.clone(),
+            next_request_id: self.next_request_id.clone(),
             last_activity: self.last_activity.clone(),
             is_healthy: self.is_healthy.clone(),
             should_shutdown: self.should_shutdown.clone(),
@@ -607,6 +609,8 @@ impl SidecarManager {
             child_process: self.child_process.clone(),
             stdin_writer: self.stdin_writer.clone(),
             stdout_reader: self.stdout_reader.clone(),
+            exchange: self.exchange.clone(),
+            next_request_id: self.next_request_id.clone(),
             last_activity: self.last_activity.clone(),
             is_healthy: self.is_healthy.clone(),
             should_shutdown: self.should_shutdown.clone(),
@@ -658,6 +662,30 @@ impl SidecarManager {
     }
 }
 
+/// Read lines until the reply for `id`. Lines for other ids (e.g. the late reply to a
+/// request whose caller gave up) or without one are discarded.
+async fn read_reply(reader: &mut (impl AsyncBufRead + Unpin), id: u64) -> Result<String> {
+    loop {
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .await
+            .context("Failed to read response from stdout")?;
+
+        if line.is_empty() {
+            return Err(anyhow!("Sidecar closed stdout (process may have crashed)"));
+        }
+
+        let reply_id = serde_json::from_str::<serde_json::Value>(&line)
+            .ok()
+            .and_then(|v| v.get("id")?.as_u64());
+        if reply_id == Some(id) {
+            return Ok(line.trim().to_string());
+        }
+        log::debug!("Discarding sidecar reply for request {:?} while waiting for {}", reply_id, id);
+    }
+}
+
 impl Drop for SidecarManager {
     fn drop(&mut self) {
         // Set shutdown flag
@@ -666,5 +694,97 @@ impl Drop for SidecarManager {
         // Note: Actual cleanup happens in shutdown() method
         // We can't do async work in Drop, so this is best-effort
         log::debug!("SidecarManager dropped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn read_reply_skips_lines_for_other_ids() {
+        let mut stdout: &[u8] = b"{\"type\":\"response\",\"id\":1,\"text\":\"stale\",\"error\":null}\n\
+            {\"type\":\"goodbye\"}\n\
+            not json\n\
+            {\"type\":\"response\",\"id\":2,\"text\":\"mine\",\"error\":null}\n";
+        let reply = read_reply(&mut stdout, 2).await.unwrap();
+        assert!(reply.contains("\"text\":\"mine\""));
+        assert!(read_reply(&mut stdout, 3).await.is_err(), "EOF must be an error");
+    }
+
+    /// Stand-in for llama-helper: answers requests in order, echoing their id,
+    /// taking 0.5 s per generation.
+    #[cfg(unix)]
+    const FAKE_HELPER: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"type":"ping"'*) echo "{\"type\":\"pong\",\"id\":$id}" ;;
+    *'"type":"generate"'*) sleep 0.5; echo "{\"type\":\"response\",\"id\":$id,\"text\":\"reply-$id\",\"error\":null}" ;;
+    *'"type":"shutdown"'*) echo '{"type":"goodbye"}'; exit 0 ;;
+  esac
+done
+"#;
+
+    #[cfg(unix)]
+    async fn spawn_fake_helper(name: &str) -> SidecarManager {
+        use std::os::unix::fs::PermissionsExt;
+        let script = std::env::temp_dir().join(format!(
+            "fake-llama-helper-{}-{}.sh",
+            std::process::id(),
+            name
+        ));
+        std::fs::write(&script, FAKE_HELPER).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let manager = SidecarManager {
+            child_process: Arc::new(Mutex::new(None)),
+            stdin_writer: Arc::new(Mutex::new(None)),
+            stdout_reader: Arc::new(Mutex::new(None)),
+            exchange: Arc::new(Mutex::new(())),
+            next_request_id: Arc::new(AtomicU64::new(1)),
+            last_activity: Arc::new(RwLock::new(Instant::now())),
+            is_healthy: Arc::new(AtomicBool::new(false)),
+            should_shutdown: Arc::new(AtomicBool::new(false)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            helper_binary_path: script,
+            current_model_path: Arc::new(RwLock::new(None)),
+            idle_timeout_secs: 300,
+        };
+        manager.spawn(PathBuf::from("model.gguf")).await.unwrap();
+        // Let the health loop's immediate first ping finish before the test's requests.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        manager
+    }
+
+    #[cfg(unix)]
+    fn generate_json(id: u64) -> String {
+        serde_json::json!({"type": "generate", "id": id, "prompt": "p"}).to_string()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn abandoned_request_reply_does_not_reach_next_caller() {
+        let manager = spawn_fake_helper("abandoned").await;
+
+        // Caller gives up (like live translation's outer timeout) after its request was
+        // written but before the reply arrived.
+        let abandoned = manager.next_request_id();
+        let gave_up = tokio::time::timeout(
+            Duration::from_millis(100),
+            manager.send_request(abandoned, generate_json(abandoned), Duration::from_secs(5)),
+        )
+        .await;
+        assert!(gave_up.is_err());
+
+        let next = manager.next_request_id();
+        let reply = manager
+            .send_request(next, generate_json(next), Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(reply.contains(&format!("\"text\":\"reply-{next}\"")), "{reply}");
+
+        // The health ping also gets its own pong, not a leftover line.
+        manager.send_ping().await.unwrap();
+        manager.shutdown().await.unwrap();
     }
 }

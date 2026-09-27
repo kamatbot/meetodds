@@ -18,11 +18,13 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 // Protocol Messages (JSON over stdin/stdout)
 // ============================================================================
+// Every reply echoes the request `id` so the app can pair replies with requests.
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Request {
     Generate {
+        id: Option<u64>,
         prompt: String,
         max_tokens: Option<i32>,
         context_size: Option<u32>,
@@ -37,17 +39,28 @@ enum Request {
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
     },
-    Ping,
+    Ping {
+        id: Option<u64>,
+    },
     Shutdown,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Response {
-    Response { text: String, error: Option<String> },
-    Pong,
+    Response {
+        id: Option<u64>,
+        text: String,
+        error: Option<String>,
+    },
+    Pong {
+        id: Option<u64>,
+    },
     Goodbye,
-    Error { message: String },
+    Error {
+        id: Option<u64>,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -588,6 +601,7 @@ fn main() -> Result<()> {
                 // Parse request
                 match serde_json::from_str::<Request>(line) {
                     Ok(Request::Generate {
+                        id,
                         prompt,
                         max_tokens,
                         context_size,
@@ -620,6 +634,7 @@ fn main() -> Result<()> {
                             let path = PathBuf::from(path_str);
                             if let Err(e) = state.load_model_if_needed(path, context_size) {
                                 send_response(&Response::Response {
+                                    id,
                                     text: String::new(),
                                     error: Some(format!("Failed to load model: {}", e)),
                                 })?;
@@ -635,19 +650,24 @@ fn main() -> Result<()> {
                             stop_tokens,
                         ) {
                             Ok(text) => {
-                                send_response(&Response::Response { text, error: None })?;
+                                send_response(&Response::Response {
+                                    id,
+                                    text,
+                                    error: None,
+                                })?;
                             }
                             Err(e) => {
                                 send_response(&Response::Response {
+                                    id,
                                     text: String::new(),
                                     error: Some(format!("Generation failed: {}", e)),
                                 })?;
                             }
                         }
                     }
-                    Ok(Request::Ping) => {
+                    Ok(Request::Ping { id }) => {
                         state.update_activity();
-                        send_response(&Response::Pong)?;
+                        send_response(&Response::Pong { id })?;
                     }
                     Ok(Request::Shutdown) => {
                         eprintln!("🛑 Shutdown requested");
@@ -656,7 +676,12 @@ fn main() -> Result<()> {
                     }
                     Err(e) => {
                         eprintln!("❌ Failed to parse request: {}", e);
+                        // Echo the id if the line had one so the caller is not left waiting.
+                        let id = serde_json::from_str::<serde_json::Value>(line)
+                            .ok()
+                            .and_then(|v| v.get("id")?.as_u64());
                         send_response(&Response::Error {
+                            id,
                             message: format!("Invalid request: {}", e),
                         })?;
                     }
@@ -709,6 +734,20 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.0);
         assert_eq!(sampling.penalty_last_n, 0);
         assert!(!sampling.uses_penalties());
+    }
+
+    #[test]
+    fn replies_echo_request_id() {
+        let request: Request = serde_json::from_str(r#"{"type":"ping","id":7}"#).unwrap();
+        let Request::Ping { id } = request else {
+            panic!("expected ping request");
+        };
+        assert_eq!(
+            serde_json::to_string(&Response::Pong { id }).unwrap(),
+            r#"{"type":"pong","id":7}"#
+        );
+        let request: Request = serde_json::from_str(r#"{"type":"ping"}"#).unwrap();
+        assert!(matches!(request, Request::Ping { id: None }));
     }
 
     #[test]
