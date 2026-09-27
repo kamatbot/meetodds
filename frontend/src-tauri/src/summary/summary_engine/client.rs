@@ -204,9 +204,9 @@ pub async fn generate_with_builtin_with_sampling(
     .await
 }
 
-/// Live translation: streams the raw generated text to `on_delta`. Cancelling aborts just
-/// this generation in the helper instead of restarting it, so a superseded caption frees
-/// the model for the next one.
+/// Live translation: streams the raw text generated so far to `on_delta`. Cancelling (or
+/// dropping the future) aborts just this generation in the helper instead of restarting
+/// it, so a superseded caption frees the model for the next one.
 pub async fn translate_with_builtin(
     app_data_dir: &PathBuf,
     model_name: &str,

@@ -1086,8 +1086,8 @@ async fn translate_with_candidate<R: Runtime>(
             .as_ref()
             .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
         crate::summary::summary_engine::sidecar::hold_warm_while_recording();
-        // Streams like the cloud providers. Cancelling (superseded caption) aborts only this
-        // generation in the helper and frees the permit.
+        // Streams like the cloud providers. Cancelling (superseded caption) or a timeout
+        // aborts only this generation in the helper and frees the permit.
         let mut streamed = String::new();
         let mut first_word_ms: Option<u64> = None;
         let mut on_delta = |delta: &str| {

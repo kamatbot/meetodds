@@ -408,8 +408,9 @@ impl SidecarManager {
     }
 
     /// `send_request` for a streamed request: each `delta` line's text goes to `on_delta`.
-    /// Cancelling `token` stops waiting at once and asks the helper to abort just this
-    /// generation; the process and its loaded model are kept.
+    /// Cancelling `token`, or dropping this future (e.g. the caller's timeout fired), stops
+    /// waiting and asks the helper to abort just this generation; the process and its
+    /// loaded model are kept.
     pub async fn send_request_cancellable(
         &self,
         id: u64,
@@ -418,17 +419,17 @@ impl SidecarManager {
         token: &CancellationToken,
         on_delta: &mut (dyn FnMut(&str) + Send),
     ) -> Result<String> {
-        tokio::select! {
+        let mut cancel_on_drop = CancelOnDrop {
+            id,
+            stdin: Some(self.stdin_writer.clone()),
+        };
+        let result = tokio::select! {
             result = self.send_request_with_deltas(id, request_json, timeout, on_delta) => result,
-            _ = token.cancelled() => {
-                // The helper still answers `id` (as cancelled); the next reader discards it.
-                let cancel = serde_json::json!({"type": "cancel", "id": id}).to_string();
-                if let Err(e) = write_line(&self.stdin_writer, &cancel).await {
-                    log::debug!("Failed to send cancel to sidecar: {}", e);
-                }
-                Err(anyhow!("Generation cancelled"))
-            }
-        }
+            _ = token.cancelled() => return Err(anyhow!("Generation cancelled")),
+        };
+        // Answered (or the sidecar is gone): nothing left to cancel.
+        cancel_on_drop.stdin = None;
+        result
     }
 
     /// Read the reply for request `id` from stdout
@@ -692,6 +693,27 @@ impl SidecarManager {
     }
 }
 
+/// Asks the helper to stop generating `id` when dropped while `stdin` is still set.
+struct CancelOnDrop {
+    id: u64,
+    stdin: Option<Arc<Mutex<Option<ChildStdin>>>>,
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        let (Some(stdin), Ok(runtime)) = (self.stdin.take(), tokio::runtime::Handle::try_current()) else {
+            return;
+        };
+        // The helper still answers `id` (as cancelled); the next reader discards it.
+        let cancel = serde_json::json!({"type": "cancel", "id": self.id}).to_string();
+        runtime.spawn(async move {
+            if let Err(e) = write_line(&stdin, &cancel).await {
+                log::debug!("Failed to send cancel to sidecar: {}", e);
+            }
+        });
+    }
+}
+
 /// Write one request line to the helper's stdin
 async fn write_line(stdin_writer: &Mutex<Option<ChildStdin>>, line: &str) -> Result<()> {
     let mut stdin_lock = stdin_writer.lock().await;
@@ -925,6 +947,23 @@ done
             .unwrap();
         assert!(reply.contains(&format!("\"text\":\"reply-{next}\"")), "{reply}");
         assert_eq!(deltas, ["re", "ply"], "no leftover deltas from the cancelled request");
+        manager.shutdown().await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn caller_timeout_sends_cancel_to_the_helper() {
+        let manager = spawn_fake_helper("timeout-cancel").await;
+        let id = manager.next_request_id();
+        // Like live translation's attempt budget: the caller drops the request future.
+        let timed_out = tokio::time::timeout(
+            Duration::from_millis(150),
+            manager.send_request_cancellable(id, stream_json(id), Duration::from_secs(5), &CancellationToken::new(), &mut |_| {}),
+        )
+        .await;
+        assert!(timed_out.is_err());
+        assert!(helper_got_cancel(&manager, id).await, "helper was not told to stop {id}");
+        assert!(manager.is_healthy(), "a timeout must not kill the sidecar");
         manager.shutdown().await.unwrap();
     }
 
