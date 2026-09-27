@@ -247,10 +247,10 @@ impl Engine {
 }
 
 fn models_root() -> Result<PathBuf> {
-    // Matches the app: Tauri app_data_dir == ~/Library/Application Support/com.meetily.ai
+    // Matches the app: Tauri app_data_dir == ~/Library/Application Support/com.meetodds.app
     Ok(dirs::data_dir()
         .ok_or_else(|| anyhow!("no data dir"))?
-        .join("com.meetily.ai")
+        .join("com.meetodds.app")
         .join("models"))
 }
 
