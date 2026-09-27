@@ -184,6 +184,52 @@ pub async fn generate_with_builtin_with_sampling(
     cancellation_token: Option<&CancellationToken>,
     sampling_override: Option<BuiltinSamplingOverride>,
 ) -> Result<String> {
+    generate_builtin(
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        max_tokens,
+        cancellation_token,
+        sampling_override,
+        false,
+    )
+    .await
+}
+
+/// Live translation: cancelling aborts just this generation in the helper instead of
+/// restarting it, so a superseded caption frees the model for the next one.
+pub async fn translate_with_builtin(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    cancellation_token: &CancellationToken,
+) -> Result<String> {
+    generate_builtin(
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        max_tokens,
+        Some(cancellation_token),
+        None,
+        true,
+    )
+    .await
+}
+
+async fn generate_builtin(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    cancellation_token: Option<&CancellationToken>,
+    sampling_override: Option<BuiltinSamplingOverride>,
+    live_translation: bool,
+) -> Result<String> {
     let sampling_override = sampling_override
         .map(BuiltinSamplingOverride::validated)
         .transpose()?;
@@ -259,7 +305,11 @@ pub async fn generate_with_builtin_with_sampling(
     log::info!("Sending generation request to sidecar");
 
     // Race between send_request and cancellation token
-    let response_json = if let Some(token) = cancellation_token {
+    let response_json = if let (true, Some(token)) = (live_translation, cancellation_token) {
+        manager
+            .send_request_cancellable(request_id, request_json, timeout, token)
+            .await?
+    } else if let Some(token) = cancellation_token {
         tokio::select! {
             result = manager.send_request(request_id, request_json, timeout) => {
                 result?

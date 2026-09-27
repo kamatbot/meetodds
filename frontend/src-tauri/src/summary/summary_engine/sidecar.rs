@@ -11,6 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -383,6 +384,28 @@ impl SidecarManager {
                     log::error!("Failed to shutdown sidecar after timeout: {}", shutdown_err);
                 }
                 Err(anyhow!("Request timed out after {:?}", timeout))
+            }
+        }
+    }
+
+    /// `send_request`, but cancelling `token` stops waiting at once and asks the helper
+    /// to abort just this generation; the process and its loaded model are kept.
+    pub async fn send_request_cancellable(
+        &self,
+        id: u64,
+        request_json: String,
+        timeout: Duration,
+        token: &CancellationToken,
+    ) -> Result<String> {
+        tokio::select! {
+            result = self.send_request(id, request_json, timeout) => result,
+            _ = token.cancelled() => {
+                // The helper still answers `id` (as cancelled); the next reader discards it.
+                let cancel = serde_json::json!({"type": "cancel", "id": id}).to_string();
+                if let Err(e) = self.write_line(&cancel).await {
+                    log::debug!("Failed to send cancel to sidecar: {}", e);
+                }
+                Err(anyhow!("Generation cancelled"))
             }
         }
     }
@@ -785,6 +808,45 @@ done
 
         // The health ping also gets its own pong, not a leftover line.
         manager.send_ping().await.unwrap();
+        manager.shutdown().await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancel_stops_waiting_and_releases_the_permit() {
+        let manager = Arc::new(spawn_fake_helper("cancel").await);
+        let pool = Arc::new(tokio::sync::Semaphore::new(1));
+        let token = CancellationToken::new();
+
+        // Mirrors live translation: hold the single local permit while waiting.
+        let id = manager.next_request_id();
+        let task = tokio::spawn({
+            let (manager, pool, token) = (manager.clone(), pool.clone(), token.clone());
+            async move {
+                let _permit = pool.acquire().await.unwrap();
+                manager
+                    .send_request_cancellable(id, generate_json(id), Duration::from_secs(5), &token)
+                    .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(pool.available_permits(), 0);
+
+        let started = Instant::now();
+        token.cancel();
+        let result = task.await.unwrap();
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_millis(200), "{:?}", started.elapsed());
+        assert_eq!(pool.available_permits(), 1);
+        assert!(manager.is_healthy(), "cancel must not kill the sidecar");
+
+        // The cancelled request's late reply does not reach the next caller.
+        let next = manager.next_request_id();
+        let reply = manager
+            .send_request(next, generate_json(next), Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(reply.contains(&format!("\"text\":\"reply-{next}\"")), "{reply}");
         manager.shutdown().await.unwrap();
     }
 }

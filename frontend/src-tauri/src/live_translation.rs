@@ -1,6 +1,6 @@
 use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
-use crate::summary::llm_client::{build_chat_request, generate_summary, LLMProvider};
+use crate::summary::llm_client::{build_chat_request, LLMProvider};
 use futures_util::StreamExt;
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -1049,27 +1049,27 @@ async fn translate_with_candidate<R: Runtime>(
     let connect_timeout = budgets.first_word.max(Duration::from_millis(3500));
 
     if config.provider == LLMProvider::BuiltInAI {
-        let future = generate_summary(
-            &TRANSLATION_HTTP_CLIENT,
-            &config.provider,
+        let app_data_dir = app_data_dir
+            .as_ref()
+            .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
+        // Cancelling (superseded caption) aborts only this generation and frees the permit.
+        let future = crate::summary::summary_engine::translate_with_builtin(
+            app_data_dir,
             &config.model_name,
-            &config.api_key,
             &system_prompt,
             &user_prompt,
-            None,
-            None,
             max_tokens,
-            None,
-            None,
-            app_data_dir.as_ref(),
-            None,
+            cancellation_token,
         );
-        let result = timeout(budgets.attempt, future).await.map_err(|_| {
-            format!(
-                "translation exceeded {}ms attempt limit",
-                budgets.attempt.as_millis()
-            )
-        })??;
+        let result = timeout(budgets.attempt, future)
+            .await
+            .map_err(|_| {
+                format!(
+                    "translation exceeded {}ms attempt limit",
+                    budgets.attempt.as_millis()
+                )
+            })?
+            .map_err(|error| error.to_string())?;
         let first = attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         emit_text(&result, first);
         return Ok((result, first));
@@ -1575,6 +1575,11 @@ pub async fn api_translate_live_text<R: Runtime>(
                 });
             }
             Err(error) => {
+                // A superseded request is not a provider failure; stop, don't fall back.
+                if cancellation_token.is_cancelled() {
+                    last_error = Some(error);
+                    break;
+                }
                 record_provider_failure(config).await;
                 last_error = Some(error.clone());
                 if let Some(next) = candidates.get(index + 1) {
