@@ -20,6 +20,10 @@ use std::time::{Duration, Instant};
 
 use app_lib::audio::audio_processing::{resample_audio, HighPassFilter, LoudnessNormalizer};
 use app_lib::audio::pipeline::{LIVE_PREVIEW_INTERVAL, LIVE_PREVIEW_MAX_WINDOW_MS, LIVE_PREVIEW_MIN_SPEECH_MS};
+use app_lib::audio::transcription::live_preview::preview_rest;
+use app_lib::audio::transcription::worker::{
+    canonical_transcription_busy, try_acquire_preview_permit, CanonicalTranscriptionGuard,
+};
 use app_lib::audio::vad::{ContinuousVadProcessor, SpeechSegment};
 use app_lib::config::DEFAULT_PARAKEET_MODEL;
 use app_lib::parakeet_engine::parakeet_engine::ParakeetEngine;
@@ -244,6 +248,14 @@ impl Engine {
                 .map(|(text, _, _)| text),
         }
     }
+
+    /// The call audio/transcription/live_preview.rs::decode_preview makes.
+    async fn preview(&self, samples: Vec<f32>) -> Result<String> {
+        match self {
+            Engine::Parakeet(e) => e.transcribe_audio(samples).await,
+            Engine::Whisper(e) => e.transcribe_audio_preview(samples, Some("en".to_string())).await,
+        }
+    }
 }
 
 fn models_root() -> Result<PathBuf> {
@@ -382,11 +394,10 @@ async fn live_phase(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Seg>();
     let audio_secs = meeting_48k.len() as f64 / CAPTURE_RATE as f64;
 
-    // Mirrors the app's preview gate (audio/transcription/live_preview.rs +
-    // worker.rs::canonical_transcription_busy): canonical decode always wins,
-    // and the watch channel keeps only the newest in-progress-utterance snapshot.
-    let canonical_busy = Arc::new(AtomicBool::new(false));
-    let (preview_tx, preview_rx) = tokio::sync::watch::channel::<Option<Vec<f32>>>(None);
+    // Uses the app's own preview gate (worker.rs permit + canonical counter and
+    // live_preview.rs pacing); the watch channel keeps only the newest
+    // in-progress-utterance snapshot, tagged with its audio end time (ms).
+    let (preview_tx, preview_rx) = tokio::sync::watch::channel::<Option<(Vec<f32>, f64)>>(None);
 
     let watcher = ThreadWatcher::start();
     let (u0, s0) = cpu_time();
@@ -430,7 +441,7 @@ async fn live_phase(
                 if let Some(snapshot) =
                     vad.live_speech_snapshot(LIVE_PREVIEW_MIN_SPEECH_MS, LIVE_PREVIEW_MAX_WINDOW_MS)
                 {
-                    let _ = preview_tx.send(Some(snapshot.samples));
+                    let _ = preview_tx.send(Some((snapshot.samples, snapshot.end_timestamp_ms)));
                     last_snapshot = Instant::now();
                 }
             }
@@ -444,38 +455,52 @@ async fn live_phase(
         // preview_tx drops here, ending the preview task's rx.changed() loop.
     });
 
-    // Preview task: mirrors audio/transcription/live_preview.rs's duty cycle
-    // (canonical-first gate, block_in_place decode, rest 2x decode time).
+    // Preview task: mirrors audio/transcription/live_preview.rs (permit gate,
+    // block_in_place decode, result dropped if canonical is busy, app pacing).
+    // A caption "emit" is a kept, non-empty result that changes the text.
     let preview_task = {
         let engine = engine.clone();
-        let busy = canonical_busy.clone();
         let mut rx = preview_rx;
         tokio::spawn(async move {
             let mut decode_ms = Vec::new();
             let mut window_secs = Vec::new();
             let mut skipped_busy = 0usize;
+            let (mut discarded, mut failed) = (0usize, 0usize);
+            let mut emits: Vec<(f64, f64)> = Vec::new(); // (wall ms, snapshot audio end ms)
+            let mut last_text = String::new();
             let mut texts: Vec<String> = Vec::new();
             while rx.changed().await.is_ok() {
-                let Some(samples) = rx.borrow_and_update().clone() else { continue };
-                if busy.load(Ordering::Acquire) {
+                let Some((samples, audio_end_ms)) = rx.borrow_and_update().clone() else { continue };
+                let Some(permit) = try_acquire_preview_permit() else {
                     skipped_busy += 1;
                     continue;
-                }
+                };
                 let secs = samples.len() as f64 / VAD_RATE as f64;
                 let d0 = Instant::now();
-                let text = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(engine.transcribe(samples))
-                })
-                .unwrap_or_default();
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(engine.preview(samples))
+                });
                 let elapsed = d0.elapsed();
+                drop(permit);
                 decode_ms.push(elapsed.as_secs_f64() * 1000.0);
                 window_secs.push(secs);
-                if texts.len() < 5 {
-                    texts.push(text);
+                match result {
+                    Ok(text) if !canonical_transcription_busy() => {
+                        let text = text.trim().to_string();
+                        if !text.is_empty() && text != last_text {
+                            emits.push((t0.elapsed().as_secs_f64() * 1000.0, audio_end_ms));
+                            if texts.len() < 5 {
+                                texts.push(text.clone());
+                            }
+                            last_text = text;
+                        }
+                    }
+                    Ok(_) => discarded += 1,
+                    Err(_) => failed += 1,
                 }
-                tokio::time::sleep(elapsed * 2).await;
+                tokio::time::sleep(preview_rest(elapsed)).await;
             }
-            (decode_ms, window_secs, skipped_busy, texts)
+            (decode_ms, window_secs, skipped_busy, discarded, failed, emits, texts)
         })
     };
 
@@ -487,17 +512,21 @@ async fn live_phase(
     let mut decode_ms = Vec::new();
     let mut rtfs = Vec::new();
     let mut queue_ms = Vec::new();
+    let mut permit_wait_ms = Vec::new();
+    let mut seg_spans: Vec<(f64, f64)> = Vec::new();
 
     while let Some(seg) = rx.recv().await {
         let picked_up = Instant::now();
+        let guard = CanonicalTranscriptionGuard::acquire().await;
+        permit_wait_ms.push(picked_up.elapsed().as_secs_f64() * 1000.0);
         let d0 = Instant::now();
-        canonical_busy.store(true, Ordering::Release);
         let text = engine
             .transcribe(seg.samples)
             .await
             .unwrap_or_else(|e| format!("<error: {}>", e));
-        canonical_busy.store(false, Ordering::Release);
+        drop(guard);
         let decode = d0.elapsed().as_secs_f64() * 1000.0;
+        seg_spans.push((seg.start_ms, seg.end_ms));
         let ready = t0.elapsed().as_secs_f64() * 1000.0;
 
         let vc = ready - seg.emitted_at.duration_since(t0).as_secs_f64() * 1000.0;
@@ -529,9 +558,29 @@ async fn live_phase(
     }
 
     let emitted = feeder.await.map_err(|e| anyhow!("feeder join: {}", e))??;
-    let (p_decode, p_window, p_skipped, p_texts) = preview_task
+    let (p_decode, p_window, p_skipped, p_discarded, p_failed, p_emits, p_texts) = preview_task
         .await
         .map_err(|e| anyhow!("preview join: {}", e))?;
+    // Caption latency, attributing each emit to the utterance (canonical segment)
+    // with the latest start at or before the snapshot's audio end. Audio time and
+    // harness wall time share an origin because the feed is real-time paced.
+    let mut first_caption_ms = Vec::new();
+    let mut staleness_ms = Vec::new();
+    let caption_lag_ms: Vec<f64> = p_emits.iter().map(|(wall, end)| wall - end).collect();
+    let mut uncaptioned = 0usize;
+    for (i, (start, _)) in seg_spans.iter().enumerate() {
+        let next_start = seg_spans.get(i + 1).map_or(f64::INFINITY, |s| s.0);
+        let walls: Vec<f64> = p_emits
+            .iter()
+            .filter(|(_, end)| end >= start && *end < next_start)
+            .map(|(wall, _)| *wall)
+            .collect();
+        match walls.first() {
+            Some(first) => first_caption_ms.push(first - start),
+            None => uncaptioned += 1,
+        }
+        staleness_ms.extend(walls.windows(2).map(|w| w[1] - w[0]));
+    }
     let wall = t0.elapsed().as_secs_f64();
     let (u1, s1) = cpu_time();
     let peak_threads = watcher.stop();
@@ -553,6 +602,7 @@ async fn live_phase(
             "speech_end_to_text_ms": summarize(&speech_end_ms),
             "speech_start_to_text_ms": summarize(&speech_start_ms),
             "queue_wait_ms": summarize(&queue_ms),
+            "canonical_permit_wait_ms": summarize(&permit_wait_ms),
             "decode_ms": summarize(&decode_ms),
             "rtf": summarize(&rtfs),
             "segment_audio_secs": summarize(&records.iter().filter_map(|r| r["audio_secs"].as_f64()).collect::<Vec<_>>()),
@@ -562,6 +612,13 @@ async fn live_phase(
             "enabled": preview,
             "decodes": p_decode.len(),
             "skipped_while_canonical_busy": p_skipped,
+            "discarded_canonical_busy": p_discarded,
+            "failed_or_aborted": p_failed,
+            "emits": p_emits.len(),
+            "segments_without_caption": uncaptioned,
+            "speech_start_to_first_caption_ms": summarize(&first_caption_ms),
+            "caption_staleness_ms": summarize(&staleness_ms),
+            "caption_audio_lag_ms": summarize(&caption_lag_ms),
             "decode_ms": summarize(&p_decode),
             "window_secs": summarize(&p_window),
             "texts": p_texts,
@@ -685,18 +742,23 @@ async fn main() -> Result<()> {
         live["cpu_percent_of_one_core"].as_f64().unwrap());
     println!("  Peak threads:   {}", live["peak_threads"]);
     println!("  latencies (ms unless noted):");
-    for k in ["segment_audio_secs", "queue_wait_ms", "decode_ms", "rtf",
+    for k in ["segment_audio_secs", "queue_wait_ms", "canonical_permit_wait_ms", "decode_ms", "rtf",
               "vad_close_to_text_ms", "speech_end_to_text_ms", "speech_start_to_text_ms"] {
         println!("{}", row(k, &live["stats"][k], if k == "rtf" { 4 } else { 1 }));
     }
 
     if live["preview"]["enabled"].as_bool().unwrap_or(false) {
+        let p = &live["preview"];
         println!(
-            "  PREVIEW LANE  decodes={} skipped={}",
-            live["preview"]["decodes"], live["preview"]["skipped_while_canonical_busy"]
+            "  PREVIEW LANE  decodes={} skipped={} discarded={} failed/aborted={} emits={} uncaptioned_segments={}",
+            p["decodes"], p["skipped_while_canonical_busy"], p["discarded_canonical_busy"],
+            p["failed_or_aborted"], p["emits"], p["segments_without_caption"]
         );
-        println!("{}", row("preview_decode_ms", &live["preview"]["decode_ms"], 1));
-        println!("{}", row("preview_window_secs", &live["preview"]["window_secs"], 1));
+        println!("{}", row("preview_decode_ms", &p["decode_ms"], 1));
+        println!("{}", row("preview_window_secs", &p["window_secs"], 1));
+        for k in ["speech_start_to_first_caption_ms", "caption_staleness_ms", "caption_audio_lag_ms"] {
+            println!("{}", row(k, &p[k], 1));
+        }
     }
 
     println!("\nBATCH DECODE ({:.1} s clip x{})", batch["clip_secs"].as_f64().unwrap(), args.batch_iters);

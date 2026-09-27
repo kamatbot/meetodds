@@ -37,11 +37,12 @@ static CANONICAL_TRANSCRIPTION_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 // otherwise doubles CPU/GPU contention under Whisper and Parakeet.
 static LOCAL_TRANSCRIPTION_PERMIT: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::new(1)));
 
-pub(crate) fn canonical_transcription_busy() -> bool {
+// `pub` (not `pub(crate)`) so tools/perf_baseline.rs drives the same gate as the app.
+pub fn canonical_transcription_busy() -> bool {
     CANONICAL_TRANSCRIPTION_ACTIVE.load(Ordering::Acquire) > 0
 }
 
-pub(crate) fn try_acquire_preview_permit() -> Option<OwnedSemaphorePermit> {
+pub fn try_acquire_preview_permit() -> Option<OwnedSemaphorePermit> {
     if canonical_transcription_busy() {
         return None;
     }
@@ -59,12 +60,12 @@ pub(crate) fn try_acquire_preview_permit() -> Option<OwnedSemaphorePermit> {
     Some(permit)
 }
 
-struct CanonicalTranscriptionGuard {
+pub struct CanonicalTranscriptionGuard {
     permit: Option<OwnedSemaphorePermit>,
 }
 
 impl CanonicalTranscriptionGuard {
-    async fn acquire() -> Self {
+    pub async fn acquire() -> Self {
         let permit = LOCAL_TRANSCRIPTION_PERMIT
             .clone()
             .acquire_owned()

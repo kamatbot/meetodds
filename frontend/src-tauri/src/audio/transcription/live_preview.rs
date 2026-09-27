@@ -5,7 +5,7 @@ use crate::audio::recording_state::{AudioChunk, DeviceType};
 use log::{debug, warn};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::watch;
 
@@ -151,16 +151,17 @@ pub fn start_live_preview_task<R: Runtime>(
                 }
             }
 
-            // Adaptive pacing: scale rest time based on measured decode duration.
-            // When decode is fast and headroom exists, rest briefly (min 100ms) to deliver fluid 300-400ms updates;
-            // cap rest to 350ms to prevent multi-second caption stalls while still yielding CPU/GPU.
-            let rest_duration = (decode_time / 2).clamp(
-                std::time::Duration::from_millis(100),
-                std::time::Duration::from_millis(350),
-            );
-            tokio::time::sleep(rest_duration).await;
+            tokio::time::sleep(preview_rest(decode_time)).await;
         }
     })
+}
+
+/// Adaptive pacing: scale rest time based on measured decode duration.
+/// When decode is fast and headroom exists, rest briefly (min 100ms) to deliver fluid 300-400ms updates;
+/// cap rest to 350ms to prevent multi-second caption stalls while still yielding CPU/GPU.
+/// Shared with tools/perf_baseline.rs so the harness paces exactly like the app.
+pub fn preview_rest(decode_time: Duration) -> Duration {
+    (decode_time / 2).clamp(Duration::from_millis(100), Duration::from_millis(350))
 }
 
 #[cfg(test)]
