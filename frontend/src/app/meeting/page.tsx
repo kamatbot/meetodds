@@ -40,11 +40,13 @@ function MeetingContent() {
   const meeting = useMemo(() => metadata?.id === meetingId ? {
     ...metadata, transcripts, title: titleOverride?.id === meetingId ? titleOverride.title : metadata.title,
   } : null, [metadata, meetingId, titleOverride, transcripts]);
+  const currentMeetingId = meeting?.id;
+  const currentMeetingTitle = meeting?.title;
 
   useEffect(() => { setActiveTab(isMeetingTab(requestedTab) ? requestedTab : 'summary'); }, [meetingId, requestedTab]);
   useEffect(() => {
-    if (meeting) setCurrentMeeting({ id: meeting.id, title: meeting.title });
-  }, [meeting?.id, meeting?.title, setCurrentMeeting]);
+    if (currentMeetingId) setCurrentMeeting({ id: currentMeetingId, title: currentMeetingTitle || '' });
+  }, [currentMeetingId, currentMeetingTitle, setCurrentMeeting]);
   useEffect(() => {
     let disposed = false;
     setSavedSummary({ id: meetingId, ready: false, summary: null, status: 'idle' });
@@ -66,7 +68,7 @@ function MeetingContent() {
   if (!meetingId || meetingId === 'intro-call' || error) return <div className="flex h-full items-center justify-center bg-bg px-6"><div className="max-w-sm text-center"><p className="text-sm font-semibold text-danger">{error || 'No meeting selected'}</p><button type="button" onClick={() => router.push('/meetings')} className="mt-4 rounded-control border border-border bg-surface px-3 py-2 text-sm text-text">Back to meetings</button></div></div>;
   if (!summaryLoaded || loadingTranscripts || !meeting) return <div role="status" aria-label="Loading saved meeting" className="flex h-full items-center justify-center bg-bg text-3"><LoaderIcon className="h-5 w-5 animate-spin motion-reduce:animate-none" /></div>;
   return <div className="flex h-full min-h-0 flex-col bg-bg">
-    <MeetingHeader key={meeting.id} meetingId={meeting.id} title={meeting.title} createdAt={meeting.created_at} activeTab={activeTab} onTabChange={setActiveTab} onTitleSaved={title => setTitleOverride({ id: meeting.id, title })} onDeleted={() => router.replace('/meetings')} />
+    <MeetingHeader key={meeting.id} meetingId={meeting.id} title={meeting.title} createdAt={meeting.created_at} onTitleSaved={title => setTitleOverride({ id: meeting.id, title })} onDeleted={() => router.replace('/meetings')} />
     <div className="min-h-0 flex-1 overflow-hidden"><PageContent key={meeting.id} meeting={meeting} summaryData={savedSummary.summary} activeTab={activeTab}
       shouldAutoGenerate={shouldAutoGenerate} onAutoGenerateComplete={() => setAutoHandled(meeting.id)} onMeetingUpdated={refetchMeetings}
       onRefetchTranscripts={refetch} segments={segments} hasMore={hasMore} isLoadingMore={isLoadingMore} totalCount={totalCount} loadedCount={loadedCount} onLoadMore={loadMore} focusSegmentId={evidenceSegmentId} /></div>
