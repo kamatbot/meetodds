@@ -575,6 +575,18 @@ fn uses_local_translation_worker(provider: &LLMProvider) -> bool {
     matches!(provider, LLMProvider::Ollama | LLMProvider::BuiltInAI)
 }
 
+/// Output cap for a local translation of `text`, so a runaway generation can't hold the
+/// single local slot. Bytes / 3 over-counts Qwen 3.5 tokens 1.5-2x for Latin and Devanagari
+/// text; doubling it covers the most expanding pair measured, English -> Hindi/Bengali
+/// (1.96x the source tokens).
+fn local_translation_max_tokens(text: &str) -> u32 {
+    let estimated_source_tokens = u32::try_from(text.len() / 3).unwrap_or(u32::MAX);
+    estimated_source_tokens
+        .saturating_mul(2)
+        .saturating_add(16)
+        .clamp(32, LIVE_TRANSLATION_MAX_TOKENS)
+}
+
 fn uses_extended_translation_budget(provider: &LLMProvider) -> bool {
     matches!(
         provider,
@@ -1046,13 +1058,15 @@ async fn translate_with_candidate<R: Runtime>(
     let (system_prompt, user_prompt) =
         build_translation_prompts(text, source, target, context_text, glossary, context_hint);
     let app_data_dir = app.path().app_data_dir().ok();
-    let max_tokens = Some(
-        config
-            .max_tokens
-            .map_or(LIVE_TRANSLATION_MAX_TOKENS, |value| {
-                value.min(LIVE_TRANSLATION_MAX_TOKENS)
-            }),
-    );
+    let mut max_tokens = config
+        .max_tokens
+        .map_or(LIVE_TRANSLATION_MAX_TOKENS, |value| {
+            value.min(LIVE_TRANSLATION_MAX_TOKENS)
+        });
+    if uses_local_translation_worker(&config.provider) {
+        max_tokens = max_tokens.min(local_translation_max_tokens(text));
+    }
+    let max_tokens = Some(max_tokens);
     let provider_name = config.provider_name.clone();
     let model_name = config.model_name.clone();
     let emit_request_id = request_id.to_string();
@@ -1728,6 +1742,15 @@ mod tests {
     }
 
     #[test]
+    fn local_output_cap_scales_with_the_source() {
+        assert_eq!(local_translation_max_tokens("Sí."), 32, "floor");
+        // 227 bytes / 49 tokens of English; its Hindi translation took 96 tokens.
+        let english = "Before we wrap up today, I want to make sure everyone knows the new release schedule: the beta ships on March 3rd, the security review happens the week after, and we need all customer feedback collected by the end of the month.";
+        assert_eq!(local_translation_max_tokens(english), 166);
+        assert_eq!(local_translation_max_tokens(&"palabra ".repeat(700)), LIVE_TRANSLATION_MAX_TOKENS);
+    }
+
+    #[test]
     fn local_and_codex_providers_receive_extended_budget() {
         assert!(uses_extended_translation_budget(&LLMProvider::OpenAICodex));
         assert!(uses_extended_translation_budget(&LLMProvider::BuiltInAI));
@@ -1846,7 +1869,7 @@ mod tests {
                 "qwen3.5:4b",
                 &system,
                 &user,
-                Some(LIVE_TRANSLATION_MAX_TOKENS),
+                Some(local_translation_max_tokens(text)),
                 &CancellationToken::new(),
                 &mut |delta| {
                     streamed.push_str(delta);
