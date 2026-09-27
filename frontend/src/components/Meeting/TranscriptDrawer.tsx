@@ -113,9 +113,8 @@ export default function TranscriptDrawer({ isProcessingStop, isStopping, showMod
         onPointerDown={beginResize} onKeyDown={e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); const next = clampWidth(width + (e.key === 'ArrowLeft' ? 20 : -20)); setWidth(next); try { localStorage.setItem(DRAWER_WIDTH_KEY, String(next)); } catch {} } }} className="meeting-drawer-resize" />}
       <header className="meeting-document-header">
         <div className="meeting-document-heading">
-          <span className="meeting-eyebrow">THE CONVERSATION</span>
-          <h1>{isPaused ? 'Room to think.' : isStopping || isProcessingStop ? 'Finishing the last words.' : 'Stay in the moment.'}</h1>
-          <p>{isPaused ? 'Recording is paused. Your conversation stays right here.' : 'Every thought, with room for yours.'}</p>
+          <h1>Transcript</h1>
+          <p role="status" aria-live="polite">{isStopping || isProcessingStop ? 'Finalizing transcript…' : isPaused ? 'Recording paused' : isRecording ? 'New finalized speech appears here.' : 'Finalized speech with speaker and time markers.'}</p>
         </div>
         <div className="meeting-document-tools">
           <button type="button" onClick={() => setCompact(v => !v)} className="meeting-icon-button" aria-label={compact ? 'Use comfortable transcript spacing' : 'Use compact transcript spacing'} aria-pressed={compact} title={compact ? 'Comfortable spacing' : 'Compact spacing'}><Rows3 size={17} /></button>

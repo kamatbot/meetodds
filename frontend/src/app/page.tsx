@@ -40,13 +40,15 @@ export default function Home() {
   const recordingState = useRecordingState();
   const { status, isStopping, isProcessing } = recordingState;
   const inAppRecording = recordingState.isRecording || isRecording;
-  const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, error: permissionError } = usePermissionCheck();
+  const isSavingMeeting = status === RecordingStatus.SAVING || recordingState.isSaving;
+  const isStartingMeeting = status === RecordingStatus.STARTING;
+  const { hasMicrophone, isChecking: isCheckingMicrophone, error: permissionError, checkPermissions } = usePermissionCheck();
   const { setIsMeetingActive, refetchMeetings } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
   const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
   const { handleRecordingStart } = useRecordingStart(isRecording, setIsRecordingState, showModal);
   const { handleRecordingStop, setIsStopping } = useRecordingStop(setIsRecordingState, setIsRecordingDisabled);
-  const { recoverableMeetings, isLoading: isLoadingRecovery, checkForRecoverableTranscripts, recoverMeeting, loadMeetingTranscripts, deleteRecoverableMeeting } = useTranscriptRecovery();
+  const { recoverableMeetings, checkForRecoverableTranscripts, recoverMeeting, loadMeetingTranscripts, deleteRecoverableMeeting } = useTranscriptRecovery();
   const router = useRouter();
 
   useEffect(() => { Analytics.trackPageView('home'); }, []);
@@ -80,6 +82,8 @@ export default function Home() {
   };
   const handleDialogClose = () => { setShowRecoveryDialog(false); if (recoverableMeetings.length === 0) sessionStorage.removeItem('recovery_dialog_shown'); };
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
+  const isFinishingMeeting = isStopping || isProcessingStop || isSavingMeeting;
+  const showLiveDesk = inAppRecording || isStartingMeeting || isFinishingMeeting;
   const recordingBusy = inAppRecording || status === RecordingStatus.STARTING || status === RecordingStatus.STOPPING || status === RecordingStatus.PROCESSING_TRANSCRIPTS || status === RecordingStatus.SAVING;
   const handleNewMeeting = async () => {
     if (!hasMicrophone || recordingBusy || isRecordingDisabled) return;
@@ -121,14 +125,16 @@ export default function Home() {
     <StopProgressStrip isProcessing={status === RecordingStatus.PROCESSING_TRANSCRIPTS && !recordingState.isRecording} isSaving={status === RecordingStatus.SAVING} />
 
     <div className="relative flex min-h-0 flex-1">
-      {inAppRecording || isStopping || isProcessingStop ? <div className="live-recording-layout w-full">
-        <main className="live-notes-pane" aria-label="Live meeting notes">
+      {showLiveDesk ? <main className="live-recording-layout w-full" aria-label="Live meeting conversation">
+        <section className="live-transcript-pane" aria-label="Live transcript">
+          <TranscriptDrawer presentation="workspace" isProcessingStop={isProcessingStop || isSavingMeeting} isStopping={isStopping} showModal={showModal} />
+        </section>
+        <aside className="live-notes-pane" aria-label="Live meeting notes">
           {currentMeetingId ? <LiveMeetingNotes meetingId={currentMeetingId} calendarEvent={recordingEvent} /> : <div className="flex h-full items-center justify-center text-[12px] text-3">Preparing meeting notes…</div>}
-        </main>
-        <TranscriptDrawer presentation="drawer" isProcessingStop={isProcessingStop} isStopping={isStopping} showModal={showModal} />
-      </div> : <div className="min-w-0 flex-1"><HomeDashboard hasMicrophone={hasMicrophone} hasSystemAudio={hasSystemAudio} permissionsLoading={isCheckingPermissions} permissionError={permissionError} recoverableMeetings={recoverableMeetings} isRecoveryLoading={isLoadingRecovery} isRecording={inAppRecording} recordingStatus={status} recordingDuration={recordingState.recordingDuration} newMeetingDisabled={!hasMicrophone || isRecordingDisabled} onNewMeeting={() => void handleNewMeeting()} onCalendarMeetingStart={(event) => void handleCalendarMeetingStart(event)} onImport={(filePath) => openImportDialog(filePath)} onReviewRecovery={() => setShowRecoveryDialog(true)} onOpenSettings={() => router.push('/settings')} /></div>}
+        </aside>
+      </main> : <div className="min-w-0 flex-1"><HomeDashboard hasMicrophone={hasMicrophone} isCheckingMicrophone={isCheckingMicrophone} permissionError={permissionError} onRetryMicrophoneCheck={() => { void checkPermissions(); }} recoverableMeetings={recoverableMeetings} newMeetingDisabled={!hasMicrophone || isRecordingDisabled || recordingBusy} onNewMeeting={() => void handleNewMeeting()} onCalendarMeetingStart={(event) => void handleCalendarMeetingStart(event)} onImport={(filePath) => openImportDialog(filePath)} onReviewRecovery={() => setShowRecoveryDialog(true)} onOpenSettings={() => router.push('/settings')} /></div>}
     </div>
 
-    {(inAppRecording || isStopping || isProcessingStop) && <LiveMeetingBar isPaused={recordingState.isPaused} isBusy={isHomeControlBusy || isStopping || isProcessingStop} captionsVisible={captionsVisible} onPauseResume={() => void handleHomePauseResume()} onStop={() => void handleHomeStop()} onToggleCaptions={() => setCaptionsVisible(!captionsVisible)} />}
+    {showLiveDesk && <LiveMeetingBar isPaused={recordingState.isPaused} isStarting={isStartingMeeting} isBusy={isHomeControlBusy || isStartingMeeting || isFinishingMeeting} isFinishing={isFinishingMeeting} captionsVisible={captionsVisible} onPauseResume={() => void handleHomePauseResume()} onStop={() => void handleHomeStop()} onToggleCaptions={() => setCaptionsVisible(!captionsVisible)} />}
   </div>;
 }

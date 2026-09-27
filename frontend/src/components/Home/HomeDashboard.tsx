@@ -1,73 +1,117 @@
 'use client';
 
-import { useMemo, type DragEvent } from 'react';
+import { useState, type DragEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, ArrowRight, CheckCircle2, FileAudio, LoaderCircle, Mic, Radio, RefreshCw, Sparkles, Star, Upload } from 'lucide-react';
-import { useConfig } from '@/contexts/ConfigContext';
+import { AlertCircle, ChevronDown, ChevronRight, FileAudio, LoaderCircle, RefreshCw, Settings, Star, Upload } from 'lucide-react';
 import { useMeetingList } from '@/hooks/useMeetingList';
 import type { MeetingMetadata } from '@/services/indexedDBService';
 import type { CalendarEvent } from '@/services/calendarService';
 import type { MeetingListItem } from '@/types/meeting';
-import { RecordingStatus } from '@/contexts/RecordingStateContext';
 import ActionInboxPreview from '@/components/Home/ActionInboxPreview';
 import CalendarAgendaCard from '@/components/Home/CalendarAgendaCard';
 
 interface HomeDashboardProps {
-  hasMicrophone: boolean; hasSystemAudio: boolean; permissionsLoading: boolean; permissionError: string | null;
-  recoverableMeetings: MeetingMetadata[]; isRecoveryLoading: boolean; isRecording: boolean; recordingStatus: RecordingStatus;
-  recordingDuration: number | null; newMeetingDisabled: boolean; onNewMeeting: () => void; onCalendarMeetingStart: (event: CalendarEvent) => void; onImport: (filePath?: string | null) => void;
-  onReviewRecovery: () => void; onOpenSettings: () => void;
+  hasMicrophone: boolean;
+  isCheckingMicrophone: boolean;
+  permissionError: string | null;
+  onRetryMicrophoneCheck: () => void;
+  recoverableMeetings: MeetingMetadata[];
+  newMeetingDisabled: boolean;
+  onNewMeeting: () => void;
+  onCalendarMeetingStart: (event: CalendarEvent) => void;
+  onImport: (filePath?: string | null) => void;
+  onReviewRecovery: () => void;
+  onOpenSettings: () => void;
 }
-function greetingFor(date: Date) { const hour = date.getHours(); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening' }
-function formatDate(date: Date) { return new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(date) }
-function formatDuration(ms: number | null) { if (ms == null || !Number.isFinite(ms)) return ''; const mins = Math.max(1, Math.round(ms / 60000)); return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60 ? `${mins % 60}m` : ''}`.trim() }
-function formatMeetingTime(value: string) { const date = new Date(value); if (Number.isNaN(date.getTime())) return ''; const same = date.toDateString() === new Date().toDateString(); return new Intl.DateTimeFormat(undefined, same ? { hour: 'numeric', minute: '2-digit' } : { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(date) }
-function displayMeetingTitle(title: string) { const v = title.trim(); return !v || /^Meeting\s+\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}$/i.test(v) ? 'Untitled meeting' : v }
-function providerLabel(value: string) { return value === 'appleSpeech' ? 'Apple Speech' : value.split(/[-_]/g).map(p => p ? `${p[0].toUpperCase()}${p.slice(1)}` : p).join(' ') }
-function statusLabel(status: MeetingListItem['summaryStatus']) { return status === 'ready' ? ['Summarised', 'text-success'] : status === 'generating' ? ['Generating summary…', 'text-warn'] : status === 'failed' ? ['Summary failed', 'text-danger'] : ['No summary', 'text-3'] }
 
-function RecentMeetingRow({ item, onOpen }: { item: MeetingListItem; onOpen: () => void }) {
-  const [label, tone] = statusLabel(item.summaryStatus);
-  return <button type="button" onClick={onOpen} className="grid w-full grid-cols-[22px_minmax(0,1fr)_110px] items-center gap-3 border-t border-border px-4 py-3 text-left first:border-t-0 hover:bg-[var(--hover)]">
-    <Star className={item.starred ? 'h-4 w-4 text-accent' : 'h-4 w-4 text-3'} fill={item.starred ? 'currentColor' : 'none'} strokeWidth={1.7} />
-    <span className="min-w-0"><span className="block truncate text-[13px] font-semibold text-text">{displayMeetingTitle(item.title)}</span><span className={`mt-0.5 block text-[11px] ${tone}`}>{label}</span></span>
-    <span className="text-right font-mono text-[10.5px] leading-5 text-3"><span className="block">{formatMeetingTime(item.createdAt)}</span><span className="block">{formatDuration(item.durationMs)}</span></span>
+function formatDuration(ms: number | null) {
+  if (ms == null || !Number.isFinite(ms)) return '';
+  const mins = Math.max(1, Math.round(ms / 60000));
+  return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60 ? `${mins % 60}m` : ''}`.trim();
+}
+
+function formatMeetingTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const sameDay = date.toDateString() === new Date().toDateString();
+  return new Intl.DateTimeFormat(undefined, sameDay
+    ? { hour: 'numeric', minute: '2-digit' }
+    : { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date);
+}
+
+function displayMeetingTitle(title: string) {
+  const value = title.trim();
+  return !value || /^Meeting\s+\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}$/i.test(value) ? 'Untitled meeting' : value;
+}
+
+function statusLabel(status: MeetingListItem['summaryStatus']) {
+  if (status === 'ready') return 'Summary ready';
+  if (status === 'generating') return 'Writing summary…';
+  if (status === 'failed') return 'Summary failed';
+  return 'No summary yet';
+}
+
+function MeetingRow({ item, onOpen }: { item: MeetingListItem; onOpen: () => void }) {
+  return <button type="button" onClick={onOpen} className="grid w-full grid-cols-[20px_minmax(0,1fr)_auto_18px] items-center gap-3 border-t border-border px-1 py-4 text-left first:border-t-0 hover:bg-[var(--hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+    <Star className={item.starred ? 'h-4 w-4 text-accent' : 'h-4 w-4 text-3'} fill={item.starred ? 'currentColor' : 'none'} strokeWidth={1.7} aria-hidden="true" />
+    <span className="min-w-0"><span className="block truncate text-[13px] font-medium text-text">{displayMeetingTitle(item.title)}</span><span className="mt-1 block truncate text-[11px] text-3">{statusLabel(item.summaryStatus)}</span></span>
+    <span className="text-right text-[11px] leading-5 text-3"><span className="block">{formatMeetingTime(item.createdAt)}</span><span className="block">{formatDuration(item.durationMs)}</span></span>
+    <ChevronRight className="h-4 w-4 text-3" aria-hidden="true" />
   </button>;
 }
 
 export default function HomeDashboard(props: HomeDashboardProps) {
   const router = useRouter();
-  const { selectedDevices, transcriptModelConfig, selectedLanguage, modelConfig, error: configError } = useConfig();
-  const { items, isLoading: meetingsLoading, error: meetingsError, refresh } = useMeetingList({ query: '', sort: 'newest', starredOnly: false });
-  const now = useMemo(() => new Date(), []); const recent = items.slice(0, 2);
-  const busyRecording = props.isRecording || props.recordingStatus === RecordingStatus.STARTING || props.recordingStatus === RecordingStatus.STOPPING;
-  const meetingNeedingAttention = items.find(m => m.summaryStatus === 'missing' || m.summaryStatus === 'failed');
-  const hasAttention = props.recoverableMeetings.length > 0 || props.permissionError || meetingNeedingAttention;
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => { event.preventDefault(); const file = event.dataTransfer.files?.[0] as (File & { path?: string }) | undefined; if (file) props.onImport(file.path ?? null) };
-  const readiness = [
-    { label: 'Microphone', ok: props.hasMicrophone, loading: props.permissionsLoading, text: props.permissionsLoading ? 'Checking…' : props.hasMicrophone ? selectedDevices.micDevice || 'Available · default device' : 'No available microphone', href: '/settings?section=recording', icon: 'audio' },
-    { label: 'System audio', ok: props.hasSystemAudio, loading: props.permissionsLoading, text: props.permissionsLoading ? 'Checking…' : props.hasSystemAudio ? selectedDevices.systemDevice || 'Available · default device' : 'No available system-audio device', href: '/settings?section=recording', icon: 'audio' },
-    { label: 'Transcription', ok: true, loading: false, text: transcriptModelConfig.provider === 'appleSpeech' ? `${providerLabel(transcriptModelConfig.provider)} · ${transcriptModelConfig.model}` : `${providerLabel(transcriptModelConfig.provider)} · ${transcriptModelConfig.model} · ${selectedLanguage}`, href: '/settings?section=transcription', icon: 'transcription' },
-    { label: 'Summary', ok: !configError, loading: false, text: configError ? 'Verify the configured provider' : `${providerLabel(modelConfig.provider)} · ${modelConfig.model}`, href: '/settings?section=summary', icon: 'summary' },
-  ];
+  const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
+  const { items, isLoading, error, hasMore, isLoadingMore, refresh, loadMore } = useMeetingList({ query: '', sort: 'newest', starredOnly: false });
 
-  return <div className="h-full overflow-y-auto bg-bg custom-scrollbar" onDragOver={e => e.preventDefault()} onDrop={handleDrop}>
-    <div className="mx-auto w-full max-w-[760px] px-6 pb-12 pt-7 md:px-8">
-      <div className="flex items-start justify-between gap-6"><div><h1 className="text-[26px] font-semibold tracking-[-.035em] text-text">{greetingFor(now)}</h1><p className="mt-1 font-mono text-[11px] text-3">{formatDate(now)}</p></div><button type="button" onClick={props.onNewMeeting} disabled={props.newMeetingDisabled || busyRecording} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-[11px] bg-accent px-4 text-[12px] font-semibold text-accent-foreground shadow-[0_6px_18px_rgba(204,72,5,.16)] hover:brightness-95 disabled:opacity-45"><span className="h-2 w-2 rounded-full bg-current" />{busyRecording ? 'Meeting in progress' : 'New meeting'}</button></div>
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files?.[0] as (File & { path?: string }) | undefined;
+    if (file) props.onImport(file.path ?? null);
+  };
 
-      <CalendarAgendaCard onStart={props.onCalendarMeetingStart} />
+  return <div className="h-full overflow-y-auto bg-bg custom-scrollbar" onDragOver={event => event.preventDefault()} onDrop={handleDrop}>
+    <div className="mx-auto w-full max-w-[920px] px-8 pb-12 pt-8">
+      <header className="flex items-center justify-between gap-5">
+        <div><h1 className="text-[25px] font-semibold tracking-[-.035em] text-text">Your meetings</h1><p className="mt-1 text-[12px] text-3">Recorded conversations, in one place.</p></div>
+        <button type="button" onClick={props.onNewMeeting} disabled={props.newMeetingDisabled} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-[10px] bg-text px-4 text-[12px] font-semibold text-bg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45">New meeting</button>
+      </header>
 
-      <div className="mt-7"><ActionInboxPreview /></div>
+      <div className="mt-5 flex items-center gap-4 text-[11px]">
+        <button type="button" onClick={() => props.onImport()} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-2 hover:bg-panel-2 hover:text-text"><Upload className="h-3.5 w-3.5" />Import audio</button>
+        <button type="button" onClick={props.onOpenSettings} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-2 hover:bg-panel-2 hover:text-text"><Settings className="h-3.5 w-3.5" />Settings</button>
+      </div>
 
-      <section className="mt-6 overflow-hidden rounded-[16px] border border-border bg-panel shadow-[0_1px_2px_rgba(24,18,12,.03)]" aria-labelledby="capture-readiness"><div className="flex h-11 items-center justify-between border-b border-border px-4"><h2 id="capture-readiness" className="text-[13px] font-semibold text-text">Capture readiness</h2><span className="inline-flex items-center gap-1.5 font-mono text-[9.5px] text-3"><i className="h-1.5 w-1.5 rounded-full bg-success" />Ready</span></div>{readiness.map(row => <button key={row.label} type="button" onClick={() => router.push(row.href)} className="grid w-full grid-cols-[18px_112px_minmax(0,1fr)_auto] items-center gap-2 border-b border-border px-4 py-[11px] text-left last:border-b-0 hover:bg-[var(--hover)]">
-        {row.loading ? <LoaderCircle className="h-4 w-4 animate-spin text-3" /> : row.icon === 'transcription' ? <Radio className="h-4 w-4 text-3" /> : row.icon === 'summary' ? <Sparkles className={`h-4 w-4 ${row.ok ? 'text-3' : 'text-warn'}`} /> : row.ok ? <CheckCircle2 className="h-4 w-4 text-success" /> : <AlertCircle className="h-4 w-4 text-warn" />}
-        <span className="text-[12.5px] font-medium text-text">{row.label}</span><span className="min-w-0 truncate text-[12px] text-2">{row.text}</span><span className="rounded-[8px] border border-border bg-panel-2 px-2.5 py-1 text-[10.5px] font-medium text-2">{row.ok ? 'Change' : 'Fix'}</span></button>)}</section>
+      {props.recoverableMeetings.length > 0 && <div className="mt-6 flex items-center gap-3 rounded-[10px] border border-warn/30 bg-panel px-3.5 py-3" role="status">
+        <AlertCircle className="h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
+        <span className="min-w-0 flex-1 text-[11.5px] text-text">{props.recoverableMeetings.length === 1 ? 'An interrupted meeting can be recovered.' : `${props.recoverableMeetings.length} interrupted meetings can be recovered.`}</span>
+        <button type="button" onClick={props.onReviewRecovery} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">Review</button>
+      </div>}
+      {props.isCheckingMicrophone ? <div className="mt-3 flex items-center gap-2 text-[11px] text-3" role="status"><LoaderCircle className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />Checking microphone availability…</div>
+        : props.permissionError || !props.hasMicrophone ? <div className="mt-3 flex items-center gap-3 rounded-[10px] border border-warn/30 bg-panel px-3.5 py-3" role="status">
+          <AlertCircle className="h-4 w-4 shrink-0 text-warn" aria-hidden="true" /><span className="min-w-0 flex-1 text-[11.5px] text-text">{props.permissionError ? 'Microphone availability could not be checked.' : 'No microphone detected.'}</span>
+          <button type="button" onClick={props.onRetryMicrophoneCheck} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">Retry</button>
+          <button type="button" onClick={props.onOpenSettings} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">Settings</button>
+        </div> : null}
 
-      <section className="mt-6" aria-labelledby="recent-home"><div className="mb-2 flex items-center justify-between"><h2 id="recent-home" className="text-[13px] font-semibold text-text">Recent meetings</h2>{items.length > 0 && <button type="button" onClick={() => router.push('/meetings')} className="inline-flex items-center gap-1 text-[11px] font-medium text-accent hover:underline">See all <ArrowRight className="h-3 w-3" /></button>}</div>
-        {meetingsLoading && !items.length ? <div className="horizon-card flex items-center justify-center py-8 text-[12px] text-3"><LoaderCircle className="mr-2 h-4 w-4 animate-spin" />Loading meetings…</div> : meetingsError && !items.length ? <div className="horizon-card p-5 text-center"><p className="text-[12px] font-semibold">Recent meetings could not be loaded</p><button type="button" onClick={() => void refresh()} className="mt-3 rounded-[9px] border border-border px-3 py-1.5 text-[11px]">Retry</button></div> : !recent.length ? <div className="horizon-card p-7 text-center"><FileAudio className="mx-auto h-5 w-5 text-3" /><p className="mt-3 text-[14px] font-semibold">Your meetings will appear here</p><p className="mt-1 text-[12px] text-2">Start a meeting, or import an audio file.</p><div className="mt-4 flex justify-center gap-2"><button type="button" onClick={props.onNewMeeting} disabled={props.newMeetingDisabled} className="rounded-[9px] bg-accent px-3 py-2 text-[11px] font-semibold text-accent-foreground"><Mic className="mr-1 inline h-3 w-3" />New meeting</button><button type="button" onClick={() => props.onImport()} className="rounded-[9px] border border-border px-3 py-2 text-[11px]"><Upload className="mr-1 inline h-3 w-3" />Import</button></div></div> : <div className="overflow-hidden rounded-[16px] border border-border bg-panel">{recent.map(item => <RecentMeetingRow key={item.id} item={item} onOpen={() => router.push(`/meeting?id=${encodeURIComponent(item.id)}`)} />)}</div>}
+      <section className="mt-7" aria-labelledby="meeting-list-heading">
+        <div className="mb-2 flex items-center justify-between"><h2 id="meeting-list-heading" className="text-[12px] font-semibold text-2">Recent</h2><span className="text-[11px] text-3">Newest first</span></div>
+        {isLoading && !items.length ? <div className="flex items-center justify-center border-y border-border py-10 text-[12px] text-3"><LoaderCircle className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" />Loading meetings…</div>
+          : error && !items.length ? <div className="border-y border-border py-8 text-center"><p className="text-[12px] font-medium text-text">Meetings could not be loaded.</p><button type="button" onClick={() => void refresh()} className="mt-3 inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-accent hover:bg-accent-soft"><RefreshCw className="h-3 w-3" />Try again</button></div>
+            : !items.length ? <div className="border-y border-border py-12 text-center"><FileAudio className="mx-auto h-5 w-5 text-3" aria-hidden="true" /><p className="mt-3 text-[13px] font-medium text-text">No meetings yet</p><p className="mt-1 text-[11px] text-3">Start a meeting or import an audio file.</p></div>
+              : <div className="border-y border-border">{items.map(item => <MeetingRow key={item.id} item={item} onOpen={() => router.push(`/meeting?id=${encodeURIComponent(item.id)}`)} />)}</div>}
+        {error && items.length > 0 && <div className="mt-3 flex items-center gap-2 text-[11px] text-danger" role="alert"><span>More meetings could not be loaded.</span><button type="button" onClick={() => void refresh()} className="font-semibold underline underline-offset-2">Retry</button></div>}
+        {hasMore && <button type="button" onClick={() => void loadMore()} disabled={isLoadingMore} className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-2 hover:bg-panel-2 disabled:opacity-50">{isLoadingMore ? <LoaderCircle className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> : <ChevronDown className="h-3.5 w-3.5" />}{isLoadingMore ? 'Loading…' : 'Load more meetings'}</button>}
       </section>
 
-      {hasAttention && <section className="mt-6" aria-labelledby="attention-home"><h2 id="attention-home" className="mb-2 text-[12px] font-semibold text-2">Needs attention</h2><div className="overflow-hidden rounded-[16px] border border-border bg-panel">{props.recoverableMeetings.length > 0 && <button type="button" onClick={props.onReviewRecovery} className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left last:border-b-0 hover:bg-[var(--hover)]"><AlertCircle className="h-4 w-4 text-warn" /><span className="min-w-0 flex-1 text-[12px]">{props.recoverableMeetings.length === 1 ? 'An interrupted meeting can be recovered' : `${props.recoverableMeetings.length} interrupted meetings can be recovered`}</span><span className="text-[10.5px] font-medium text-accent">Review →</span></button>}{props.permissionError && <button type="button" onClick={props.onOpenSettings} className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left last:border-b-0 hover:bg-[var(--hover)]"><AlertCircle className="h-4 w-4 text-warn" /><span className="flex-1 text-[12px]">Audio readiness could not be verified</span><span className="text-[10.5px] text-accent">Settings →</span></button>}{meetingNeedingAttention && <button type="button" onClick={() => router.push(`/meeting?id=${encodeURIComponent(meetingNeedingAttention.id)}`)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--hover)]"><AlertCircle className="h-4 w-4 text-warn" /><span className="min-w-0 flex-1 truncate text-[12px]"><strong>{displayMeetingTitle(meetingNeedingAttention.title)}</strong> · {meetingNeedingAttention.summaryStatus === 'failed' ? 'summary failed' : 'no summary'}</span><span className="text-[10.5px] text-accent">Open →</span></button>}</div></section>}
+      <details className="mt-8 border-t border-border pt-4" onToggle={event => setMoreOptionsOpen(event.currentTarget.open)}>
+        <summary className="cursor-pointer list-none text-[11px] font-medium text-3 hover:text-text [&::-webkit-details-marker]:hidden"><span className="inline-flex items-center gap-1.5">Calendar and action inbox <ChevronDown className="h-3.5 w-3.5" /></span></summary>
+        {moreOptionsOpen && <div className="mt-4 space-y-5">
+          <CalendarAgendaCard onStart={props.onCalendarMeetingStart} />
+          <ActionInboxPreview />
+        </div>}
+      </details>
     </div>
   </div>;
 }
