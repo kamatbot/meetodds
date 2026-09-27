@@ -106,6 +106,8 @@ export function useLiveTranslation(
 ): LiveTranslationState {
   const [settings, setSettings] = useState<LiveTranslationSettings>(DEFAULT_LIVE_TRANSLATION_SETTINGS);
   const [translations, setTranslations] = useState<Record<string, LiveTranslationEntry>>({});
+  const translationsRef = useRef(translations);
+  translationsRef.current = translations;
   const [queuedCount, setQueuedCount] = useState(0);
   const [activeCount, setActiveCount] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -677,6 +679,17 @@ export function useLiveTranslation(
       latestRevisionRef.current.set(segmentKey, revision);
       const activeRequestId = activeRequestIdsRef.current.get(segmentKey);
       if (activeRequestId) cancelNativeRequest(activeRequestId);
+      if (isLive && !translationsRef.current[segmentKey]?.translatedText) {
+        // The instant handoff seeds this turn from a finished preview translation of the
+        // same text; translating it again would only occupy the (single local) model.
+        const preview = translationsRef.current[`live-preview-${transcript.speaker_source === 'system' ? 'system' : 'microphone'}`];
+        if (
+          preview?.status === 'translated'
+          && preview.targetLanguage === settings.targetLanguage
+          && preview.sourceText?.trim() === text
+          && preview.translatedText?.trim()
+        ) return;
+      }
       enqueueJob({
         segmentKey,
         text,

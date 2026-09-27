@@ -122,6 +122,20 @@ test('instant preview-to-final handoff seeds translation immediately without lat
   assert.equal(h.value.translations['sequence-9']?.translatedText, 'Good morning everyone');
   assert.equal(h.value.translations['sequence-9']?.status, 'translated');
 });
+test('a finalized turn identical to the translated preview is not translated twice', async () => {
+  const h = harness(); await h.flush(); const first = h.jobs[0];
+  await h.finish(first, 'Good morning everyone');
+  // A turn finalized meanwhile gives the final job different context, so the result cache misses.
+  const earlier = { id: 'turn0', sequence_id: 8, text: 'Hola', speaker_source: 'system', speaker_label: 'Them' };
+  const turn = { id: 'turn1', sequence_id: 9, text: ` ${speech(1).text} `, speaker_source: 'microphone', speaker_label: 'Me' };
+  const finalJobs = () => h.jobs.filter(j => !j.args.requestId.startsWith('live-preview')).map(j => j.args.text);
+  await h.input(null, 'meeting-a', [earlier, turn]);
+  assert.deepEqual(finalJobs(), ['Hola'], 'only the other turn is translated');
+  assert.equal(h.value.translations['sequence-9']?.translatedText, 'Good morning everyone');
+  assert.equal(h.value.translations['sequence-9']?.status, 'translated');
+  await h.input(null, 'meeting-a', [earlier, turn, { id: 'turn2', sequence_id: 10, text: 'Otra frase', speaker_source: 'microphone', speaker_label: 'Me' }]);
+  assert.deepEqual(finalJobs(), ['Hola', 'Otra frase'], 'not re-queued as backfill later');
+});
 test('handoff seed survives the uncached canonical job placeholder', async () => {
   const h = harness(); await h.flush(); const first = h.jobs[0];
   await h.finish(first, 'Good morning everyone');
@@ -129,6 +143,7 @@ test('handoff seed survives the uncached canonical job placeholder', async () =>
   await h.input(null, 'meeting-a', [turn]);
   assert.equal(h.value.translations['sequence-9']?.translatedText, 'Good morning everyone');
   assert.equal(h.value.translations['sequence-9']?.status, 'translating');
+  assert.ok(h.jobs.some(j => j.args.text === turn.text), 'a longer final turn is still translated');
 });
 test('streaming deltas do not rescan or re-enqueue backfill turns', async () => {
   const h = harness(); await h.flush(); const first = h.jobs[0];
