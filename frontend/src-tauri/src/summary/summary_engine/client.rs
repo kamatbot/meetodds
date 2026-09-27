@@ -24,9 +24,15 @@ use super::sidecar::SidecarManager;
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Request {
     Generate {
+        /// Echoed in the reply so it can be paired with this request
+        id: u64,
         prompt: String,
         max_tokens: Option<i32>,
+        /// Model load key; unchanged per model so summaries and translations share it
         context_size: Option<u32>,
+        /// Smaller per-request llama context (helper grows it to fit prompt + output)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        n_ctx: Option<u32>,
         model_path: Option<String>,
         // Sampling parameters
         temperature: Option<f32>,
@@ -182,6 +188,52 @@ pub async fn generate_with_builtin_with_sampling(
     cancellation_token: Option<&CancellationToken>,
     sampling_override: Option<BuiltinSamplingOverride>,
 ) -> Result<String> {
+    generate_builtin(
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        max_tokens,
+        cancellation_token,
+        sampling_override,
+        false,
+    )
+    .await
+}
+
+/// Live translation: cancelling aborts just this generation in the helper instead of
+/// restarting it, so a superseded caption frees the model for the next one.
+pub async fn translate_with_builtin(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    cancellation_token: &CancellationToken,
+) -> Result<String> {
+    generate_builtin(
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        max_tokens,
+        Some(cancellation_token),
+        None,
+        true,
+    )
+    .await
+}
+
+async fn generate_builtin(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    cancellation_token: Option<&CancellationToken>,
+    sampling_override: Option<BuiltinSamplingOverride>,
+    live_translation: bool,
+) -> Result<String> {
     let sampling_override = sampling_override
         .map(BuiltinSamplingOverride::validated)
         .transpose()?;
@@ -232,10 +284,14 @@ pub async fn generate_with_builtin_with_sampling(
         sampling.top_p = overrides.top_p;
         sampling.top_k = overrides.top_k;
     }
+    let request_id = manager.next_request_id();
     let request = Request::Generate {
+        id: request_id,
         prompt: formatted_prompt,
         max_tokens: Some(max_tokens.map_or(models::DEFAULT_MAX_TOKENS, |value| value as i32)),
         context_size: Some(model_def.context_size),
+        // A 32k KV cache per caption dominates latency; size live translations to fit.
+        n_ctx: live_translation.then_some(models::LIVE_TRANSLATION_MIN_CTX),
         model_path: Some(model_path.to_string_lossy().to_string()),
         temperature: Some(sampling.temperature),
         top_k: Some(sampling.top_k),
@@ -255,9 +311,13 @@ pub async fn generate_with_builtin_with_sampling(
     log::info!("Sending generation request to sidecar");
 
     // Race between send_request and cancellation token
-    let response_json = if let Some(token) = cancellation_token {
+    let response_json = if let (true, Some(token)) = (live_translation, cancellation_token) {
+        manager
+            .send_request_cancellable(request_id, request_json, timeout, token)
+            .await?
+    } else if let Some(token) = cancellation_token {
         tokio::select! {
-            result = manager.send_request(request_json, timeout) => {
+            result = manager.send_request(request_id, request_json, timeout) => {
                 result?
             }
             _ = token.cancelled() => {
@@ -270,7 +330,7 @@ pub async fn generate_with_builtin_with_sampling(
             }
         }
     } else {
-        manager.send_request(request_json, timeout).await?
+        manager.send_request(request_id, request_json, timeout).await?
     };
 
     // Check cancellation before parsing response
@@ -357,9 +417,11 @@ mod tests {
     #[test]
     fn test_request_serialization() {
         let request = Request::Generate {
+            id: 7,
             prompt: "test prompt".to_string(),
             max_tokens: Some(512),
             context_size: Some(2048),
+            n_ctx: None,
             model_path: Some("/path/to/model.gguf".to_string()),
             temperature: Some(1.0),
             top_k: Some(64),
@@ -373,6 +435,8 @@ mod tests {
 
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"type\":\"generate\""));
+        assert!(json.contains("\"id\":7"));
+        assert!(!json.contains("n_ctx"), "summaries use the full model context");
         assert!(json.contains("\"prompt\":\"test prompt\""));
         assert!(json.contains("\"max_tokens\":512"));
         assert!(json.contains("\"temperature\":1.0"));

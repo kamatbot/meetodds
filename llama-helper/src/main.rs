@@ -1,8 +1,10 @@
+use std::collections::VecDeque;
 use std::io::{self, BufRead, Write};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -18,14 +20,19 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 // Protocol Messages (JSON over stdin/stdout)
 // ============================================================================
+// Every reply echoes the request `id` so the app can pair replies with requests.
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Request {
     Generate {
+        id: Option<u64>,
         prompt: String,
         max_tokens: Option<i32>,
         context_size: Option<u32>,
+        /// Ask for a smaller llama context than `context_size` (which stays the model
+        /// load key). Grown to fit prompt + max_tokens; see `request_n_ctx`.
+        n_ctx: Option<u32>,
         model_path: Option<String>,
         // Sampling parameters
         temperature: Option<f32>,
@@ -37,18 +44,36 @@ enum Request {
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
     },
-    Ping,
+    Ping {
+        id: Option<u64>,
+    },
     Shutdown,
+    /// Stop the generation for request `id` early; it still gets a (cancelled) reply.
+    Cancel {
+        id: u64,
+    },
 }
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Response {
-    Response { text: String, error: Option<String> },
-    Pong,
+    Response {
+        id: Option<u64>,
+        text: String,
+        error: Option<String>,
+    },
+    Pong {
+        id: Option<u64>,
+    },
     Goodbye,
-    Error { message: String },
+    Error {
+        id: Option<u64>,
+        message: String,
+    },
 }
+
+/// A parsed stdin line, or the parse error with the line's `id` if it had one.
+type Incoming = std::result::Result<Request, (Option<u64>, String)>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct SamplingConfig {
@@ -349,8 +374,10 @@ impl ModelState {
         &mut self,
         prompt: String,
         max_tokens: i32,
+        n_ctx: Option<u32>,
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
+        mut cancel_requested: impl FnMut() -> bool,
     ) -> Result<String> {
         let start_time = Instant::now();
         let model = self.model.as_ref().context("Model not loaded")?;
@@ -364,11 +391,26 @@ impl ModelState {
             })
             .unwrap_or(2);
 
+        let tokens_list = model
+            .str_to_token(&prompt, AddBos::Always)
+            .with_context(|| "failed to tokenize prompt")?;
+
+        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
+
+        // Full-size requests (summaries) keep one batch as large as the context.
+        let n_ctx = request_n_ctx(self.context_size, n_ctx, tokens_list.len(), max_tokens);
+        let n_batch = if n_ctx < self.context_size {
+            n_ctx.min(512)
+        } else {
+            n_ctx
+        };
+
+        // ponytail: a fresh context (KV cache) per request. Next step is one persistent
+        // context reusing the shared prompt prefix, but LlamaContext borrows the model,
+        // so ModelState would become self-referential.
         let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(Some(
-                NonZeroU32::new(self.context_size).context("Invalid ctx size")?,
-            ))
-            .with_n_batch(self.context_size)
+            .with_n_ctx(Some(NonZeroU32::new(n_ctx).context("Invalid ctx size")?))
+            .with_n_batch(n_batch)
             .with_n_threads(threads)
             .with_n_threads_batch(threads);
 
@@ -376,28 +418,25 @@ impl ModelState {
             .new_context(&self.backend, ctx_params)
             .context("unable to create the llama_context")?;
 
-        let tokens_list = model
-            .str_to_token(&prompt, AddBos::Always)
-            .with_context(|| "failed to tokenize prompt")?;
+        let mut batch = LlamaBatch::new(n_batch as usize, 1);
 
-        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
-
-        // Use context size for batch capacity to handle long prompts
-        let batch_size = self.context_size as usize;
-        let mut batch = LlamaBatch::new(batch_size, 1);
-
+        // Decode the prompt in chunks of at most n_batch tokens.
         let last_index: i32 = (tokens_list.len() - 1) as i32;
         for (i, token) in (0_i32..).zip(tokens_list.into_iter()) {
             let is_last = i == last_index;
             batch
                 .add(token, i, &[0], is_last)
                 .context("Failed to add token to batch")?;
+            if is_last || batch.n_tokens() as u32 == n_batch {
+                ctx.decode(&mut batch).context("llama_decode() failed")?;
+                if !is_last {
+                    batch.clear();
+                }
+            }
         }
-
-        ctx.decode(&mut batch).context("llama_decode() failed")?;
         let prompt_time = start_time.elapsed();
 
-        let n_prompt_tokens = batch.n_tokens();
+        let n_prompt_tokens = last_index + 1;
         let mut n_cur = n_prompt_tokens;
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
@@ -448,6 +487,11 @@ impl ModelState {
         let mut sampler = pin!(sampler);
 
         loop {
+            if cancel_requested() {
+                eprintln!("✋ Generation cancelled");
+                anyhow::bail!("cancelled");
+            }
+
             // Check if we've generated enough tokens
             if (n_cur - n_prompt_tokens) >= max_tokens {
                 eprintln!("✓ Reached max_tokens limit");
@@ -534,6 +578,16 @@ impl ModelState {
     }
 }
 
+/// Context size for one request: the model's full `context_size` unless the request asks
+/// for less, in which case prompt + max_tokens (rounded up to 512) must still fit.
+fn request_n_ctx(context_size: u32, requested: Option<u32>, prompt_tokens: usize, max_tokens: i32) -> u32 {
+    let Some(requested) = requested else {
+        return context_size;
+    };
+    let needed = (prompt_tokens as u64 + max_tokens.max(0) as u64).div_ceil(512) * 512;
+    needed.max(requested as u64).min(context_size as u64) as u32
+}
+
 // ============================================================================
 // Main Loop with Keep-Alive Protocol
 // ============================================================================
@@ -543,6 +597,55 @@ fn send_response(response: &Response) -> Result<()> {
     println!("{}", json);
     io::stdout().flush()?;
     Ok(())
+}
+
+/// Reads stdin on its own thread so a running generation can see `cancel` lines.
+/// The channel closes on EOF or a read error.
+fn spawn_stdin_reader() -> Receiver<Incoming> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in io::stdin().lock().lines() {
+            let line = match line {
+                Ok(line) => line,
+                Err(e) => {
+                    eprintln!("❌ Error reading stdin: {}", e);
+                    break;
+                }
+            };
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let incoming = serde_json::from_str::<Request>(line).map_err(|e| {
+                let id = serde_json::from_str::<serde_json::Value>(line)
+                    .ok()
+                    .and_then(|v| v.get("id")?.as_u64());
+                (id, e.to_string())
+            });
+            if tx.send(incoming).is_err() {
+                break;
+            }
+        }
+    });
+    rx
+}
+
+/// Queues lines that arrived mid-generation and removes a `cancel` for `id`, if any.
+fn take_cancel(rx: &Receiver<Incoming>, pending: &mut VecDeque<Incoming>, id: Option<u64>) -> bool {
+    pending.extend(rx.try_iter());
+    let Some(id) = id else {
+        return false;
+    };
+    match pending
+        .iter()
+        .position(|m| matches!(m, Ok(Request::Cancel { id: c }) if *c == id))
+    {
+        Some(pos) => {
+            pending.remove(pos);
+            true
+        }
+        None => false,
+    }
 }
 
 fn main() -> Result<()> {
@@ -559,9 +662,9 @@ fn main() -> Result<()> {
 
     let mut state = ModelState::new()?;
 
-    let stdin = io::stdin();
-    let mut stdin_lock = stdin.lock();
-    let mut buffer = String::new();
+    let rx = spawn_stdin_reader();
+    // Requests that arrived while a generation was running.
+    let mut pending: VecDeque<Incoming> = VecDeque::new();
 
     loop {
         // Check idle timeout
@@ -571,100 +674,109 @@ fn main() -> Result<()> {
             break;
         }
 
-        // Read line from stdin
-        buffer.clear();
-        match stdin_lock.read_line(&mut buffer) {
-            Ok(0) => {
-                // EOF reached
-                eprintln!("📪 EOF received, shutting down");
-                break;
-            }
-            Ok(_) => {
-                let line = buffer.trim();
-                if line.is_empty() {
+        let incoming = match pending.pop_front() {
+            Some(incoming) => incoming,
+            None => match rx.recv() {
+                Ok(incoming) => incoming,
+                Err(_) => {
+                    // EOF reached
+                    eprintln!("📪 EOF received, shutting down");
+                    break;
+                }
+            },
+        };
+
+        match incoming {
+            Ok(Request::Generate {
+                id,
+                prompt,
+                max_tokens,
+                context_size,
+                n_ctx,
+                model_path,
+                temperature,
+                top_k,
+                top_p,
+                presence_penalty,
+                frequency_penalty,
+                repeat_penalty,
+                penalty_last_n,
+                stop_tokens,
+            }) => {
+                if take_cancel(&rx, &mut pending, id) {
+                    eprintln!("✋ Generation cancelled before start");
+                    send_response(&Response::Response {
+                        id,
+                        text: String::new(),
+                        error: Some("Generation failed: cancelled".to_string()),
+                    })?;
                     continue;
                 }
 
-                // Parse request
-                match serde_json::from_str::<Request>(line) {
-                    Ok(Request::Generate {
-                        prompt,
-                        max_tokens,
-                        context_size,
-                        model_path,
-                        temperature,
-                        top_k,
-                        top_p,
-                        presence_penalty,
-                        frequency_penalty,
-                        repeat_penalty,
-                        penalty_last_n,
-                        stop_tokens,
-                    }) => {
-                        let max_tokens = max_tokens.unwrap_or(512);
-                        let context_size = context_size.unwrap_or(2048);
+                let max_tokens = max_tokens.unwrap_or(512);
+                let context_size = context_size.unwrap_or(2048);
 
-                        let sampling = SamplingConfig::from_request(
-                            temperature,
-                            top_k,
-                            top_p,
-                            presence_penalty,
-                            frequency_penalty,
-                            repeat_penalty,
-                            penalty_last_n,
-                        );
-                        let stop_tokens = stop_tokens.unwrap_or_else(Vec::new);
+                let sampling = SamplingConfig::from_request(
+                    temperature,
+                    top_k,
+                    top_p,
+                    presence_penalty,
+                    frequency_penalty,
+                    repeat_penalty,
+                    penalty_last_n,
+                );
+                let stop_tokens = stop_tokens.unwrap_or_else(Vec::new);
 
-                        // Load model if path provided
-                        if let Some(path_str) = model_path {
-                            let path = PathBuf::from(path_str);
-                            if let Err(e) = state.load_model_if_needed(path, context_size) {
-                                send_response(&Response::Response {
-                                    text: String::new(),
-                                    error: Some(format!("Failed to load model: {}", e)),
-                                })?;
-                                continue;
-                            }
-                        }
-
-                        // Generate response with sampling parameters
-                        match state.generate(
-                            prompt,
-                            max_tokens,
-                            sampling,
-                            stop_tokens,
-                        ) {
-                            Ok(text) => {
-                                send_response(&Response::Response { text, error: None })?;
-                            }
-                            Err(e) => {
-                                send_response(&Response::Response {
-                                    text: String::new(),
-                                    error: Some(format!("Generation failed: {}", e)),
-                                })?;
-                            }
-                        }
+                // Load model if path provided
+                if let Some(path_str) = model_path {
+                    let path = PathBuf::from(path_str);
+                    if let Err(e) = state.load_model_if_needed(path, context_size) {
+                        send_response(&Response::Response {
+                            id,
+                            text: String::new(),
+                            error: Some(format!("Failed to load model: {}", e)),
+                        })?;
+                        continue;
                     }
-                    Ok(Request::Ping) => {
-                        state.update_activity();
-                        send_response(&Response::Pong)?;
-                    }
-                    Ok(Request::Shutdown) => {
-                        eprintln!("🛑 Shutdown requested");
-                        send_response(&Response::Goodbye)?;
-                        break;
+                }
+
+                // Generate response with sampling parameters
+                match state.generate(prompt, max_tokens, n_ctx, sampling, stop_tokens, || {
+                    take_cancel(&rx, &mut pending, id)
+                }) {
+                    Ok(text) => {
+                        send_response(&Response::Response {
+                            id,
+                            text,
+                            error: None,
+                        })?;
                     }
                     Err(e) => {
-                        eprintln!("❌ Failed to parse request: {}", e);
-                        send_response(&Response::Error {
-                            message: format!("Invalid request: {}", e),
+                        send_response(&Response::Response {
+                            id,
+                            text: String::new(),
+                            error: Some(format!("Generation failed: {}", e)),
                         })?;
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("❌ Error reading stdin: {}", e);
+            Ok(Request::Ping { id }) => {
+                state.update_activity();
+                send_response(&Response::Pong { id })?;
+            }
+            // Its request already finished (and was answered); nothing to do.
+            Ok(Request::Cancel { .. }) => {}
+            Ok(Request::Shutdown) => {
+                eprintln!("🛑 Shutdown requested");
+                send_response(&Response::Goodbye)?;
                 break;
+            }
+            Err((id, e)) => {
+                eprintln!("❌ Failed to parse request: {}", e);
+                send_response(&Response::Error {
+                    id,
+                    message: format!("Invalid request: {}", e),
+                })?;
             }
         }
     }
@@ -709,6 +821,44 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.0);
         assert_eq!(sampling.penalty_last_n, 0);
         assert!(!sampling.uses_penalties());
+    }
+
+    #[test]
+    fn request_n_ctx_fits_prompt_and_output_within_model_context() {
+        assert_eq!(request_n_ctx(32768, None, 120, 512), 32768, "summaries keep full context");
+        assert_eq!(request_n_ctx(32768, Some(2048), 120, 512), 2048, "floor");
+        assert_eq!(request_n_ctx(32768, Some(2048), 1700, 512), 2560, "grown, 512-aligned");
+        assert_eq!(request_n_ctx(4096, Some(2048), 9000, 512), 4096, "capped");
+    }
+
+    #[test]
+    fn replies_echo_request_id() {
+        let request: Request = serde_json::from_str(r#"{"type":"ping","id":7}"#).unwrap();
+        let Request::Ping { id } = request else {
+            panic!("expected ping request");
+        };
+        assert_eq!(
+            serde_json::to_string(&Response::Pong { id }).unwrap(),
+            r#"{"type":"pong","id":7}"#
+        );
+        let request: Request = serde_json::from_str(r#"{"type":"ping"}"#).unwrap();
+        assert!(matches!(request, Request::Ping { id: None }));
+    }
+
+    #[test]
+    fn take_cancel_matches_only_its_id_and_keeps_other_lines() {
+        let parse = |line: &str| serde_json::from_str::<Request>(line).map_err(|e| (None, e.to_string()));
+        let (tx, rx) = mpsc::channel();
+        let mut pending = VecDeque::new();
+        tx.send(parse(r#"{"type":"cancel","id":1}"#)).unwrap();
+        tx.send(parse(r#"{"type":"ping","id":3}"#)).unwrap();
+
+        assert!(!take_cancel(&rx, &mut pending, Some(2)));
+        assert_eq!(pending.len(), 2, "unrelated lines stay queued");
+        assert!(!take_cancel(&rx, &mut pending, None));
+        assert!(take_cancel(&rx, &mut pending, Some(1)));
+        assert!(matches!(pending.front(), Some(Ok(Request::Ping { id: Some(3) }))));
+        assert_eq!(pending.len(), 1);
     }
 
     #[test]
