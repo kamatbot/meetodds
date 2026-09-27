@@ -303,6 +303,22 @@ fn get_default_gpu_layers(model_path: &PathBuf, context_size: u32) -> u32 {
         .map(|m| m.len() as f32 / 1024.0 / 1024.0 / 1024.0)
         .unwrap_or(0.0);
 
+    // Apple Silicon memory is unified: layers kept on the CPU use the same RAM, so a partial
+    // offload saves nothing and only slows generation (Qwen3.5 4B at 27/33 layers: prompt
+    // +65%, decode -10%). The KV estimate below assumes ~8 GB for a 32k context where the
+    // shipped GQA/hybrid/sliding-window models need ~1 GB, and the layer estimate is short
+    // for Gemma 3 4B (35), so both only apply when the weights alone don't fit.
+    // ponytail: flat 1 GB for KV + compute; read the KV geometry from GGUF if a model with a
+    // large KV cache ships.
+    #[cfg(feature = "metal")]
+    if file_size_gb > 0.0 && file_size_gb + 1.0 <= vram - 0.5 {
+        eprintln!(
+            "✅ Unified memory: offloading all layers ({:.2} GB weights, {:.2} GB GPU budget)",
+            file_size_gb, vram
+        );
+        return 999; // more than any model has; llama.cpp offloads all of them
+    }
+
     let estimated_layers = if file_size_gb > 2.5 { 33 } else { 28 };
 
     calculate_gpu_layers(model_path, estimated_layers, vram, context_size)
@@ -444,6 +460,8 @@ impl ModelState {
                 }
             }
         }
+        // decode() returns before the GPU is done; wait so the stats split prompt vs generation.
+        let _ = ctx.get_logits_ith(batch.n_tokens() - 1);
         let prompt_time = start_time.elapsed();
 
         let n_prompt_tokens = last_index + 1;
