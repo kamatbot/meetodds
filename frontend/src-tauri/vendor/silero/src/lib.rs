@@ -378,8 +378,13 @@ impl VadSession {
     pub fn trim_start_silence(&mut self) {
         let last_index = if let Some(start_ms) = self.speech_start_ms {
             self.duration_to_index(Duration::from_millis(start_ms as u64))
+        } else if let VadState::Speech { start_ms, .. } = self.state {
+            // Local change: a speech candidate (before min_speech_time) already fixed its
+            // padded start; trimming past it would make the later get_speech panic.
+            self.duration_to_index(Duration::from_millis(start_ms as u64))
         } else {
-            let remove_to = self.session_time() - self.config.pre_speech_pad;
+            // Local change: saturating, so a session shorter than the pad doesn't panic.
+            let remove_to = self.session_time().saturating_sub(self.config.pre_speech_pad);
             self.duration_to_index(remove_to)
         };
         if let Some(last_index) = last_index {
