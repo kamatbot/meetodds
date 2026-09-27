@@ -698,7 +698,8 @@ export function useLiveTranslation(
     ? translations[previewKey]
     : undefined;
 
-  return {
+  // Stable identity: LiveMeetingTranslationProvider passes this object as its context value.
+  return useMemo(() => ({
     settings,
     translations,
     updateSettings,
@@ -714,5 +715,9 @@ export function useLiveTranslation(
     lastFirstWordLatencyMs,
     lastFallbackReason,
     previewTranslation,
-  };
+  }), [
+    settings, translations, updateSettings, clearTranslations, retryPreviewTranslation,
+    queuedCount, activeCount, translatedCount, lastError, lastProvider, lastModel,
+    lastLatencyMs, lastFirstWordLatencyMs, lastFallbackReason, previewTranslation,
+  ]);
 }
