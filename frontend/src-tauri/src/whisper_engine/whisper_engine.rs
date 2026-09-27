@@ -59,6 +59,12 @@ pub struct WhisperEngine {
     active_downloads: Arc<RwLock<HashSet<String>>>, // Set of models currently being downloaded
 }
 
+/// whisper.cpp abort callback for caption-lane decodes: true once a canonical
+/// (saved-transcript) decode is waiting for or holding the local-inference permit.
+unsafe extern "C" fn abort_preview_for_canonical(_user_data: *mut std::ffi::c_void) -> bool {
+    crate::audio::transcription::worker::canonical_transcription_busy()
+}
+
 impl WhisperEngine {
     /// Detect available GPU acceleration capabilities
     fn detect_gpu_acceleration() -> bool {
@@ -605,6 +611,13 @@ impl WhisperEngine {
         params.set_max_len(96);
         params.set_single_segment(true);
         params.set_n_threads(adaptive_config.max_threads.unwrap_or(2).clamp(1, 2) as i32);
+        // Give up at the next encoder/decoder step once a canonical decode is waiting;
+        // whisper_full then returns an error and the caption is discarded. Never set
+        // this on canonical params: the counter is non-zero while canonical runs.
+        // Raw callback on purpose: whisper-rs 0.13.2 set_abort_callback_safe is unsound.
+        unsafe {
+            params.set_abort_callback(Some(abort_preview_for_canonical));
+        }
 
         let mut cached_slot = self.preview_state.try_lock().ok();
         let mut fresh_state = None;

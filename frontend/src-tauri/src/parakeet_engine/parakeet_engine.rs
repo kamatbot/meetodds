@@ -452,6 +452,25 @@ impl ParakeetEngine {
 
     /// Transcribe audio samples using the loaded Parakeet model
     pub async fn transcribe_audio(&self, audio_data: Vec<f32>) -> Result<String> {
+        self.transcribe_audio_until(audio_data, || false).await
+    }
+
+    /// Caption-lane decode: gives up (Err) after the encoder or between decoder steps
+    /// once a canonical decode is waiting, so the saved transcript is never delayed
+    /// by more than one decoder step of preview work.
+    pub async fn transcribe_audio_preview(&self, audio_data: Vec<f32>) -> Result<String> {
+        self.transcribe_audio_until(
+            audio_data,
+            crate::audio::transcription::worker::canonical_transcription_busy,
+        )
+        .await
+    }
+
+    async fn transcribe_audio_until(
+        &self,
+        audio_data: Vec<f32>,
+        cancelled: fn() -> bool,
+    ) -> Result<String> {
         let mut model_guard = self.current_model.write().await;
         let model = model_guard
             .as_mut()
@@ -466,7 +485,7 @@ impl ParakeetEngine {
 
         // Transcribe using Parakeet model
         let result = model
-            .transcribe_samples(audio_data)
+            .transcribe_samples(audio_data, cancelled)
             .map_err(|e| anyhow!("Parakeet transcription failed: {}", e))?;
 
         log::debug!("Parakeet transcription result: '{}'", result.text);

@@ -206,7 +206,7 @@ async fn decode_preview(
             .await
             .map_err(|error| error.to_string()),
         TranscriptionEngine::Parakeet(engine) => engine
-            .transcribe_audio(audio)
+            .transcribe_audio_preview(audio)
             .await
             .map_err(|error| error.to_string()),
         TranscriptionEngine::Provider(provider) => provider

@@ -252,7 +252,7 @@ impl Engine {
     /// The call audio/transcription/live_preview.rs::decode_preview makes.
     async fn preview(&self, samples: Vec<f32>) -> Result<String> {
         match self {
-            Engine::Parakeet(e) => e.transcribe_audio(samples).await,
+            Engine::Parakeet(e) => e.transcribe_audio_preview(samples).await,
             Engine::Whisper(e) => e.transcribe_audio_preview(samples, Some("en".to_string())).await,
         }
     }

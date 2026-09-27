@@ -42,6 +42,8 @@ pub enum ParakeetError {
     OutputNotFound(String),
     #[error("Failed to get tensor shape for input: {0}")]
     TensorShape(String),
+    #[error("Decode cancelled")]
+    Cancelled,
 }
 
 pub struct ParakeetModel {
@@ -332,21 +334,27 @@ impl ParakeetModel {
         Ok((logits.to_owned(), (state1_3d, state2_3d)))
     }
 
+    /// `cancelled` is polled after the encoder and before every decoder step; once it
+    /// returns true the call gives up with `ParakeetError::Cancelled`.
     pub fn recognize_batch(
         &mut self,
         waveforms: &ArrayViewD<f32>,
         waveforms_len: &ArrayViewD<i64>,
+        cancelled: fn() -> bool,
     ) -> Result<Vec<TimestampedResult>, ParakeetError> {
         // Preprocess and encode
         let (features, features_lens) = self.preprocess(waveforms, waveforms_len)?;
         let (encoder_out, encoder_out_lens) =
             self.encode(&features.view(), &features_lens.view())?;
+        if cancelled() {
+            return Err(ParakeetError::Cancelled);
+        }
 
         // Decode for each batch item
         let mut results = Vec::new();
         for (encodings, &encodings_len) in encoder_out.outer_iter().zip(encoder_out_lens.iter()) {
             let (tokens, timestamps) =
-                self.decode_sequence(&encodings.view(), encodings_len as usize)?;
+                self.decode_sequence(&encodings.view(), encodings_len as usize, cancelled)?;
             let result = self.decode_tokens(tokens, timestamps);
             results.push(result);
         }
@@ -358,6 +366,7 @@ impl ParakeetModel {
         &mut self,
         encodings: &ArrayViewD<f32>, // [time_steps, 1024]
         encodings_len: usize,
+        cancelled: fn() -> bool,
     ) -> Result<(Vec<i32>, Vec<usize>), ParakeetError> {
         let mut prev_state = self.create_decoder_state()?;
         let mut tokens = Vec::new();
@@ -367,6 +376,9 @@ impl ParakeetModel {
         let mut emitted_tokens = 0;
 
         while t < encodings_len {
+            if cancelled() {
+                return Err(ParakeetError::Cancelled);
+            }
             let encoder_step = encodings.slice(ndarray::s![t, ..]);
             // Convert to dynamic dimension to match decode_step parameter type
             let encoder_step_dyn = encoder_step.to_owned().into_dyn();
@@ -485,6 +497,7 @@ impl ParakeetModel {
     pub fn transcribe_samples(
         &mut self,
         samples: Vec<f32>,
+        cancelled: fn() -> bool,
     ) -> Result<TimestampedResult, ParakeetError> {
         let batch_size = 1;
         let samples_len = samples.len();
@@ -496,7 +509,7 @@ impl ParakeetModel {
         let waveforms_lens = Array1::from_vec(vec![samples_len as i64]).into_dyn();
 
         // Run recognition to get detailed results
-        let results = self.recognize_batch(&waveforms.view(), &waveforms_lens.view())?;
+        let results = self.recognize_batch(&waveforms.view(), &waveforms_lens.view(), cancelled)?;
 
         // Extract the first (and only) result
         let timestamped_result = results.into_iter().next().ok_or_else(|| {
