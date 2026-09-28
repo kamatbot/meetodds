@@ -458,18 +458,15 @@ pub(crate) struct LocalLlm {
     pub custom_endpoint: Option<String>,
 }
 
+/// A loopback Ollama/custom summary model is honoured; otherwise practice runs on
+/// Apple Intelligence, failing explicitly when it can't handle `language`.
 pub(crate) async fn resolve_local_llm(
     pool: &sqlx::SqlitePool,
-    app_data_dir: &std::path::PathBuf,
+    language: Option<&str>,
 ) -> Result<LocalLlm, String> {
     use crate::summary::llm_client::LLMProvider;
-    use crate::summary::summary_engine::models::{get_available_models, get_model_path};
-    let builtin_present = |name: &str| get_model_path(app_data_dir, name).map_or(false, |p| p.exists());
     if let Ok(cfg) = crate::live_translation::resolve_provider_config(pool).await {
         match cfg.provider {
-            LLMProvider::BuiltInAI if builtin_present(&cfg.model_name) => {
-                return Ok(LocalLlm { provider: LLMProvider::BuiltInAI, provider_name: "builtin-ai", model: cfg.model_name, ollama_endpoint: None, custom_endpoint: None });
-            }
             LLMProvider::Ollama
                 if crate::spanish_provider::loopback(cfg.ollama_endpoint.as_deref().unwrap_or("http://localhost:11434")) =>
             {
@@ -481,11 +478,20 @@ pub(crate) async fn resolve_local_llm(
             _ => {}
         }
     }
-    // Fall back to any downloaded built-in model, best first (models.rs order).
-    if let Some(model) = get_available_models().into_iter().find(|m| builtin_present(&m.name)) {
-        return Ok(LocalLlm { provider: LLMProvider::BuiltInAI, provider_name: "builtin-ai", model: model.name, ollama_endpoint: None, custom_endpoint: None });
+    let apple = crate::apple_intelligence::model_info().await?;
+    if !apple.available {
+        let reason = apple.reason.unwrap_or_else(|| "Apple Intelligence is unavailable on this Mac.".to_string());
+        return Err(format!("Real-time practice runs on-device with Apple Intelligence. {reason}"));
     }
-    Err("Real-time practice runs on a local model. Download one in Settings → Summary model (Qwen 3.5 2B is a good start); cloud models are only used for lesson summaries.".to_string())
+    crate::apple_intelligence::ensure_language_supported(&apple.languages, language)
+        .map_err(|_| "Apple Intelligence doesn't support this practice language yet, so real-time practice isn't available for it.".to_string())?;
+    Ok(LocalLlm {
+        provider: LLMProvider::AppleIntelligence,
+        provider_name: crate::apple_intelligence::PROVIDER_ID,
+        model: crate::apple_intelligence::MODEL_ID.to_string(),
+        ollama_endpoint: None,
+        custom_endpoint: None,
+    })
 }
 
 
@@ -504,7 +510,7 @@ pub async fn spanish_translate_line<R: Runtime>(
     let language = crate::languages::module(resolve_language(language.as_deref().unwrap_or("")))
         .expect("resolved learning language is registered");
     let app_data_dir = app.path().app_data_dir().map_err(|_| "App storage unavailable.")?;
-    let llm = resolve_local_llm(state.db_manager.pool(), &app_data_dir).await?;
+    let llm = resolve_local_llm(state.db_manager.pool(), Some(language.id)).await?;
     let raw = crate::summary::llm_client::generate_summary(
         &TUTOR_HTTP_CLIENT,
         &llm.provider,
@@ -556,7 +562,7 @@ pub async fn spanish_help_suggestion<R: Runtime>(
     let language = crate::languages::module(resolve_language(&profile.language))
         .expect("resolved learning language is registered");
     let app_data_dir = app.path().app_data_dir().map_err(|_| "App storage unavailable.")?;
-    let llm = resolve_local_llm(pool, &app_data_dir).await?;
+    let llm = resolve_local_llm(pool, Some(language.id)).await?;
     let system = format!(
         "You are a {} tutor. Give ONE short {} example (at most {words} words) that the learner could say to answer the question. Output only the {} sentence, without quotes or explanation. {} /no_think",
         language.name,
@@ -622,13 +628,11 @@ pub async fn spanish_check_readiness<R: Runtime>(
     let whisper_model = Some(format!("{prefix}:{model}"));
     let whisper_ready = is_multilingual_model(&model);
 
-    let (llm_provider, llm_model, llm_ready, llm_message) = match app.path().app_data_dir() {
-        Ok(dir) => match resolve_local_llm(state.db_manager.pool(), &dir).await {
+    let (llm_provider, llm_model, llm_ready, llm_message) =
+        match resolve_local_llm(state.db_manager.pool(), None).await {
             Ok(llm) => (Some(llm.provider_name.to_string()), Some(llm.model), true, None),
             Err(e) => (None, None, false, Some(e)),
-        },
-        Err(_) => (None, None, false, Some("App storage unavailable.".to_string())),
-    };
+        };
 
     let message = if !whisper_ready {
         let base = format!(
@@ -913,7 +917,7 @@ async fn prepare_speech<R: Runtime>(
     let system = core::speech::conversion_system(language)
         .ok_or("This phrase cannot be spoken safely.")?;
     let app_data_dir = app.path().app_data_dir().map_err(|_| "App storage unavailable.")?;
-    let llm = resolve_local_llm(state.db_manager.pool(), &app_data_dir).await?;
+    let llm = resolve_local_llm(state.db_manager.pool(), Some(language)).await?;
     let model = crate::spanish_provider::MeetOddsModel::new(
         TUTOR_HTTP_CLIENT.clone(),
         crate::spanish_provider::ProviderConfig {
@@ -1276,7 +1280,7 @@ pub async fn spanish_tutor_turn<R: Runtime>(
         mode == core::tutor::Mode::Help || (learner_input && !(intent == core::text::Intent::Minimal && tutoring.minimal_streak >= 1));
     let model = if needs_model {
         let app_data_dir = app.path().app_data_dir().map_err(|_| "App storage unavailable.")?;
-        let llm = resolve_local_llm(pool, &app_data_dir).await?;
+        let llm = resolve_local_llm(pool, Some(learner.language_id())).await?;
         SessionModel::Configured(crate::spanish_provider::MeetOddsModel::new(
             TUTOR_HTTP_CLIENT.clone(),
             crate::spanish_provider::ProviderConfig {
@@ -1286,7 +1290,7 @@ pub async fn spanish_tutor_turn<R: Runtime>(
                 app_data_dir,
                 ollama_endpoint: llm.ollama_endpoint,
                 custom_endpoint: llm.custom_endpoint,
-                // resolve_local_llm only ever returns loopback/built-in providers.
+                // resolve_local_llm only ever returns loopback/on-device providers.
                 allow_external_text: false,
                 cloud_sampling_supported: false,
             },
