@@ -834,6 +834,11 @@ fn validate_candidate_readiness(
             }
             Ok(())
         }
+        // The Foundation Models bridge has no streaming translation path here.
+        LLMProvider::AppleIntelligence => Err(
+            "Apple Intelligence isn't used for live translation. Choose a translation engine in Settings → Live translation."
+                .to_string(),
+        ),
         _ => Ok(()),
     }
 }
@@ -1265,7 +1270,10 @@ pub(crate) async fn resolve_provider_config(pool: &SqlitePool) -> Result<Transla
     let mut top_p = None;
 
     match &provider {
-        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::OpenAICodex => {}
+        LLMProvider::Ollama
+        | LLMProvider::BuiltInAI
+        | LLMProvider::OpenAICodex
+        | LLMProvider::AppleIntelligence => {}
         LLMProvider::CustomOpenAI => {
             let config = SettingsRepository::get_custom_openai_config(pool)
                 .await

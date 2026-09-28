@@ -44,7 +44,7 @@ pub async fn resolve(pool: &SqlitePool, provider_name: &str, model: &str, approv
     let mut resolved = ResolvedSummaryConfig { provider: provider.clone(), api_key: String::new(), ollama_endpoint: None,
         custom_openai_endpoint: None, max_tokens: None, temperature: None, top_p: None, local: false };
     let destination = match provider {
-        LLMProvider::BuiltInAI => { resolved.local = true; "on-device".to_string() }
+        LLMProvider::BuiltInAI | LLMProvider::AppleIntelligence => { resolved.local = true; "on-device".to_string() }
         LLMProvider::OpenAICodex => "https://chatgpt.com/backend-api/codex".to_string(),
         LLMProvider::OpenAI => "https://api.openai.com/v1".to_string(),
         LLMProvider::Claude => "https://api.anthropic.com/v1".to_string(),

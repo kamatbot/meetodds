@@ -75,6 +75,7 @@ pub enum LLMProvider {
     Ollama,
     OpenRouter,
     BuiltInAI,
+    AppleIntelligence,
     CustomOpenAI,
 }
 
@@ -90,6 +91,7 @@ impl LLMProvider {
             "openrouter" => Ok(Self::OpenRouter),
             "builtin-ai" | "local-llama" | "localllama" => Ok(Self::BuiltInAI),
             "custom-openai" => Ok(Self::CustomOpenAI),
+            "apple-intelligence" => Ok(Self::AppleIntelligence),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
         }
     }
@@ -161,7 +163,7 @@ pub fn build_chat_request(
                 header_map,
             )
         }
-        LLMProvider::BuiltInAI | LLMProvider::OpenAICodex => {
+        LLMProvider::BuiltInAI | LLMProvider::OpenAICodex | LLMProvider::AppleIntelligence => {
             return Err("This provider does not use the chat completions API".to_string());
         }
     };
@@ -293,6 +295,18 @@ pub async fn generate_summary(
         .await;
     }
 
+    // Apple Intelligence runs on-device through the Swift bridge, no HTTP API.
+    if provider == &LLMProvider::AppleIntelligence {
+        return crate::apple_intelligence::generate(
+            system_prompt,
+            user_prompt,
+            max_tokens,
+            temperature,
+            cancellation_token,
+        )
+        .await;
+    }
+
     // Handle BuiltInAI provider separately (uses local sidecar, no HTTP API)
     if provider == &LLMProvider::BuiltInAI {
         let app_data_dir = app_data_dir
@@ -404,6 +418,7 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::Groq => "Groq",
         LLMProvider::Ollama => "Ollama",
         LLMProvider::BuiltInAI => "Built-in AI",
+        LLMProvider::AppleIntelligence => "Apple Intelligence",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
     }
