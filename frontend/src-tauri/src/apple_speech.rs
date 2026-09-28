@@ -71,13 +71,14 @@ mod ffi {
             callback: Callback,
         );
         pub fn md_speech_start(id: u64, locale: *const c_char, callback: Callback);
+        /// 0 = accepted, 1 = queue full (session keeps running), 2 = closed/invalid.
         pub fn md_speech_push(
             id: u64,
             samples: *const f32,
             count: u32,
             sample_rate: u32,
             timestamp: f64,
-        ) -> bool;
+        ) -> i32;
         pub fn md_speech_finish(id: u64);
         pub fn md_speech_cancel(id: u64);
     }
@@ -167,9 +168,11 @@ impl SpeechSession {
         }
     }
 
-    pub fn push(&self, samples: &[f32], rate: u32, timestamp: f64) -> Result<(), String> {
+    /// `Ok(false)`: the session's input queue (~10 s of audio) is full and this audio was
+    /// not accepted; the session itself keeps running.
+    pub fn push(&self, samples: &[f32], rate: u32, timestamp: f64) -> Result<bool, String> {
         if samples.is_empty() {
-            return Ok(());
+            return Ok(true);
         }
         if rate == 0
             || !timestamp.is_finite()
@@ -179,7 +182,7 @@ impl SpeechSession {
             return Err("Invalid audio format or timestamp for Apple Speech.".into());
         }
         #[cfg(target_os = "macos")]
-        if unsafe {
+        match unsafe {
             ffi::md_speech_push(
                 self.id,
                 samples.as_ptr(),
@@ -188,7 +191,9 @@ impl SpeechSession {
                 timestamp,
             )
         } {
-            return Ok(());
+            0 => return Ok(true),
+            1 => return Ok(false),
+            _ => {}
         }
         Err("Apple Speech could not accept audio. Stop and retry transcription from the saved recording.".into())
     }
@@ -297,7 +302,9 @@ impl crate::audio::transcription::provider::TranscriptionProvider for AppleSpeec
             .unwrap_or(&self.locale);
         let result = async {
             let mut session = SpeechSession::start(locale).await?;
-            session.push(&audio, 16_000, 0.0)?;
+            if !session.push(&audio, 16_000, 0.0)? {
+                return Err("Apple Speech could not accept this audio.".into());
+            }
             session.finish();
             let mut text = Vec::new();
             loop {
