@@ -1104,9 +1104,8 @@ fn normalized_engine(value: Option<&str>) -> String {
         .to_ascii_lowercase()
 }
 
-/// The meeting's spoken language, which Apple Translation needs explicitly. Apple Speech
-/// stores its locale as the transcript model; Parakeet and `.en` Whisper models are English;
-/// otherwise the transcription language preference, then detection on the caption itself.
+/// The meeting's spoken language, which Apple Translation needs explicitly: the Apple Speech
+/// locale, otherwise the transcription language preference, then detection on the caption.
 fn meeting_source_language(
     transcript: Option<(&str, &str)>,
     language_preference: Option<&str>,
@@ -1122,8 +1121,6 @@ fn meeting_source_language(
             if let Some(locale) = explicit(model) {
                 return Some(locale);
             }
-        } else if provider.eq_ignore_ascii_case("parakeet") || model.to_lowercase().ends_with(".en") {
-            return Some("en".to_string());
         }
     }
     if let Some(preference) = language_preference.and_then(explicit) {
@@ -1141,13 +1138,21 @@ fn apple_source_is_target(source: &str, target: LanguageSpec) -> bool {
     is_detected_language_matching_target(primary, target.code)
 }
 
+/// The locale Apple Speech actually records with. Stored rows from older engines aren't
+/// rewritten on upgrade, so they resolve to the system default, as recording does.
+async fn effective_speech_locale(pool: &SqlitePool) -> String {
+    let stored = SettingsRepository::get_transcript_config(pool).await.ok().flatten();
+    match stored.and_then(|c| crate::apple_speech::saved_locale(&c.provider, &c.model)) {
+        Some(locale) => locale,
+        None => crate::apple_speech::default_locale().await,
+    }
+}
+
 async fn apple_source_language(pool: &SqlitePool, text: &str) -> Option<String> {
-    let transcript = SettingsRepository::get_transcript_config(pool).await.ok().flatten();
+    let locale = effective_speech_locale(pool).await;
     let preference = crate::get_language_preference_internal();
     meeting_source_language(
-        transcript
-            .as_ref()
-            .map(|setting| (setting.provider.as_str(), setting.model.as_str())),
+        Some((crate::apple_speech::PROVIDER, locale.as_str())),
         preference.as_deref(),
         text,
     )
@@ -1165,7 +1170,7 @@ async fn prepare_apple(
     let Some(target) = target_language.map(resolve_language).transpose()? else {
         return Ok(prepared(false));
     };
-    // With automatic Whisper language detection the source is only known per caption.
+    // Without a known speech locale the source is only known per caption.
     let Some(source) = apple_source_language(pool, "").await else {
         return Ok(prepared(false));
     };
@@ -1437,29 +1442,9 @@ pub async fn api_translate_live_text<R: Runtime>(
     if source.is_none() {
         // If target is English and active STT engine is producing English:
         if target.code == "en" {
-            let mut is_english_stt = false;
-            let mut stt_model_name = "parakeet-english".to_string();
-
-            if let Ok(Some(transcript_setting)) =
-                SettingsRepository::get_transcript_config(state.db_manager.pool()).await
-            {
-                if transcript_setting.provider.eq_ignore_ascii_case("parakeet") {
-                    is_english_stt = true;
-                    stt_model_name = "parakeet-english".to_string();
-                } else if transcript_setting.model.to_lowercase().ends_with(".en") {
-                    is_english_stt = true;
-                    stt_model_name = format!("{}-english", transcript_setting.provider);
-                }
-            }
-
-            if !is_english_stt {
-                if let Some(pref) = crate::get_language_preference_internal() {
-                    if pref.eq_ignore_ascii_case("en") || pref.to_lowercase().starts_with("en-") {
-                        is_english_stt = true;
-                        stt_model_name = "whisper-english".to_string();
-                    }
-                }
-            }
+            let locale = effective_speech_locale(state.db_manager.pool()).await;
+            let is_english_stt = locale.to_ascii_lowercase().starts_with("en");
+            let stt_model_name = format!("{}-english", crate::apple_speech::PROVIDER);
 
             if is_english_stt {
                 return Ok(LiveTranslationResponse {
@@ -1892,11 +1877,9 @@ mod tests {
     fn apple_source_follows_the_meeting_transcription_language() {
         let apple = Some((crate::apple_speech::PROVIDER, "es_MX"));
         assert_eq!(meeting_source_language(apple, Some("en"), "").as_deref(), Some("es-MX"));
-        assert_eq!(meeting_source_language(Some(("parakeet", "parakeet-tdt")), None, "").as_deref(), Some("en"));
-        assert_eq!(meeting_source_language(Some(("localWhisper", "base.en")), None, "").as_deref(), Some("en"));
-        assert_eq!(meeting_source_language(Some(("localWhisper", "large-v3")), Some("hi"), "").as_deref(), Some("hi"));
+        assert_eq!(meeting_source_language(Some((crate::apple_speech::PROVIDER, "")), Some("hi"), "").as_deref(), Some("hi"));
         let detected = meeting_source_language(
-            Some(("localWhisper", "large-v3")),
+            Some((crate::apple_speech::PROVIDER, "")),
             Some("auto"),
             "Buenos días a todos, hoy vamos a revisar el presupuesto del próximo trimestre.",
         );
