@@ -20,7 +20,7 @@ Choose **OpenAI Cloud API** when you want to use an OpenAI Platform API key. Thi
 
 ## Privacy boundary
 
-Audio capture and transcription can remain entirely on-device. When either OpenAI cloud provider is selected, the transcript text needed to generate or translate a meeting summary is sent to the selected OpenAI service. Local Built-in AI and Ollama remain available when no cloud processing is desired.
+Audio capture and transcription can remain entirely on-device. When either OpenAI cloud provider is selected, the transcript text needed to generate or translate a meeting summary is sent to the selected OpenAI service. On-device Apple Intelligence and Ollama remain available when no cloud processing is desired.
 
 ## Compatibility
 

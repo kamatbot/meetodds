@@ -68,6 +68,7 @@ When enabled, analytics helps us with:
 If you choose to use external LLM providers:
 - **Anthropic Claude**: Subject to Anthropic's privacy policy
 - **Groq**: Subject to Groq's privacy policy
+- **Apple Intelligence**: Summaries run on Apple's on-device model; meeting text is not sent to Apple or MeetOdds
 - **Local Ollama**: Processed entirely on your device
 
 ### Analytics Service (Optional)

@@ -46,7 +46,7 @@ sudo pacman -S base-devel cmake git
 
 ## 🧠 Understanding Auto-Detection
 
-The build scripts (`dev-gpu.sh` and `build-gpu.sh`) orchestrate the entire build process. They first call `scripts/auto-detect-gpu.js` to identify your hardware, then build the `llama-helper` sidecar with the appropriate features, and finally launch the Tauri application.
+The build scripts (`dev-gpu.sh` and `build-gpu.sh`) orchestrate the entire build process. They first call `scripts/auto-detect-gpu.js` to identify your hardware, then launch the Tauri application with the matching GPU feature.
 
 ### Detection Priority
 

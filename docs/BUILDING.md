@@ -57,9 +57,7 @@ The build scripts (`dev-gpu.sh` and `build-gpu.sh`) orchestrate the entire build
 
 1.  **Detect location:** Find `package.json` (works from project root or `frontend/`)
 2.  **Auto-detect GPU:** Run `scripts/auto-detect-gpu.js` (or use `TAURI_GPU_FEATURE` if set)
-3.  **Build Sidecar:** Build `llama-helper` with the detected feature (debug or release)
-4.  **Copy Binary:** Copy the built sidecar to `src-tauri/binaries` with the target triple
-5.  **Run Tauri:** Call `npm run tauri:dev` or `tauri:build` with the feature flag passed via env var
+3.  **Run Tauri:** Call `npm run tauri:dev` or `tauri:build` with the feature flag passed via env var
 
 #### Detection Priority
 

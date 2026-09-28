@@ -18,7 +18,8 @@ Most meeting assistants send audio or transcripts to a cloud service. MeetOdds i
 
 - Record microphone and system audio on your computer.
 - Transcribe locally with Whisper or Parakeet.
-- Generate summaries locally with the built-in `llama.cpp`-based helper or Ollama.
+- Generate summaries on-device with Apple Intelligence (macOS 26+, Apple Intelligence enabled) or with Ollama.
+  Apple Intelligence summarizes long meetings in chunks and supports only its own languages (not Hindi, for example); MeetOdds says so instead of silently switching providers.
 - Keep recordings, transcripts, notes, and meeting history on your device.
 - Work without a cloud AI account after the required local models have been downloaded.
 
@@ -32,7 +33,7 @@ MeetOdds can also use the **OpenAI Codex (ChatGPT subscription)** provider built
 - Only the transcript text required for the requested summary or translation is sent to OpenAI.
 - OpenAI account availability, usage limits, and service terms apply.
 
-This is intentionally separate from the fully local workflow. If a meeting must never leave your computer, use Built-in Local AI or Ollama instead.
+This is intentionally separate from the fully local workflow. If a meeting must never leave your computer, use Apple Intelligence or Ollama instead.
 
 MeetOdds also supports the OpenAI API and other configurable AI providers for users who prefer them.
 
@@ -164,7 +165,7 @@ The supported application consists of:
 - **Tauri 2 / Rust** for desktop integration, audio capture, persistence, transcription orchestration, and native functionality
 - **Next.js / React / TypeScript** for the user interface
 - **Whisper / Parakeet** for local transcription
-- **llama.cpp / Ollama** for local AI summaries
+- **Apple Intelligence (Foundation Models) / Ollama** for local AI summaries
 - optional external AI providers, including ChatGPT-account access through the OpenAI Codex integration
 
 The historical Python/FastAPI backend in this repository is retained only as an archive and is not part of the supported runtime.
