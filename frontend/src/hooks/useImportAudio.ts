@@ -49,9 +49,7 @@ export interface UseImportAudioReturn {
   startImport: (
     sourcePath: string,
     title: string,
-    language?: string | null,
-    model?: string | null,
-    provider?: string | null
+    language?: string | null
   ) => Promise<void>;
   cancelImport: () => Promise<void>;
   reset: () => void;
@@ -206,9 +204,7 @@ export function useImportAudio({
     async (
       sourcePath: string,
       title: string,
-      language?: string | null,
-      model?: string | null,
-      provider?: string | null
+      language?: string | null
     ) => {
       isCancelledRef.current = false;
       setStatus('processing');
@@ -221,8 +217,8 @@ export function useImportAudio({
             file_size_bytes: fileInfo.size_bytes.toString(),
             duration_seconds: fileInfo.duration_seconds.toString(),
             language: language || 'auto',
-            model_provider: provider || '',
-            model_name: model || ''
+            model_provider: 'appleSpeech',
+            model_name: language || ''
           });
         }
 
@@ -230,8 +226,6 @@ export function useImportAudio({
           sourcePath,
           title,
           language: language || null,
-          model: model || null,
-          provider: provider || null,
         });
       } catch (err: any) {
         setStatus('error');
