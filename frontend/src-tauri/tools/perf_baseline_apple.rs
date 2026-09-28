@@ -40,10 +40,15 @@ pub fn ps_cpu() -> HashMap<u32, (f64, String)> {
 }
 
 /// Apple on-device recognition: Speech.framework XPCServices/localspeechrecognition does the
-/// work; aned (Neural Engine daemon) is included for completeness. Observed on macOS 27.
+/// work; corespeechd, the embedded-ASR stack and aned (Neural Engine daemon) are included for
+/// completeness. Observed on macOS 27. Text-to-speech/Siri services are not recognition.
 fn is_speech_service(comm: &str) -> bool {
     let c = comm.to_lowercase();
-    c.contains("speech") || c.ends_with("/aned")
+    // iOS Simulator runtimes ship their own copies of these daemons; they are not this Mac's.
+    if c.contains("coresimulator") || c.contains(".simruntime/") {
+        return false;
+    }
+    c.contains("/speech.framework/") || c.contains("speechrecognition") || c.contains("corespeech") || c.ends_with("/aned")
 }
 
 /// Per-process CPU consumed between two snapshots, excluding this process.
@@ -284,6 +289,8 @@ async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Val
     let mut partials: Vec<(f64, f64)> = Vec::new();
     let mut partial_texts: Vec<String> = Vec::new();
     let mut sys_results = 0usize;
+    // Non-empty text from a session fed digital silence would be a hallucination.
+    let mut sys_text_results = 0usize;
     let mut deadline = None;
     while mic.is_some() || sys.is_some() {
         tokio::select! {
@@ -321,7 +328,10 @@ async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Val
                 _ => {}
             },
             ev = next_event(&mut sys), if sys.is_some() => match ev {
-                Some(SpeechEvent::Result { .. }) => sys_results += 1,
+                Some(SpeechEvent::Result { text, .. }) => {
+                    sys_results += 1;
+                    sys_text_results += !text.trim().is_empty() as usize;
+                }
                 Some(SpeechEvent::Finished) => sys = None,
                 Some(SpeechEvent::Error { message }) => return Err(anyhow!("system: {}", message)),
                 None => return Err(anyhow!("system session disconnected or its result queue overflowed")),
@@ -352,6 +362,7 @@ async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Val
         "finals_after_input_closed": finals.iter().filter(|f| f.4).count(),
         "partials": partials.len(),
         "system_session_results_on_silence": sys_results,
+        "system_session_text_results_on_silence": sys_text_results,
         "speech_secs_total": finals.iter().map(|f| (f.1 - f.0) / 1000.0).sum::<f64>(),
         "cpu_user_secs": u1 - u0,
         "cpu_sys_secs": s1 - s0,
