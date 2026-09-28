@@ -80,6 +80,27 @@ private func errorReply(_ error: Error) -> (String, String) {
     return ("failed", "Apple Intelligence could not complete this request.")
 }
 
+/// Fixed structured output for the meeting outcome pass (guided generation keeps
+/// the small model's decisions/action items parseable). Rust renders the Markdown.
+@available(macOS 26.0, *)
+private func meetingOutcomeSchema() throws -> GenerationSchema {
+    let text = DynamicGenerationSchema(type: String.self)
+    let action = DynamicGenerationSchema(name: "ActionItem", properties: [
+        .init(name: "task", description: "A clear, self-contained follow-up task, not a transcript fragment.", schema: text),
+        .init(name: "owner", description: "The person responsible, only when explicitly stated.", schema: text, isOptional: true),
+        .init(name: "due", description: "The deadline exactly as stated, only when stated.", schema: text, isOptional: true),
+        .init(name: "commitment", description: "agreed when accepted in the meeting, proposed otherwise.",
+              schema: DynamicGenerationSchema(name: "Commitment", anyOf: ["agreed", "proposed"])),
+    ])
+    let root = DynamicGenerationSchema(name: "MeetingOutcome", properties: [
+        .init(name: "outcome", description: "One concise statement of what the meeting achieved or left unresolved.", schema: text),
+        .init(name: "decisions", description: "Explicitly agreed decisions only; discussion is not a decision.", schema: DynamicGenerationSchema(arrayOf: text)),
+        .init(name: "actionItems", description: "Every real follow-up task supported by the notes.", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(referenceTo: "ActionItem"))),
+        .init(name: "openQuestions", description: "Substantive issues still unresolved at the end of the meeting.", schema: DynamicGenerationSchema(arrayOf: text)),
+    ])
+    return try GenerationSchema(root: root, dependencies: [action])
+}
+
 @_cdecl("md_ai_status")
 public func md_ai_status(_ id: UInt64, _ callback: IntelligenceCallback?) {
     guard #available(macOS 26.0, *) else {
@@ -117,7 +138,8 @@ public func md_ai_token_counts(_ id: UInt64, _ json: UnsafePointer<CChar>?, _ ca
     Requests.shared.install(id, task)
 }
 
-/// Input: {"instructions", "prompt", "maxTokens"?, "temperature"?}. Reply: {"kind":"text"}.
+/// Input: {"instructions", "prompt", "maxTokens"?, "temperature"?, "schema"?}. Reply: {"kind":"text"};
+/// with "schema": "meetingOutcome" the text is that schema's JSON.
 @_cdecl("md_ai_generate")
 public func md_ai_generate(_ id: UInt64, _ json: UnsafePointer<CChar>?, _ callback: IntelligenceCallback?) {
     guard let request = decodeJSON(json) as? [String: Any],
@@ -125,6 +147,7 @@ public func md_ai_generate(_ id: UInt64, _ json: UnsafePointer<CChar>?, _ callba
           let prompt = request["prompt"] as? String else { replyError(callback, id, "invalid", "Invalid Apple Intelligence request."); return }
     let maxTokens = request["maxTokens"] as? Int
     let temperature = request["temperature"] as? Double
+    let structured = request["schema"] as? String == "meetingOutcome"
     let task = Task {
         defer { Requests.shared.remove(id) }
         guard #available(macOS 26.0, *) else { replyError(callback, id, "unavailable", "Apple Intelligence requires macOS 26 or later."); return }
@@ -133,9 +156,14 @@ public func md_ai_generate(_ id: UInt64, _ json: UnsafePointer<CChar>?, _ callba
         do {
             let session = LanguageModelSession(model: system, instructions: instructions.isEmpty ? nil : instructions)
             let options = GenerationOptions(temperature: temperature, maximumResponseTokens: maxTokens)
-            let response = try await session.respond(to: prompt, options: options)
+            let text: String
+            if structured {
+                text = try await session.respond(to: prompt, schema: meetingOutcomeSchema(), includeSchemaInPrompt: true, options: options).content.jsonString
+            } else {
+                text = try await session.respond(to: prompt, options: options).content
+            }
             if Task.isCancelled { return }
-            reply(callback, id, ["kind": "text", "text": response.content])
+            reply(callback, id, ["kind": "text", "text": text])
         } catch {
             if Task.isCancelled { return }
             let (code, message) = errorReply(error)

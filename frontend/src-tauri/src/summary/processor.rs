@@ -171,6 +171,227 @@ fn build_final_report_system_prompt(
     )
 }
 
+fn build_final_user_prompt(content: &str, custom_prompt: &str) -> String {
+    let mut prompt = format!("<transcript_chunks>\n{content}\n</transcript_chunks>\n");
+    if !custom_prompt.is_empty() {
+        prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
+        prompt.push_str(custom_prompt);
+        prompt.push_str("\n</user_context>");
+    }
+    prompt
+}
+
+const CHUNK_SYSTEM_PROMPT: &str = "You are an expert meeting summarizer.";
+const COMBINE_SYSTEM_PROMPT: &str = "You are an expert at synthesizing meeting summaries.";
+
+// Apple Intelligence shares one small context (4,096 tokens measured) between
+// instructions, prompt and output, so every pass reserves room for its answer.
+const APPLE_CHUNK_OUTPUT_TOKENS: usize = 600;
+const APPLE_COMBINE_OUTPUT_TOKENS: usize = 900;
+const APPLE_FINAL_OUTPUT_TOKENS: usize = 1500;
+// Units stay far below any chunk budget even at ~1 token per character.
+const APPLE_UNIT_MAX_CHARS: usize = 1200;
+const NOTES_SEPARATOR: &str = "\n---\n";
+
+const APPLE_OUTCOME_OUTPUT_TOKENS: u32 = 800;
+/// First line of the frontend's POST_MEETING_INSTRUCTIONS (lib/post-meeting-flow.ts).
+const OUTCOME_CONTRACT_HEADING: &str = "POST-MEETING OUTCOME CONTRACT";
+const OUTCOME_SYSTEM_PROMPT: &str = "You extract the outcome of a meeting from its notes. Write in English. Only use information present in the notes; never invent owners, deadlines, decisions or tasks. Reconcile later corrections with earlier discussion and remove duplicates.";
+
+/// Separates the user's own context from the post-meeting marker contract, which the
+/// Apple path fulfils with guided generation instead of free-form instructions.
+fn split_outcome_contract(custom_prompt: &str) -> (&str, bool) {
+    match custom_prompt.find(OUTCOME_CONTRACT_HEADING) {
+        Some(at) => (custom_prompt[..at].trim(), true),
+        None => (custom_prompt, false),
+    }
+}
+
+/// Renders the post-meeting contract sections exactly as the outcome parser reads them.
+fn render_outcome_contract(outcome: &crate::apple_intelligence::MeetingOutcome) -> String {
+    // One line per item and no " | " inside fields, so metadata parses back exactly.
+    let clean = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").replace('|', "/");
+    let list = |items: Vec<String>| {
+        let items: Vec<String> = items
+            .into_iter()
+            .filter(|item| !item.is_empty())
+            .map(|item| format!("- {item}"))
+            .collect();
+        if items.is_empty() { "- None".to_string() } else { items.join("\n") }
+    };
+    let actions = outcome
+        .action_items
+        .iter()
+        .map(|action| {
+            let mut line = clean(&action.task);
+            if line.is_empty() {
+                return line;
+            }
+            for (key, value) in [("Owner", &action.owner), ("Due", &action.due)] {
+                if let Some(value) = value.as_deref().map(clean).filter(|v| !v.is_empty()) {
+                    line.push_str(&format!(" | {key}: {value}"));
+                }
+            }
+            if let Some(c) = action.commitment.as_deref().filter(|c| matches!(*c, "agreed" | "proposed")) {
+                line.push_str(&format!(" | Commitment: {c}"));
+            }
+            line
+        })
+        .collect();
+    let summary = clean(&outcome.outcome);
+    format!(
+        "<!-- meetodds:outcome -->\n## Meeting outcome\n{}\n\n<!-- meetodds:decisions -->\n## Decisions\n{}\n\n<!-- meetodds:actions -->\n## Action items\n{}\n\n<!-- meetodds:questions -->\n## Open questions\n{}\n\n<!-- meetodds:end -->",
+        if summary.is_empty() { "None" } else { &summary },
+        list(outcome.decisions.iter().map(|d| clean(d)).collect()),
+        list(actions),
+        list(outcome.open_questions.iter().map(|q| clean(q)).collect()),
+    )
+}
+
+/// Splits text into lines, breaking overlong lines at word boundaries.
+/// Each unit keeps its trailing newline so unit token counts add up to the whole.
+fn split_units(text: &str, max_chars: usize) -> Vec<String> {
+    let mut units = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let mut current = String::new();
+        // Words longer than a unit (e.g. unspaced CJK text) are cut by characters.
+        let words = line.split(' ').flat_map(|word| {
+            let chars: Vec<char> = word.chars().collect();
+            chars.chunks(max_chars).map(String::from_iter).collect::<Vec<_>>()
+        });
+        for word in words {
+            if !current.is_empty() && current.chars().count() + word.chars().count() >= max_chars {
+                units.push(std::mem::take(&mut current) + "\n");
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(&word);
+        }
+        units.push(current + "\n");
+    }
+    units
+}
+
+/// In-order greedy packing: each group's token total stays within `budget`
+/// (a single unit larger than the budget becomes its own group).
+fn pack_by_tokens(counts: &[usize], budget: usize) -> Vec<std::ops::Range<usize>> {
+    let mut groups = Vec::new();
+    let (mut start, mut total) = (0, 0);
+    for (i, &count) in counts.iter().enumerate() {
+        if i > start && total + count > budget {
+            groups.push(start..i);
+            start = i;
+            total = 0;
+        }
+        total += count;
+    }
+    if start < counts.len() {
+        groups.push(start..counts.len());
+    }
+    groups
+}
+
+/// Token budget left for variable content once the fixed prompt and output are reserved.
+/// ponytail: fixed 5% + 64 margin for chat-template tokens tokenCount doesn't see.
+fn apple_content_budget(context: usize, fixed_prompt: usize, output: usize) -> usize {
+    context.saturating_sub(context / 20 + 64 + fixed_prompt + output)
+}
+
+/// Map-reduce a long transcript into notes that fit the final Apple Intelligence
+/// template pass. Returns (content, chunks summarized); short transcripts pass through.
+async fn apple_condense_transcript(
+    context: usize,
+    text: &str,
+    final_system_prompt: &str,
+    custom_prompt: &str,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<(String, i64), String> {
+    use crate::apple_intelligence::{generate, token_counts};
+    let cancelled = || cancellation_token.is_some_and(|t| t.is_cancelled());
+    let fixed = token_counts(
+        &[
+            format!("{final_system_prompt}{}", build_final_user_prompt("", custom_prompt)),
+            format!("{CHUNK_SYSTEM_PROMPT}{}", build_chunk_summary_user_prompt("")),
+            format!("{COMBINE_SYSTEM_PROMPT}{}", build_combine_summary_user_prompt("")),
+        ],
+        cancellation_token,
+    )
+    .await?;
+    let final_budget = apple_content_budget(context, fixed[0], APPLE_FINAL_OUTPUT_TOKENS);
+    let chunk_budget = apple_content_budget(context, fixed[1], APPLE_CHUNK_OUTPUT_TOKENS);
+    let combine_budget = apple_content_budget(context, fixed[2], APPLE_COMBINE_OUTPUT_TOKENS);
+    if final_budget < 300 {
+        return Err("This summary template and its instructions are too long for Apple Intelligence. Choose a shorter template or ChatGPT in Settings → Summary.".to_string());
+    }
+
+    let units = split_units(text, APPLE_UNIT_MAX_CHARS);
+    let counts = token_counts(&units, cancellation_token).await?;
+    let total: usize = counts.iter().sum();
+    info!("Apple Intelligence: transcript {} tokens, final budget {}", total, final_budget);
+    if total <= final_budget {
+        return Ok((text.to_string(), 1));
+    }
+
+    let chunks = pack_by_tokens(&counts, chunk_budget);
+    let chunk_count = chunks.len();
+    let mut notes = Vec::with_capacity(chunk_count);
+    for (i, range) in chunks.into_iter().enumerate() {
+        if cancelled() {
+            return Err("Summary generation was cancelled".to_string());
+        }
+        info!("Apple Intelligence: summarizing chunk {}/{}", i + 1, chunk_count);
+        let chunk = units[range].concat();
+        notes.push(
+            generate(
+                CHUNK_SYSTEM_PROMPT,
+                &build_chunk_summary_user_prompt(&chunk),
+                Some(APPLE_CHUNK_OUTPUT_TOKENS as u32),
+                None,
+                cancellation_token,
+            )
+            .await
+            .map_err(|e| format!("Chunk {}/{} failed: {e}", i + 1, chunk_count))?,
+        );
+    }
+
+    // Reduce until the notes fit the final template pass.
+    loop {
+        let separators: Vec<String> = notes.iter().map(|n| format!("{n}{NOTES_SEPARATOR}")).collect();
+        let counts = token_counts(&separators, cancellation_token).await?;
+        if counts.iter().sum::<usize>() <= final_budget {
+            return Ok((notes.join(NOTES_SEPARATOR), chunk_count as i64));
+        }
+        let groups = pack_by_tokens(&counts, combine_budget);
+        if groups.len() >= notes.len() {
+            return Err("The meeting notes could not be condensed to fit Apple Intelligence. Choose ChatGPT in Settings → Summary for this meeting.".to_string());
+        }
+        info!("Apple Intelligence: combining {} notes into {}", notes.len(), groups.len());
+        let mut combined = Vec::with_capacity(groups.len());
+        for range in groups {
+            if cancelled() {
+                return Err("Summary generation was cancelled".to_string());
+            }
+            let group = &notes[range];
+            if group.len() == 1 {
+                combined.push(group[0].clone());
+                continue;
+            }
+            combined.push(
+                generate(
+                    COMBINE_SYSTEM_PROMPT,
+                    &build_combine_summary_user_prompt(&group.join(NOTES_SEPARATOR)),
+                    Some(APPLE_COMBINE_OUTPUT_TOKENS as u32),
+                    None,
+                    cancellation_token,
+                )
+                .await?,
+            );
+        }
+        notes = combined;
+    }
+}
+
 /// Rough token count estimation using character count
 pub fn rough_token_count(s: &str) -> usize {
     let char_count = s.chars().count();
@@ -354,6 +575,20 @@ pub async fn generate_meeting_summary(
     let total_tokens = rough_token_count(text);
     info!("Transcript length: {} tokens", total_tokens);
 
+    // Apple Intelligence: explicit availability/language failure, never a silent fallback.
+    let apple_context = if provider == &LLMProvider::AppleIntelligence {
+        let model = crate::apple_intelligence::model_info().await?;
+        if !model.available {
+            return Err(model.reason.unwrap_or_else(|| "Apple Intelligence is unavailable on this Mac.".to_string()));
+        }
+        for code in [detected_transcript_language, summary_language] {
+            crate::apple_intelligence::ensure_language_supported(&model.languages, code)?;
+        }
+        Some(if model.context_size > 0 { model.context_size } else { 4096 })
+    } else {
+        None
+    };
+
     let (mut english_markdown, successful_chunk_count) = if let Some(cached) =
         resolve_cached_english(cached_english, summary_language)
     {
@@ -363,10 +598,38 @@ pub async fn generate_meeting_summary(
         let content_to_summarize: String;
         let successful_chunk_count: i64;
 
+        // Generate markdown structure and section instructions using template methods
+        let clean_template_markdown = template.to_markdown_structure();
+        let section_instructions = template.to_section_instructions();
+        let mut final_system_prompt =
+            build_final_report_system_prompt(&section_instructions, &clean_template_markdown);
+        // The small on-device model follows instructions, not trailing user context:
+        // carry the user's context (incl. the post-meeting marker contract) there.
+        let (custom_prompt, apple_outcome) = match apple_context {
+            Some(_) => {
+                let (user_context, wants_outcome) = split_outcome_contract(custom_prompt);
+                if !user_context.is_empty() {
+                    final_system_prompt.push_str("\n\n");
+                    final_system_prompt.push_str(user_context);
+                }
+                ("", wants_outcome)
+            }
+            None => (custom_prompt, false),
+        };
+
         // Strategy: Use single-pass for cloud providers or short transcripts
         // Use multi-level chunking for Ollama/BuiltInAI with long transcripts
         // Note: CustomOpenAI is treated like cloud providers (unlimited context)
-        if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI) || total_tokens < token_threshold {
+        if let Some(context) = apple_context {
+            (content_to_summarize, successful_chunk_count) = apple_condense_transcript(
+                context,
+                text,
+                &final_system_prompt,
+                custom_prompt,
+                cancellation_token,
+            )
+            .await?;
+        } else if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI) || total_tokens < token_threshold {
             info!(
                 "Using single-pass summarization (tokens: {}, threshold: {})",
                 total_tokens, token_threshold
@@ -385,7 +648,7 @@ pub async fn generate_meeting_summary(
             info!("Split transcript into {} chunks", num_chunks);
 
             let mut chunk_summaries = Vec::new();
-            let system_prompt_chunk = "You are an expert meeting summarizer.";
+            let system_prompt_chunk = CHUNK_SYSTEM_PROMPT;
 
             for (i, chunk) in chunks.iter().enumerate() {
                 // Check for cancellation before processing each chunk
@@ -450,7 +713,7 @@ pub async fn generate_meeting_summary(
                     chunk_summaries.len()
                 );
                 let combined_text = chunk_summaries.join("\n---\n");
-                let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
+                let system_prompt_combine = COMBINE_SYSTEM_PROMPT;
                 let user_prompt_combine = build_combine_summary_user_prompt(&combined_text);
                 generate_summary(
                     client,
@@ -475,22 +738,7 @@ pub async fn generate_meeting_summary(
 
         info!("Generating final markdown report with template: {}", template_id);
 
-        // Generate markdown structure and section instructions using template methods
-        let clean_template_markdown = template.to_markdown_structure();
-        let section_instructions = template.to_section_instructions();
-
-        let final_system_prompt =
-            build_final_report_system_prompt(&section_instructions, &clean_template_markdown);
-
-        let mut final_user_prompt = format!(
-            "<transcript_chunks>\n{content_to_summarize}\n</transcript_chunks>\n"
-        );
-
-        if !custom_prompt.is_empty() {
-            final_user_prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
-            final_user_prompt.push_str(custom_prompt);
-            final_user_prompt.push_str("\n</user_context>");
-        }
+        let final_user_prompt = build_final_user_prompt(&content_to_summarize, custom_prompt);
 
         // Check cancellation before final summary generation
         if let Some(token) = cancellation_token {
@@ -509,7 +757,7 @@ pub async fn generate_meeting_summary(
             &final_user_prompt,
             ollama_endpoint,
             custom_openai_endpoint,
-            max_tokens,
+            if apple_context.is_some() { Some(APPLE_FINAL_OUTPUT_TOKENS as u32) } else { max_tokens },
             temperature,
             top_p,
             app_data_dir,
@@ -517,7 +765,18 @@ pub async fn generate_meeting_summary(
         )
         .await?;
 
-        let english_markdown = clean_llm_markdown_output(&raw_markdown);
+        let mut english_markdown = clean_llm_markdown_output(&raw_markdown);
+        if apple_outcome {
+            let outcome = crate::apple_intelligence::generate_meeting_outcome(
+                OUTCOME_SYSTEM_PROMPT,
+                &format!("<meeting_notes>\n{content_to_summarize}\n</meeting_notes>"),
+                Some(APPLE_OUTCOME_OUTPUT_TOKENS),
+                cancellation_token,
+            )
+            .await?;
+            english_markdown.push_str("\n\n");
+            english_markdown.push_str(&render_outcome_contract(&outcome));
+        }
         info!("Summary pass completed ({} chars)", english_markdown.len());
 
         (english_markdown, successful_chunk_count)
@@ -792,6 +1051,66 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn summary_apple_units_split_long_lines_and_keep_newlines() {
+        let long = "word ".repeat(600);
+        let units = split_units(&format!("Alice: hi\n\n{long}\nBob: ok"), 100);
+        assert_eq!(units.first().unwrap(), "Alice: hi\n");
+        assert_eq!(units.last().unwrap(), "Bob: ok\n");
+        assert!(units.len() > 20);
+        assert!(units.iter().all(|u| u.ends_with('\n') && u.chars().count() <= 101));
+        assert_eq!(units.concat().split_whitespace().count(), 2 + 600 + 2);
+        let cjk = split_units(&"会議".repeat(150), 100);
+        assert_eq!(cjk.len(), 3);
+        assert!(cjk.iter().all(|u| u.chars().count() <= 101));
+    }
+
+    #[test]
+    fn summary_apple_chunk_plan_respects_token_budget() {
+        let counts = [400, 900, 700, 1200, 100, 3000, 50];
+        let groups = pack_by_tokens(&counts, 2000);
+        assert_eq!(groups, vec![0..3, 3..5, 5..6, 6..7]);
+        // Every multi-unit group fits; only an oversized single unit may exceed.
+        for g in &groups {
+            let total: usize = counts[g.clone()].iter().sum();
+            assert!(total <= 2000 || g.len() == 1);
+        }
+        assert!(pack_by_tokens(&[], 10).is_empty());
+    }
+
+    #[test]
+    fn summary_apple_budget_reserves_prompt_output_and_margin() {
+        // 4096 - (204 + 64 margin + 500 prompt + 1500 output)
+        assert_eq!(apple_content_budget(4096, 500, 1500), 1828);
+        assert_eq!(apple_content_budget(4096, 4000, 1500), 0);
+    }
+
+    #[test]
+    fn summary_final_user_prompt_wraps_content_and_context() {
+        let prompt = build_final_user_prompt("notes", "ctx");
+        assert!(prompt.starts_with("<transcript_chunks>\nnotes\n</transcript_chunks>"));
+        assert!(prompt.contains("<user_context>\nctx\n</user_context>"));
+        assert!(!build_final_user_prompt("notes", "").contains("user_context"));
+    }
+
+    #[test]
+    fn summary_apple_outcome_contract_is_split_and_rendered_for_the_parser() {
+        let (user, wants) = split_outcome_contract("Focus on budget\n\n\nPOST-MEETING OUTCOME CONTRACT\nFollow...");
+        assert_eq!((user, wants), ("Focus on budget", true));
+        assert_eq!(split_outcome_contract("just context"), ("just context", false));
+
+        let outcome: crate::apple_intelligence::MeetingOutcome = serde_json::from_str(
+            r#"{"outcome":"Release date set","decisions":["Ship on April 14"],
+                "actionItems":[{"task":"Finalize the\nchecklist | today","owner":"Marco","due":"Friday","commitment":"agreed"},
+                               {"task":"Ask vendor","commitment":"maybe"}],"openQuestions":[]}"#,
+        )
+        .unwrap();
+        let md = render_outcome_contract(&outcome);
+        assert!(md.starts_with("<!-- meetodds:outcome -->\n## Meeting outcome\nRelease date set"));
+        assert!(md.contains("<!-- meetodds:actions -->\n## Action items\n- Finalize the checklist / today | Owner: Marco | Due: Friday | Commitment: agreed\n- Ask vendor\n"));
+        assert!(md.contains("## Open questions\n- None\n\n<!-- meetodds:end -->"));
     }
 
     // resolve_cached_english matrix -------------------------------------------

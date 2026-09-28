@@ -217,9 +217,65 @@ pub async fn generate(
     temperature: Option<f32>,
     cancel: Option<&CancellationToken>,
 ) -> Result<String, String> {
+    request_text(instructions, prompt, max_tokens, temperature, None, cancel).await
+}
+
+/// Guided-generation result for the meeting outcome contract.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MeetingOutcome {
+    pub outcome: String,
+    pub decisions: Vec<String>,
+    pub action_items: Vec<ActionItem>,
+    pub open_questions: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct ActionItem {
+    pub task: String,
+    pub owner: Option<String>,
+    pub due: Option<String>,
+    pub commitment: Option<String>,
+}
+
+pub async fn generate_meeting_outcome(
+    instructions: &str,
+    prompt: &str,
+    max_tokens: Option<u32>,
+    cancel: Option<&CancellationToken>,
+) -> Result<MeetingOutcome, String> {
+    let json = request_text(
+        instructions,
+        prompt,
+        max_tokens,
+        None,
+        Some("meetingOutcome"),
+        cancel,
+    )
+    .await?;
+    serde_json::from_str(&json)
+        .map_err(|_| "Apple Intelligence returned an invalid meeting outcome.".into())
+}
+
+async fn request_text(
+    instructions: &str,
+    prompt: &str,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    schema: Option<&str>,
+    cancel: Option<&CancellationToken>,
+) -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (instructions, prompt, max_tokens, temperature, cancel);
+        let _ = (
+            instructions,
+            prompt,
+            max_tokens,
+            temperature,
+            schema,
+            cancel,
+        );
         return Err(UNAVAILABLE.into());
     }
     #[cfg(target_os = "macos")]
@@ -229,6 +285,7 @@ pub async fn generate(
             "prompt": prompt,
             "maxTokens": max_tokens,
             "temperature": temperature,
+            "schema": schema,
         }))?;
         let mut request = Request::register();
         unsafe { ffi::md_ai_generate(request.id, payload.as_ptr(), receive) };
@@ -303,6 +360,12 @@ mod tests {
         let reply: Reply =
             serde_json::from_str(r#"{"kind":"error","code":"language","message":"x"}"#).unwrap();
         assert!(matches!(reply, Reply::Error { .. }));
+        let outcome: MeetingOutcome = serde_json::from_str(
+            r#"{"outcome":"Shipped","actionItems":[{"task":"Send notes","commitment":"agreed"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(outcome.action_items[0].task, "Send notes");
+        assert!(outcome.decisions.is_empty() && outcome.action_items[0].owner.is_none());
     }
 
     #[test]
