@@ -882,12 +882,13 @@ impl AudioPipeline {
                     }
                     if self.apple_speech_enabled {
                         // Mixed audio above is already queued for durable recording. Never block it
-                        // on ASR, silently discard overflow, or fall back to another engine mid-call.
-                        if let Some(sender) = &self.apple_speech_sender {
-                            if sender.try_send(chunk).is_err() {
+                        // on ASR or fall back to another engine mid-call. A full queue (~10 s behind)
+                        // skips this chunk for ASR only; the Apple task re-anchors and warns.
+                        if let Some(sender) = &mut self.apple_speech_sender {
+                            if let Err(super::transcription::apple::AppleSendError::Closed) = sender.try_send(chunk) {
                                 self.apple_speech_sender = None;
                                 self.state.report_error(AudioError::TranscriptionFailed);
-                                warn!("Apple Speech input stopped/overflowed; audio recording continues. Retry from saved audio.");
+                                warn!("Apple Speech input stopped; audio recording continues. Retry from saved audio.");
                             }
                         }
                     }

@@ -1,18 +1,22 @@
 //! `--engine apple` for perf_baseline, plus the ground-truth metrics shared with the
 //! Parakeet run.
 //!
-//! Drives the app's real `app_lib::apple_speech::SpeechSession` (the compiled Swift
-//! bridge) the way `audio/transcription/apple.rs` does: one continuous session per
-//! source, a bounded 128-chunk input queue fed with `try_send`, sample-clock
-//! timestamps, partials = `live-transcript-preview`, finals = `transcript-update`.
+//! Drives the app's real per-source logic, `audio::transcription::apple::Source` (energy
+//! gate, sample clock, session restarts) over the compiled Swift bridge, the way
+//! `audio/transcription/apple.rs` does: a bounded input queue (~10 s per source) fed with
+//! `try_send`, `Step::Partial` = `live-transcript-preview` (none with --captions-off:
+//! finals-only sessions), `Step::Final` = `transcript-update`.
 //! Recognition runs partly out of process, so besides getrusage this also diffs
 //! per-process CPU time (`ps`) across each phase.
 //!
-//! ponytail: the event loop mirrors apple.rs instead of calling `PreparedApple::spawn`,
-//! which needs a live Tauri `AppHandle`. Keep the two in step.
+//! ponytail: the event loop mirrors `PreparedApple::spawn` (which needs a live Tauri
+//! `AppHandle`) around the shared `Source`. Keep the two in step.
 
 use super::*;
-use app_lib::apple_speech::{SpeechEvent, SpeechSession};
+use app_lib::apple_speech::SpeechSession;
+use app_lib::audio::transcription::apple::{Source, SpeechGate, Step};
+use app_lib::audio::{AudioChunk, RecordingDeviceType as DeviceType};
+use futures_util::FutureExt;
 use std::collections::HashMap;
 
 const REFERENCE: &str =
@@ -161,61 +165,138 @@ pub fn gt_metrics(finals: &[Final], partials: &[(f64, f64)], repeats: usize, per
 }
 
 // ---------------------------------------------------------------------------
+// synthetic keyboard typing (--typing)
+// ---------------------------------------------------------------------------
+
+/// Keystroke peak relative to the speech clip's peak (each key 0.5-1.0x of this).
+const TYPING_LEVEL: f32 = 0.7;
+/// Typing-only stretch before the first clip and after the last one.
+const TYPING_ONLY_SECS: f64 = 6.0;
+
+/// xorshift with a fixed seed: the typing track is identical across runs.
+struct Rng(u64);
+impl Rng {
+    fn f(&mut self) -> f32 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 40) as f32 / (1u64 << 24) as f32
+    }
+    fn range(&mut self, lo: f32, hi: f32) -> f32 {
+        lo + (hi - lo) * self.f()
+    }
+}
+
+/// One keystroke: 5-15 ms of white noise under a 1.5-4 ms exponential decay (the
+/// broadband click) plus a 150-400 Hz damped "thock". Peak is roughly `amp`.
+fn add_click(out: &mut [f32], at: usize, amp: f32, rng: &mut Rng) {
+    let rate = CAPTURE_RATE as f32;
+    let n = (rng.range(5.0, 15.0) * rate / 1000.0) as usize;
+    let tau = rng.range(1.5, 4.0) / 1000.0;
+    let freq = rng.range(150.0, 400.0);
+    for i in 0..n {
+        let Some(s) = out.get_mut(at + i) else { break };
+        let t = i as f32 / rate;
+        let click = rng.range(-1.0, 1.0) * (-t / tau).exp();
+        let thock = 0.5 * (std::f32::consts::TAU * freq * t).sin() * (-t / (2.0 * tau)).exp();
+        *s += amp * (click + thock);
+    }
+}
+
+/// Synthetic laptop typing at 48 kHz (no recordings of people). Words of 2-8 keys at
+/// 80-250 ms spacing, 250-700 ms between words and a 1-2.5 s pause 15 % of the time.
+/// Each key is a press at `peak` x U(0.5, 1.0) and a release 60-130 ms later at 40 %.
+pub fn synth_typing(len: usize, peak: f32) -> Vec<f32> {
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    let ms = |x: f32| (x * CAPTURE_RATE as f32 / 1000.0) as usize;
+    let mut out = vec![0f32; len];
+    let mut at = ms(rng.range(0.0, 300.0));
+    while at < len {
+        for _ in 0..2 + (rng.f() * 7.0) as usize {
+            let amp = peak * rng.range(0.5, 1.0);
+            add_click(&mut out, at, amp, &mut rng);
+            let release = at + ms(rng.range(60.0, 130.0));
+            add_click(&mut out, release, amp * 0.4, &mut rng);
+            at += ms(rng.range(80.0, 250.0));
+        }
+        at += ms(if rng.f() < 0.15 { rng.range(1000.0, 2500.0) } else { rng.range(250.0, 700.0) });
+    }
+    out
+}
+
+/// Finals outside every clip span (typing-only / silent stretches), and finals per clip.
+fn fragmentation(finals: &[Final], clips: &[(f64, f64)]) -> Value {
+    let overlaps = |f: &Final, c: &(f64, f64)| f.0 < c.1 && c.0 < f.1;
+    let per_clip: Vec<f64> = clips.iter().map(|c| finals.iter().filter(|f| overlaps(f, c)).count() as f64).collect();
+    json!({
+        "finals_outside_speech": finals.iter().filter(|f| !clips.iter().any(|c| overlaps(f, c))).count(),
+        "finals_per_utterance": summarize(&per_clip),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // apple phases
 // ---------------------------------------------------------------------------
 
-async fn start(locale: &str) -> Result<(SpeechSession, f64)> {
+async fn start(locale: &str, partials: bool) -> Result<(SpeechSession, f64)> {
     let t = Instant::now();
-    let s = SpeechSession::start(locale).await.map_err(|e| anyhow!("Apple Speech start: {}", e))?;
+    let s = SpeechSession::start(locale, partials).await.map_err(|e| anyhow!("Apple Speech start: {}", e))?;
     Ok((s, t.elapsed().as_secs_f64() * 1000.0))
 }
 
-async fn next_event(session: &mut Option<SpeechSession>) -> Option<SpeechEvent> {
-    match session {
-        Some(s) => s.events.recv().await,
+async fn next_event(source: &mut Option<Source>) -> (Option<app_lib::apple_speech::SpeechEvent>, Option<usize>) {
+    match source {
+        Some(s) => s.next_event().await,
         None => std::future::pending().await,
     }
 }
 
-/// Finish and wait for `Finished` on every session (30 s, as apple.rs).
-async fn drain(sessions: Vec<SpeechSession>) -> Result<()> {
-    for mut s in sessions {
-        s.finish();
-        loop {
-            match tokio::time::timeout(Duration::from_secs(30), s.events.recv()).await {
-                Ok(Some(SpeechEvent::Finished)) => break,
-                Ok(Some(SpeechEvent::Error { message })) => return Err(anyhow!(message)),
-                Ok(Some(_)) => {}
-                Ok(None) | Err(_) => return Err(anyhow!("Apple Speech did not finish")),
-            }
-        }
-    }
-    Ok(())
+/// A capture chunk as the pipeline delivers it; `index` counts chunks of this source.
+fn chunk(data: Vec<f32>, index: usize, device_type: DeviceType) -> AudioChunk {
+    let end = ((index + 1) * CHUNK_SAMPLES) as f64 / CAPTURE_RATE as f64;
+    AudioChunk { data, sample_rate: CAPTURE_RATE, timestamp: end, chunk_id: index as u64, device_type }
 }
 
-/// Two sessions (mic + system) fed digital silence, real-time paced.
-async fn idle_phase(locale: &str, secs: u64) -> Result<Value> {
-    let (mic, mic_ms) = start(locale).await?;
-    let (sys, sys_ms) = start(locale).await?;
-    let mut sessions = vec![mic, sys];
+/// Shadow copy of the app's gate (deterministic) to record which audio was fed, in ms.
+fn track_runs(gate: &mut SpeechGate, data: &[f32], ts: f64, runs: &mut Vec<(f64, f64)>) {
+    if !gate.process(data.to_vec(), ts, CAPTURE_RATE) {
+        return;
+    }
+    for (samples, at) in gate.pending.drain(..) {
+        let (start, end) = (at * 1000.0, (at + samples.len() as f64 / CAPTURE_RATE as f64) * 1000.0);
+        match runs.last_mut() {
+            Some(run) if (run.1 - start).abs() < 0.01 => run.1 = end,
+            _ => runs.push((start, end)),
+        }
+    }
+}
+
+fn fed_secs(runs: &[(f64, f64)]) -> f64 {
+    runs.iter().map(|r| (r.1 - r.0) / 1000.0).sum()
+}
+
+/// Two sources (mic + system) fed digital silence, real-time paced.
+async fn idle_phase(locale: &str, secs: u64, partials: bool) -> Result<Value> {
+    let (mic, mic_ms) = start(locale, partials).await?;
+    let (sys, sys_ms) = start(locale, partials).await?;
+    let mut sources = [Source::new("microphone", mic, partials), Source::new("system", sys, partials)];
     let silence = vec![0f32; CHUNK_SAMPLES];
     let chunk_dur = Duration::from_secs_f64(CHUNK_SAMPLES as f64 / CAPTURE_RATE as f64);
     let ticks = (secs as f64 / chunk_dur.as_secs_f64()) as usize;
     let mut results = 0usize;
+    let (mut gate, mut runs) = (SpeechGate::new(), vec![]);
 
     let ps0 = ps_cpu();
     let watcher = ThreadWatcher::start();
     let (u0, s0) = cpu_time();
     let t0 = Instant::now();
     for i in 0..ticks {
-        let ts = (i * CHUNK_SAMPLES) as f64 / CAPTURE_RATE as f64;
-        for s in sessions.iter_mut() {
-            s.push(&silence, CAPTURE_RATE, ts).map_err(|e| anyhow!(e))?;
-            while let Ok(ev) = s.events.try_recv() {
-                match ev {
-                    SpeechEvent::Result { .. } => results += 1,
-                    SpeechEvent::Error { message } => return Err(anyhow!(message)),
-                    _ => {}
+        track_runs(&mut gate, &silence, (i * CHUNK_SAMPLES) as f64 / CAPTURE_RATE as f64, &mut runs);
+        for (source, device) in sources.iter_mut().zip([DeviceType::Microphone, DeviceType::System]) {
+            source.accept(locale, chunk(silence.clone(), i, device), 0.0, partials).await.map_err(|e| anyhow!(e))?;
+            while let Some((event, from)) = source.next_event().now_or_never() {
+                if let Step::Final { .. } | Step::Partial { .. } = source.on_event(event, from).map_err(|e| anyhow!(e))? {
+                    results += 1;
                 }
             }
         }
@@ -225,7 +306,13 @@ async fn idle_phase(locale: &str, secs: u64) -> Result<Value> {
     let (u1, s1) = cpu_time();
     let peak_threads = watcher.stop();
     let services = cpu_deltas(&ps0, wall);
-    drain(sessions).await?;
+    for mut source in sources {
+        source.finish();
+        while !source.is_done() {
+            let (event, from) = tokio::time::timeout(Duration::from_secs(30), source.next_event()).await?;
+            source.on_event(event, from).map_err(|e| anyhow!(e))?;
+        }
+    }
     let cpu = (u1 - u0) + (s1 - s0);
     Ok(json!({
         "wall_secs": wall,
@@ -234,7 +321,8 @@ async fn idle_phase(locale: &str, secs: u64) -> Result<Value> {
         "cpu_secs": cpu,
         "cpu_percent_of_one_core": cpu / wall * 100.0,
         "peak_threads": peak_threads,
-        "chunks_fed": ticks,
+        "chunks_per_session": ticks,
+        "secs_fed_to_recognizer_per_session": fed_secs(&runs),
         "sessions": 2,
         "session_start_ms": [mic_ms, sys_ms],
         "results_on_silence": results,
@@ -244,13 +332,16 @@ async fn idle_phase(locale: &str, secs: u64) -> Result<Value> {
 
 /// Mic session fed the synthetic meeting (same DSP and pacing as `live_phase`), plus a
 /// system session fed silence, through the app's bounded queue and event loop.
-async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Value, Vec<Final>, Vec<(f64, f64)>)> {
+async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String, partials_requested: bool) -> Result<(Value, Vec<Final>, Vec<(f64, f64)>)> {
     let audio_secs = meeting.len() as f64 / CAPTURE_RATE as f64;
-    let (mic, mic_ms) = start(locale).await?;
-    let (sys, sys_ms) = start(locale).await?;
-    let (mut mic, mut sys) = (Some(mic), Some(sys));
-    // audio/transcription/apple.rs:57 — one bounded queue for both sources.
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<(bool, Vec<f32>)>(128);
+    let (mic, mic_ms) = start(locale, partials_requested).await?;
+    let (sys, sys_ms) = start(locale, partials_requested).await?;
+    let (mut mic, mut sys) = (Some(Source::new("microphone", mic, partials_requested)), Some(Source::new("system", sys, partials_requested)));
+    let (mut mic_gate, mut sys_gate) = (SpeechGate::new(), SpeechGate::new());
+    let (mut mic_runs, mut sys_runs) = (vec![], vec![]);
+    let mut restarts = [0u32; 2];
+    // apple.rs bounds each source to ~10 s of queued audio (470 x 1024-sample chunks).
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(bool, Vec<f32>)>(2 * 470);
 
     let ps0 = ps_cpu();
     let watcher = ThreadWatcher::start();
@@ -269,7 +360,7 @@ async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Val
                 _ => norm.normalize_loudness(&hpf.process(chunk)),
             };
             let n = processed.len();
-            // Pipeline uses try_send: overflow ends Apple transcription (pipeline.rs:941).
+            // The pipeline uses try_send; the app skips and re-anchors on overflow, never seen here.
             tx.try_send((true, processed)).map_err(|_| anyhow!("input queue overflow at chunk {}", i))?;
             tx.try_send((false, vec![0f32; n])).map_err(|_| anyhow!("input queue overflow at chunk {}", i))?;
             let deadline = t0 + chunk_dur * (i as u32 + 1);
@@ -281,26 +372,29 @@ async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Val
     });
 
     let ms = |t: Instant| t.duration_since(t0).as_secs_f64() * 1000.0;
-    let (mut mic_clock, mut sys_clock) = (0usize, 0usize);
+    let (mut mic_chunks, mut sys_chunks) = (0usize, 0usize);
     let mut input_open = true;
     let mut input_closed_ms = f64::NAN;
-    let mut final_end = -1.0;
     let mut finals: Vec<Final> = Vec::new();
     let mut partials: Vec<(f64, f64)> = Vec::new();
     let mut partial_texts: Vec<String> = Vec::new();
     let mut sys_results = 0usize;
-    // Non-empty text from a session fed digital silence would be a hallucination.
     let mut sys_text_results = 0usize;
     let mut deadline = None;
     while mic.is_some() || sys.is_some() {
         tokio::select! {
-            chunk = rx.recv(), if input_open => match chunk {
+            input = rx.recv(), if input_open => match input {
                 Some((is_mic, data)) => {
-                    let (session, clock) = if is_mic { (&mic, &mut mic_clock) } else { (&sys, &mut sys_clock) };
-                    if let Some(s) = session {
-                        s.push(&data, CAPTURE_RATE, *clock as f64 / CAPTURE_RATE as f64).map_err(|e| anyhow!(e))?;
+                    let (source, index, gate, runs, device) = if is_mic {
+                        (&mut mic, &mut mic_chunks, &mut mic_gate, &mut mic_runs, DeviceType::Microphone)
+                    } else {
+                        (&mut sys, &mut sys_chunks, &mut sys_gate, &mut sys_runs, DeviceType::System)
+                    };
+                    track_runs(gate, &data, (*index * CHUNK_SAMPLES) as f64 / CAPTURE_RATE as f64, runs);
+                    if let Some(s) = source {
+                        s.accept(locale, chunk(data, *index, device), 0.0, partials_requested).await.map_err(|e| anyhow!(e))?;
                     }
-                    *clock += data.len();
+                    *index += 1;
                 }
                 None => {
                     input_open = false;
@@ -309,33 +403,28 @@ async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Val
                     deadline = Some(tokio::time::Instant::now() + Duration::from_secs(30));
                 }
             },
-            ev = next_event(&mut mic), if mic.is_some() => match ev {
-                Some(SpeechEvent::Result { text, start, end, is_final }) => {
-                    let now = ms(Instant::now());
-                    // Same acceptance as audio/transcription/apple.rs:205.
-                    let valid = !text.trim().is_empty() && start.is_finite() && end >= start && end > final_end;
-                    if valid && is_final {
-                        final_end = end;
-                        finals.push((start * 1000.0, end * 1000.0, now, text.trim().to_owned(), !input_open));
-                    } else if valid {
-                        partials.push((now, end * 1000.0));
-                        if partial_texts.len() < 5 { partial_texts.push(text.trim().to_owned()); }
+            (ev, from) = next_event(&mut mic), if mic.is_some() => {
+                let src = mic.as_mut().unwrap();
+                match src.on_event(ev, from).map_err(|e| anyhow!("mic: {}", e))? {
+                    Step::Final { text, start, end } => finals.push((start * 1000.0, end * 1000.0, ms(Instant::now()), text, !input_open)),
+                    Step::Partial { text, end, .. } => {
+                        partials.push((ms(Instant::now()), end * 1000.0));
+                        if partial_texts.len() < 5 { partial_texts.push(text); }
                     }
+                    Step::Ended if input_open => return Err(anyhow!("mic session ended early")),
+                    Step::Ended | Step::Nothing => {}
                 }
-                Some(SpeechEvent::Finished) => mic = None,
-                Some(SpeechEvent::Error { message }) => return Err(anyhow!("mic: {}", message)),
-                None => return Err(anyhow!("mic session disconnected or its result queue overflowed")),
-                _ => {}
+                if src.is_done() { restarts[0] = src.restarts; mic = None; }
             },
-            ev = next_event(&mut sys), if sys.is_some() => match ev {
-                Some(SpeechEvent::Result { text, .. }) => {
-                    sys_results += 1;
-                    sys_text_results += !text.trim().is_empty() as usize;
+            (ev, from) = next_event(&mut sys), if sys.is_some() => {
+                let src = sys.as_mut().unwrap();
+                match src.on_event(ev, from).map_err(|e| anyhow!("system: {}", e))? {
+                    // Non-empty text from a source fed digital silence would be a hallucination.
+                    Step::Final { .. } | Step::Partial { .. } => { sys_results += 1; sys_text_results += 1; }
+                    Step::Ended if input_open => return Err(anyhow!("system session ended early")),
+                    Step::Ended | Step::Nothing => {}
                 }
-                Some(SpeechEvent::Finished) => sys = None,
-                Some(SpeechEvent::Error { message }) => return Err(anyhow!("system: {}", message)),
-                None => return Err(anyhow!("system session disconnected or its result queue overflowed")),
-                _ => {}
+                if src.is_done() { restarts[1] = src.restarts; sys = None; }
             },
             _ = tokio::time::sleep_until(deadline.unwrap_or_else(tokio::time::Instant::now)), if deadline.is_some() => {
                 return Err(anyhow!("Apple Speech did not finish within 30 s of end of input"));
@@ -361,6 +450,10 @@ async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Val
         "finals": finals.len(),
         "finals_after_input_closed": finals.iter().filter(|f| f.4).count(),
         "partials": partials.len(),
+        "partials_requested": partials_requested,
+        "secs_fed_to_recognizer": {"microphone": fed_secs(&mic_runs), "system": fed_secs(&sys_runs)},
+        "microphone_fed_runs_ms": mic_runs,
+        "session_restarts": {"microphone": restarts[0], "system": restarts[1]},
         "system_session_results_on_silence": sys_results,
         "system_session_text_results_on_silence": sys_text_results,
         "speech_secs_total": finals.iter().map(|f| (f.1 - f.0) / 1000.0).sum::<f64>(),
@@ -386,14 +479,42 @@ async fn live_phase(locale: &str, meeting: Vec<f32>, dsp: String) -> Result<(Val
 
 pub async fn run(args: &Args, machine: Value, meeting: Vec<f32>, clip_16k: &[f32], period_secs: f64, wav: &Path) -> Result<()> {
     let locale = args.model.clone().unwrap_or_else(|| "en_US".into());
-    println!("  {:<16} Apple Speech {} (SpeechAnalyzer, bridge preset timeIndexedProgressiveTranscription)\n", "engine", locale);
+    let partials = !args.captions_off;
+    let preset = if partials {
+        "timeIndexedProgressiveTranscription (volatileResults, fastResults, audioTimeRange)"
+    } else {
+        "finals only (audioTimeRange)"
+    };
+    println!("  {:<16} Apple Speech {} (SpeechAnalyzer, {})\n", "engine", locale, preset);
 
     println!("[1/2] idle cost: {}s of silence through 2 Apple sessions...", args.idle_secs);
-    let idle = idle_phase(&locale, args.idle_secs).await?;
+    let idle = idle_phase(&locale, args.idle_secs, partials).await?;
+
+    // --typing: typing-only lead and tail, keystrokes over the whole mic track.
+    let lead_secs = if args.typing { TYPING_ONLY_SECS } else { 0.0 };
+    let mut meeting = meeting;
+    if args.typing {
+        let pad = vec![0f32; (TYPING_ONLY_SECS * CAPTURE_RATE as f64) as usize];
+        meeting = [pad.as_slice(), &meeting, &pad].concat();
+        let peak = clip_16k.iter().fold(0f32, |m, x| m.max(x.abs()));
+        let keys = synth_typing(meeting.len(), peak * TYPING_LEVEL);
+        for (m, k) in meeting.iter_mut().zip(keys) {
+            *m = (*m + k).clamp(-1.0, 1.0);
+        }
+    }
+    let clip_ms = clip_16k.len() as f64 * 1000.0 / VAD_RATE as f64;
+    let clips: Vec<(f64, f64)> = (0..args.repeats)
+        .map(|r| ((lead_secs + r as f64 * period_secs) * 1000.0, (lead_secs + r as f64 * period_secs) * 1000.0 + clip_ms))
+        .collect();
 
     println!("[2/2] live simulation ({:.0}s of audio, real-time paced, mic + silent system session)...", meeting.len() as f64 / CAPTURE_RATE as f64);
-    let (mut live, finals, partials) = live_phase(&locale, meeting, args.dsp.clone()).await?;
-    live["ground_truth"] = gt_metrics(&finals, &partials, args.repeats, period_secs, clip_speech_bounds(clip_16k));
+    let (mut live, finals, partials) = live_phase(&locale, meeting, args.dsp.clone(), partials).await?;
+    live["fragmentation"] = fragmentation(&finals, &clips);
+    // Ground truth is on the clip grid; shift the typing-only lead out.
+    let lead_ms = lead_secs * 1000.0;
+    let shifted: Vec<Final> = finals.iter().map(|f| (f.0 - lead_ms, f.1 - lead_ms, f.2 - lead_ms, f.3.clone(), f.4)).collect();
+    let shifted_partials: Vec<(f64, f64)> = partials.iter().map(|p| (p.0 - lead_ms, p.1 - lead_ms)).collect();
+    live["ground_truth"] = gt_metrics(&shifted, &shifted_partials, args.repeats, period_secs, clip_speech_bounds(clip_16k));
 
     let report = json!({
         "generated_at": chrono::Utc::now().to_rfc3339(),
@@ -401,7 +522,8 @@ pub async fn run(args: &Args, machine: Value, meeting: Vec<f32>, clip_16k: &[f32
         "config": {
             "engine": "apple",
             "model": locale,
-            "preset": "timeIndexedProgressiveTranscription (volatileResults, fastResults, audioTimeRange)",
+            "preset": preset,
+            "captions_off": args.captions_off,
             "dsp": args.dsp,
             "capture_rate_hz": CAPTURE_RATE,
             "chunk_samples": CHUNK_SAMPLES,
@@ -409,6 +531,9 @@ pub async fn run(args: &Args, machine: Value, meeting: Vec<f32>, clip_16k: &[f32
             "repeats": args.repeats,
             "gap_ms": args.gap_ms,
             "idle_secs": args.idle_secs,
+            "typing": args.typing,
+            "typing_level": if args.typing { TYPING_LEVEL } else { 0.0 },
+            "typing_only_secs_each_end": lead_secs,
         },
         "idle": idle,
         "live": live,
@@ -419,7 +544,7 @@ pub async fn run(args: &Args, machine: Value, meeting: Vec<f32>, clip_16k: &[f32
     println!("IDLE (2 Apple sessions, {} s of silence)", args.idle_secs);
     println!("  App CPU:        {:.3} s over {:.1} s wall = {:.2}% of one core", f(&idle["cpu_secs"]), f(&idle["wall_secs"]), f(&idle["cpu_percent_of_one_core"]));
     println!("  Speech svcs:    {:.2}% of one core", f(&idle["other_processes"]["speech_services_cpu_percent_of_one_core"]));
-    println!("  Peak threads:   {}   results on silence: {}", idle["peak_threads"], idle["results_on_silence"]);
+    println!("  Peak threads:   {}   results on silence: {}   secs fed per session: {}", idle["peak_threads"], idle["results_on_silence"], idle["secs_fed_to_recognizer_per_session"]);
     println!("\nLIVE SIMULATION");
     println!("  Audio:          {:.1} s   Wall: {:.1} s   Finals: {} ({} after input closed)   Partials: {}",
         f(&live["audio_secs"]), f(&live["wall_secs"]), live["finals"], live["finals_after_input_closed"], live["partials"]);
@@ -429,6 +554,9 @@ pub async fn run(args: &Args, machine: Value, meeting: Vec<f32>, clip_16k: &[f32
     println!("  Speech svcs:    {:.3} s = {:.2}% of one core  {}", f(&live["other_processes"]["speech_services_cpu_secs"]),
         f(&live["other_processes"]["speech_services_cpu_percent_of_one_core"]), live["other_processes"]["speech_services"]);
     println!("  Peak threads:   {}", live["peak_threads"]);
+    println!("  Secs fed:       {}   restarts: {}   mic runs (ms): {}", live["secs_fed_to_recognizer"], live["session_restarts"], live["microphone_fed_runs_ms"]);
+    println!("  Fragmentation:  finals outside speech {}   finals per utterance {}   system text results on silence {}",
+        live["fragmentation"]["finals_outside_speech"], live["fragmentation"]["finals_per_utterance"], live["system_session_text_results_on_silence"]);
     println!("  latencies (ms):");
     for k in ["speech_end_to_text_ms", "speech_start_to_text_ms"] {
         println!("{}", row(k, &live["stats"][k], 1));

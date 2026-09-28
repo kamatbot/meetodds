@@ -63,6 +63,15 @@ struct Args {
     /// does), hpf, norm, or none.
     #[arg(long, default_value = "full")]
     dsp: String,
+
+    /// Apple only: overlay synthetic keyboard typing on the mic track (over speech and
+    /// in the gaps) plus typing-only stretches before and after. See `apple::synth_typing`.
+    #[arg(long, default_value_t = false)]
+    typing: bool,
+
+    /// Apple only: captions off, so sessions request finals only (no volatile results).
+    #[arg(long, default_value_t = false)]
+    captions_off: bool,
 }
 
 // ---------------------------------------------------------------------------

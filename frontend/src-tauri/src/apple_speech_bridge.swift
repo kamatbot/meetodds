@@ -37,51 +37,57 @@ private final class Session: @unchecked Sendable {
         let timestamp: Double
     }
 
+    /// Input is bounded by queued audio time, not frame count, so any callback size
+    /// gets the same headroom. Rust restarts the session when this fills.
+    static let maxQueuedSeconds = 10.0
+
     let id: UInt64
     let callback: SpeechCallback?
+    let partials: Bool
     private let lock = NSLock()
     private let deliveryLock = NSLock()
     private var continuation: AsyncStream<Frame>.Continuation?
     private var task: Task<Void, Never>?
     private var terminal = false
     private var acceptedFrames = 0
+    private var queuedSeconds = 0.0
     private var inputFinished = false
     // This state is touched by the one ordered stream-consumer task only.
     private var converter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var needsInputAnchor = true
 
-    init(id: UInt64, callback: SpeechCallback?) {
+    init(id: UInt64, callback: SpeechCallback?, partials: Bool) {
         self.id = id
         self.callback = callback
+        self.partials = partials
     }
 
     func start(localeID: String) {
         lock.lock()
         guard !terminal, task == nil else { lock.unlock(); return }
-        let (stream, continuation) = AsyncStream<Frame>.makeStream(bufferingPolicy: .bufferingOldest(128))
+        let (stream, continuation) = AsyncStream<Frame>.makeStream(bufferingPolicy: .unbounded)
         self.continuation = continuation
         task = Task { [weak self] in await self?.run(stream: stream, localeID: localeID) }
         lock.unlock()
     }
 
-    // The C pointer is copied before this method returns. Yield is synchronous and
-    // gives the caller an accurate bounded-ingress result.
-    func push(samples: UnsafePointer<Float>?, count: UInt32, sampleRate: UInt32, timestamp: Double) -> Bool {
-        guard let samples, count > 0, sampleRate > 0, timestamp.isFinite, timestamp >= 0 else { return false }
+    // The C pointer is copied before this method returns. Returns 0 = accepted,
+    // 1 = queue full (not accepted; the session keeps running), 2 = closed/invalid.
+    func push(samples: UnsafePointer<Float>?, count: UInt32, sampleRate: UInt32, timestamp: Double) -> Int32 {
+        guard let samples, count > 0, sampleRate > 0, timestamp.isFinite, timestamp >= 0 else { return 2 }
+        let duration = Double(count) / Double(sampleRate)
         let copied = Array(UnsafeBufferPointer(start: samples, count: Int(count)))
         lock.lock()
-        guard !terminal, let continuation else { lock.unlock(); return false }
-        let outcome = continuation.yield(Frame(samples: copied, sampleRate: Double(sampleRate), timestamp: timestamp))
-        switch outcome {
-        case .enqueued: acceptedFrames += 1; lock.unlock(); return true
-        case .dropped:
-            lock.unlock()
-            fail("Apple local speech fell behind its bounded audio queue; audio recording continues.")
-            return false
-        case .terminated: lock.unlock(); return false
-        @unknown default: lock.unlock(); return false
+        guard !terminal, let continuation else { lock.unlock(); return 2 }
+        // An empty queue always accepts, so one long batch buffer still fits.
+        if queuedSeconds > 0, queuedSeconds + duration > Session.maxQueuedSeconds { lock.unlock(); return 1 }
+        guard case .enqueued = continuation.yield(Frame(samples: copied, sampleRate: Double(sampleRate), timestamp: timestamp)) else {
+            lock.unlock(); return 2
         }
+        acceptedFrames += 1; queuedSeconds += duration
+        lock.unlock()
+        return 0
     }
 
     func finish() {
@@ -157,7 +163,11 @@ private final class Session: @unchecked Sendable {
         guard await SpeechTranscriber.installedLocales.contains(where: { $0.identifier == locale.identifier }) else {
             throw BridgeError.localeUnavailable
         }
-        let transcriber = SpeechTranscriber(locale: locale, preset: .timeIndexedProgressiveTranscription)
+        // Captions off: finals only (volatile results would be encoded, routed and dropped).
+        // fastResults stays: without it end-of-speech -> final went from ~0.56 s to ~1.56 s.
+        let transcriber = partials
+            ? SpeechTranscriber(locale: locale, preset: .timeIndexedProgressiveTranscription)
+            : SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.fastResults], attributeOptions: [.audioTimeRange])
         guard let outputFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw BridgeError.notReady
         }
@@ -189,6 +199,7 @@ private final class Session: @unchecked Sendable {
 
     @available(macOS 26.0, *)
     private func makeInput(_ frame: Frame, outputFormat: AVAudioFormat) throws -> AnalyzerInput {
+        lock.lock(); queuedSeconds -= Double(frame.samples.count) / frame.sampleRate; lock.unlock()
         guard let inputFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: frame.sampleRate, channels: 1, interleaved: false),
               let source = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(frame.samples.count)) else { throw BridgeError.conversion }
         source.frameLength = source.frameCapacity
@@ -213,7 +224,8 @@ private final class Session: @unchecked Sendable {
         // The analyzer advances ordinary contiguous buffers by their exact decoded
         // frame length. Supplying independently rounded timestamps for every
         // converted chunk can create overlaps; retain an explicit source anchor
-        // only for the first chunk of a continuous session.
+        // only for the first chunk of a continuous session. Rust splices skipped audio out
+        // of this timeline (the analyzer mis-hears speech after a jump) and maps back.
         let timestamp: CMTime? = needsInputAnchor ? CMTime(seconds: frame.timestamp, preferredTimescale: 48_000) : nil
         needsInputAnchor = false
         return AnalyzerInput(buffer: buffer, bufferStartTime: timestamp)
@@ -278,17 +290,17 @@ public func md_speech_prepare(_ id: UInt64, _ localeCString: UnsafePointer<CChar
 }
 
 @_cdecl("md_speech_start")
-public func md_speech_start(_ id: UInt64, _ localeCString: UnsafePointer<CChar>?, _ callback: SpeechCallback?) {
+public func md_speech_start(_ id: UInt64, _ localeCString: UnsafePointer<CChar>?, _ partials: Bool, _ callback: SpeechCallback?) {
     let localeID = localeCString.map(String.init(cString:)) ?? ""
     guard isSupportedRuntime() else { emitError(callback, id, "Apple local speech requires macOS 26 or later on Apple Silicon."); emit(callback, id, ["kind": "finished"]); return }
-    let session = Session(id: id, callback: callback)
+    let session = Session(id: id, callback: callback, partials: partials)
     SpeechSessions.shared.install(session)
     session.start(localeID: localeID)
 }
 
 @_cdecl("md_speech_push")
-public func md_speech_push(_ id: UInt64, _ samples: UnsafePointer<Float>?, _ count: UInt32, _ sampleRate: UInt32, _ timestamp: Double) -> Bool {
-    return SpeechSessions.shared.session(id)?.push(samples: samples, count: count, sampleRate: sampleRate, timestamp: timestamp) ?? false
+public func md_speech_push(_ id: UInt64, _ samples: UnsafePointer<Float>?, _ count: UInt32, _ sampleRate: UInt32, _ timestamp: Double) -> Int32 {
+    return SpeechSessions.shared.session(id)?.push(samples: samples, count: count, sampleRate: sampleRate, timestamp: timestamp) ?? 2
 }
 
 @_cdecl("md_speech_finish") public func md_speech_finish(_ id: UInt64) { SpeechSessions.shared.session(id)?.finish() }

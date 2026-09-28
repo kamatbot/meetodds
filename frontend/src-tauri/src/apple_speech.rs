@@ -77,14 +77,15 @@ mod ffi {
             download: bool,
             callback: Callback,
         );
-        pub fn md_speech_start(id: u64, locale: *const c_char, callback: Callback);
+        pub fn md_speech_start(id: u64, locale: *const c_char, partials: bool, callback: Callback);
+        /// 0 = accepted, 1 = queue full (session keeps running), 2 = closed/invalid.
         pub fn md_speech_push(
             id: u64,
             samples: *const f32,
             count: u32,
             sample_rate: u32,
             timestamp: f64,
-        ) -> bool;
+        ) -> i32;
         pub fn md_speech_finish(id: u64);
         pub fn md_speech_cancel(id: u64);
     }
@@ -154,10 +155,11 @@ impl SpeechSession {
         }
     }
 
-    pub async fn start(locale: &str) -> Result<Self, String> {
+    /// `partials: false` requests finals only (no volatile results).
+    pub async fn start(locale: &str, partials: bool) -> Result<Self, String> {
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = locale;
+            let _ = (locale, partials);
             return Err(UNAVAILABLE.into());
         }
         #[cfg(target_os = "macos")]
@@ -165,7 +167,7 @@ impl SpeechSession {
             let locale = locale_string(locale)?;
             let mut session = Self::register();
             unsafe {
-                ffi::md_speech_start(session.id, locale.as_ptr(), receive);
+                ffi::md_speech_start(session.id, locale.as_ptr(), partials, receive);
             }
             match session.next(Duration::from_secs(30)).await? {
                 SpeechEvent::Ready { .. } => Ok(session),
@@ -174,9 +176,11 @@ impl SpeechSession {
         }
     }
 
-    pub fn push(&self, samples: &[f32], rate: u32, timestamp: f64) -> Result<(), String> {
+    /// `Ok(false)`: the session's input queue (~10 s of audio) is full and this audio was
+    /// not accepted; the session itself keeps running.
+    pub fn push(&self, samples: &[f32], rate: u32, timestamp: f64) -> Result<bool, String> {
         if samples.is_empty() {
-            return Ok(());
+            return Ok(true);
         }
         if rate == 0
             || !timestamp.is_finite()
@@ -186,7 +190,7 @@ impl SpeechSession {
             return Err("Invalid audio format or timestamp for Apple Speech.".into());
         }
         #[cfg(target_os = "macos")]
-        if unsafe {
+        match unsafe {
             ffi::md_speech_push(
                 self.id,
                 samples.as_ptr(),
@@ -195,7 +199,9 @@ impl SpeechSession {
                 timestamp,
             )
         } {
-            return Ok(());
+            0 => return Ok(true),
+            1 => return Ok(false),
+            _ => {}
         }
         Err("Apple Speech could not accept audio. Stop and retry transcription from the saved recording.".into())
     }
@@ -472,7 +478,7 @@ mod tests {
             .find(|locale| locale.installed && locale.id.replace('_', "-") == "en-US")
             .expect("Install English (US) through Settings before this explicit smoke check");
         assert!(!prepare(&locale.id, false).await.unwrap().is_empty());
-        let mut session = SpeechSession::start(&locale.id).await.unwrap();
+        let mut session = SpeechSession::start(&locale.id, false).await.unwrap();
         session.finish();
         assert!(matches!(
             session.next(Duration::from_secs(10)).await.unwrap(),

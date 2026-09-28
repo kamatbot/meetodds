@@ -696,7 +696,7 @@ pub async fn spanish_start_listening<R: Runtime>(
     // Fail before opening the microphone if this practice language needs assets.
     // Preparation is explicit in Settings; listening never downloads a model.
     let locale = crate::apple_speech::prepare(language, false).await?;
-    let mut session = SpeechSession::start(&locale).await?;
+    let mut session = SpeechSession::start(&locale, false).await?;
 
     let device = match device_name.filter(|name| !name.trim().is_empty()) {
         Some(name) => parse_audio_device(&name).map_err(|e| e.to_string())?,

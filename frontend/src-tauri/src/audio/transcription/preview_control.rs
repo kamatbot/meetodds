@@ -31,6 +31,10 @@ impl PreviewGate {
     pub fn set_active(&self, active: bool) {
         self.update(ACTIVE, active);
     }
+    /// The captions preference alone (Apple chooses partials vs finals-only from it).
+    pub fn enabled(&self) -> bool {
+        self.0.load(Ordering::Acquire) & ENABLED != 0
+    }
     pub fn epoch(&self) -> Option<u64> {
         let state = self.0.load(Ordering::Acquire);
         (state & 3 == 3).then_some(state)
