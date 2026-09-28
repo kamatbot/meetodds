@@ -1,8 +1,10 @@
-//! Continuous Apple ASR; no VAD sentence gate and no separate speculative model pass.
+//! Continuous Apple ASR; no model VAD and no separate speculative model pass. A cheap
+//! energy gate keeps silence (and keystrokes alone) away from the recognizer.
 use super::{live_preview::LiveTranscriptPreviewUpdate, worker::TranscriptUpdate};
 use crate::apple_speech::{SpeechEvent, SpeechSession};
 use crate::audio::{recording_state::DeviceType, AudioChunk};
 use log::warn;
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -64,6 +66,82 @@ impl AppleAudioSender {
     }
 }
 
+/// Energy gate in front of the recognizer. Apple analyzes silence at full cost and has
+/// produced text from digital zeros, so audio is only fed around sustained energy:
+/// 5 consecutive loud 10 ms frames. A keystroke (<= 15 ms click, a gap, then the release)
+/// never lights 5 in a row, so typing alone neither opens the gate nor extends it; any
+/// vowel does. Pre-roll keeps onsets; hangover keeps word endings and gives Apple enough
+/// trailing audio to finalize before input pauses.
+pub struct SpeechGate {
+    open: bool,
+    hangover_left: u32,
+    frame_energy: f32,
+    frame_len: usize,
+    loud_run: u32,
+    /// Closed: pre-roll. Open: audio waiting to be fed (the caller drains it).
+    pub pending: VecDeque<(Vec<f32>, f64)>,
+}
+
+impl SpeechGate {
+    /// ponytail: fixed threshold (-50 dBFS RMS per 10 ms frame, after the app's mic
+    /// loudness normalization). Rooms whose noise floor sits above it keep the gate open,
+    /// which costs CPU, never words; track the noise floor adaptively if that shows up.
+    const THRESHOLD: f32 = 1e-5;
+    const SUSTAINED_FRAMES: u32 = 5;
+    const HANGOVER_FRAMES: u32 = 150;
+    const PREROLL_SECS: f64 = 0.3;
+
+    pub fn new() -> Self {
+        Self {
+            open: false,
+            hangover_left: 0,
+            frame_energy: 0.0,
+            frame_len: 0,
+            loud_run: 0,
+            pending: VecDeque::new(),
+        }
+    }
+
+    fn end_frame(&mut self) {
+        let loud = self.frame_energy / self.frame_len.max(1) as f32 > Self::THRESHOLD;
+        self.loud_run = if loud { self.loud_run + 1 } else { 0 };
+        if self.loud_run >= Self::SUSTAINED_FRAMES {
+            self.open = true;
+            self.hangover_left = Self::HANGOVER_FRAMES;
+        } else if self.open {
+            self.hangover_left -= 1;
+            self.open = self.hangover_left > 0;
+        }
+    }
+
+    /// Queue one chunk starting at `start` (sample-clock seconds). Returns true when
+    /// `pending` should be fed now: pre-roll + this chunk on opening, or the tail.
+    pub fn process(&mut self, samples: Vec<f32>, start: f64, rate: u32) -> bool {
+        let was_open = self.open;
+        let frame = (rate / 100).max(1) as usize;
+        for x in &samples {
+            self.frame_energy += x * x;
+            self.frame_len += 1;
+            if self.frame_len == frame {
+                self.end_frame();
+                self.frame_energy = 0.0;
+                self.frame_len = 0;
+            }
+        }
+        self.pending.push_back((samples, start));
+        if self.open || was_open {
+            return true;
+        }
+        let secs = |b: &Vec<f32>| b.len() as f64 / rate.max(1) as f64;
+        while self.pending.len() > 1
+            && self.pending.iter().skip(1).map(|(b, _)| secs(b)).sum::<f64>() >= Self::PREROLL_SECS
+        {
+            self.pending.pop_front();
+        }
+        false
+    }
+}
+
 /// What the event loop should do with one session event.
 pub enum Step {
     Final { text: String, start: f64, end: f64 },
@@ -73,9 +151,10 @@ pub enum Step {
     Nothing,
 }
 
-/// Maps a session's timeline to recording time. Skipped audio (dropped input) is
-/// spliced out: the analyzer gets contiguous audio, because SpeechAnalyzer mis-hears
-/// the first words after a `bufferStartTime` jump (measured).
+/// Maps a session's timeline to recording time. Skipped audio (gate closed, dropped
+/// input) is spliced out: the analyzer gets contiguous audio, because SpeechAnalyzer
+/// mis-hears the first words after a `bufferStartTime` jump (measured), and a fresh
+/// session per speech burst finalizes ~0.3-0.8 s later than a warm one (measured).
 #[derive(Default)]
 struct Timeline {
     /// (analyzer time, recording time - analyzer time from there on).
@@ -121,8 +200,8 @@ impl Live {
     }
 }
 
-/// One capture source: sample clock and its Apple session. A captions toggle or a full
-/// Swift queue continues in a new session anchored at the sample clock; the previous
+/// One capture source: gate, sample clock and its Apple session. A captions toggle or a
+/// full Swift queue continues in a new session anchored at the sample clock; the previous
 /// one finishes in `retiring` (its queued audio is still finalized).
 pub struct Source {
     name: &'static str,
@@ -130,6 +209,7 @@ pub struct Source {
     partials: bool,
     retiring: Vec<Live>,
     clock: SampleClock,
+    gate: SpeechGate,
     pub restarts: u32,
 }
 
@@ -141,6 +221,7 @@ impl Source {
             partials,
             retiring: Vec::new(),
             clock: SampleClock::default(),
+            gate: SpeechGate::new(),
             restarts: 0,
         }
     }
@@ -171,25 +252,34 @@ impl Source {
     pub async fn accept(&mut self, locale: &str, chunk: AudioChunk, dropped_secs: f64, partials: bool) -> Result<bool, String> {
         let rate = chunk.sample_rate;
         self.clock.skip(dropped_secs);
-        let at = self.clock.accept(chunk.data.len(), rate, chunk.timestamp)?;
-        let secs = chunk.data.len() as f64 / rate as f64;
-        let behind = dropped_secs > 0.0;
+        let start = self.clock.accept(chunk.data.len(), rate, chunk.timestamp)?;
+        let mut behind = dropped_secs > 0.0;
+        if behind {
+            // Pre-roll from before the drop is not contiguous with this chunk.
+            self.gate.pending.clear();
+        }
         if partials != self.partials {
             // Captions toggled: partials vs finals-only.
             self.restart(locale, partials).await?;
         }
-        let Some(live) = &mut self.live else { return Ok(behind) };
-        if live.session.push(&chunk.data, rate, live.timeline.place(at, secs))? {
+        if !self.gate.process(chunk.data, start, rate) {
             return Ok(behind);
         }
-        // The recognizer is ~10 s behind. Keep live transcription going.
-        self.restart(locale, self.partials).await?;
-        if let Some(live) = &mut self.live {
-            if !live.session.push(&chunk.data, rate, live.timeline.place(at, secs))? {
+        while let Some((samples, at)) = self.gate.pending.pop_front() {
+            let secs = samples.len() as f64 / rate as f64;
+            let Some(live) = &mut self.live else { break };
+            if live.session.push(&samples, rate, live.timeline.place(at, secs))? {
+                continue;
+            }
+            // The recognizer is ~10 s behind. Keep live transcription going.
+            behind = true;
+            self.restart(locale, self.partials).await?;
+            let Some(live) = &mut self.live else { break };
+            if !live.session.push(&samples, rate, live.timeline.place(at, secs))? {
                 return Err("Apple Speech cannot accept live audio.".into());
             }
         }
-        Ok(true)
+        Ok(behind)
     }
 
     /// Next event of the current (`None`) or a retiring (`Some(i)`) session.
@@ -567,7 +657,7 @@ mod tests {
     #[test]
     fn timeline_splices_out_skipped_audio_and_maps_results_back() {
         let mut t = Timeline::default();
-        // Fed 0-2 s, skipped 2-10 s (dropped), fed 10-11 s, skipped, fed 20-21 s.
+        // Fed 0-2 s, skipped 2-10 s (gate closed), fed 10-11 s, skipped, fed 20-21 s.
         assert_eq!(t.place(0.0, 1.0), 0.0);
         assert_eq!(t.place(1.0, 1.0), 1.0);
         assert_eq!(t.place(10.0, 1.0), 2.0, "the analyzer sees contiguous audio");
@@ -582,7 +672,7 @@ mod tests {
         assert_eq!(late.to_recording(42.25), 42.25);
     }
 
-    /// Native: pushing 30 s of audio at once overflows the Swift queue (10 s);
+    /// Native: pushing 30 s of voice-level audio at once overflows the Swift queue (10 s);
     /// the source restarts instead of ending, and every session still finishes cleanly.
     #[cfg(target_os = "macos")]
     #[tokio::test]
@@ -602,6 +692,55 @@ mod tests {
             let (event, from) = tokio::time::timeout(std::time::Duration::from_secs(60), source.next_event()).await.unwrap();
             source.on_event(event, from).unwrap();
         }
+    }
+
+    /// Feed a 48 kHz signal through the gate in 1024-sample chunks; returns fed spans (s).
+    fn fed(gate: &mut SpeechGate, signal: &[f32]) -> Vec<(f64, f64)> {
+        let mut spans = vec![];
+        for (i, c) in signal.chunks(1024).enumerate() {
+            if gate.process(c.to_vec(), (i * 1024) as f64 / 48000.0, 48000) {
+                spans.extend(gate.pending.drain(..).map(|(b, t)| (t, t + b.len() as f64 / 48000.0)));
+            }
+        }
+        spans
+    }
+
+    /// Fast typing from `from` to `to` s: a loud 15 ms press every 100 ms and a 10 ms
+    /// release 60 ms after it.
+    fn add_clicks(signal: &mut [f32], from: f64, to: f64) {
+        let mut t = from;
+        while t < to {
+            for (at, ms) in [(t, 15), (t + 0.06, 10)] {
+                for s in signal.iter_mut().skip((at * 48000.0) as usize).take(48 * ms) {
+                    *s += 0.5;
+                }
+            }
+            t += 0.1;
+        }
+    }
+
+    #[test]
+    fn gate_skips_silence_and_keystrokes_alone() {
+        let mut signal = vec![0.0; 48000 * 6];
+        add_clicks(&mut signal, 3.0, 6.0);
+        let mut gate = SpeechGate::new();
+        assert!(fed(&mut gate, &signal).is_empty());
+        // Only the pre-roll is held while closed.
+        assert!(gate.pending.iter().map(|(b, _)| b.len()).sum::<usize>() <= 48000 * 3 / 10 + 1024);
+    }
+
+    #[test]
+    fn gate_keeps_onset_and_tail_contiguous_and_typing_does_not_extend_it() {
+        // Silence, 2 s of voice-level tone (-23 dBFS), then typing only.
+        let mut signal: Vec<f32> = (0..48000 * 8)
+            .map(|i| if (48000..48000 * 3).contains(&i) { 0.1 * (i as f32 * 0.03).sin() } else { 0.0 })
+            .collect();
+        add_clicks(&mut signal, 3.0, 8.0);
+        let spans = fed(&mut SpeechGate::new(), &signal);
+        assert!(spans.windows(2).all(|w| (w[1].0 - w[0].1).abs() < 1e-9), "one contiguous run");
+        let (first, last) = (spans[0].0, spans[spans.len() - 1].1);
+        assert!((0.65..=0.8).contains(&first), "pre-roll before the 1 s onset: {first}");
+        assert!((4.45..=4.6).contains(&last), "1.5 s hangover after the 3 s offset, clicks ignored: {last}");
     }
 
     #[test]
