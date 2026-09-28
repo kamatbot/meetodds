@@ -36,9 +36,6 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr :3118') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 
-REM Set libclang path for whisper-rs-sys
-set "LIBCLANG_PATH=C:\Program Files\LLVM\bin"
-
 REM Try to find and setup Visual Studio environment
 if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
     echo Setting up Visual Studio 2022 Build Tools environment...
@@ -186,7 +183,6 @@ echo   The script automatically configures:
 echo   - Visual Studio build environment
 echo   - Windows SDK paths
 echo   - C++ runtime libraries
-echo   - LLVM/Clang paths for whisper-rs-sys
 echo.
 echo PORT MANAGEMENT:
 echo   Automatically kills processes on port 3118 before building

@@ -61,8 +61,8 @@ echo "Signing with identity: $signing_identity"
 
 if [[ "${APP_ONLY:-0}" == "1" ]]; then
   echo "Packaging a fast release app only (no DMG or updater artifact)"
-  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app -- --features metal,coreml
+  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app
 else
   echo "Packaging full distributable release: App bundle and signed DMG installer"
-  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app,dmg -- --features metal,coreml
+  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app,dmg
 fi

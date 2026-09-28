@@ -19,7 +19,7 @@ pub fn compile() {
         "x86_64" => "x86_64",
         other => panic!("unsupported macOS Swift architecture: {}", other),
     };
-    let deployment = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "14.2".into());
+    let deployment = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "26.0".into());
     let target = format!("{}-apple-macosx{}", target_arch, deployment);
     let output = Command::new("xcrun")
         .args([
@@ -74,8 +74,8 @@ pub fn compile() {
         "cargo:rustc-link-search=native={}",
         toolchain_swift.display()
     );
-    // Weak-linking keeps macOS 14/15 launches valid. The bridge performs its own
-    // macOS 26 runtime check before touching SpeechAnalyzer APIs.
+    // The app requires macOS 26. Weak-linking is retained so a launch on an
+    // unsupported OS still reaches the bridge's own availability check.
     println!("cargo:rustc-link-arg=-Wl,-weak_framework,Speech");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=CoreMedia");
