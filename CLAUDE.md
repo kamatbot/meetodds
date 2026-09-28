@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Audio Processing**: Rust (cpal, ScreenCaptureKit, professional audio mixing)
 - **Transcription**: Apple Speech (SpeechAnalyzer/SpeechTranscriber, on-device) through a Swift bridge; the only engine
 - **App API Surface**: Tauri commands and events, not a separate FastAPI service
-- **LLM Integration**: Ollama (local), Claude, Groq, OpenRouter
+- **LLM Integration**: Apple Intelligence (on-device), OpenAI Codex (ChatGPT), Ollama (local), Claude, Groq, OpenRouter
 
 ## Essential Development Commands
 

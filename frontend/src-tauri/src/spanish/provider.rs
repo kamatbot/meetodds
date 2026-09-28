@@ -1,12 +1,9 @@
 //! Native host adapter. Registered as crate::spanish_provider, separate from the
 //! model-free core so its tests never link Tauri/audio/GPU dependencies.
 use crate::spanish::tutor::{
-    CallKind, Diagnostic, EventSink, Model, ModelFuture, Prompt, TutorReplyEvent, REPLY_EVENT,
+    Diagnostic, EventSink, Model, ModelFuture, Prompt, TutorReplyEvent, REPLY_EVENT,
 };
 use crate::summary::llm_client::{self, LLMProvider};
-use crate::summary::summary_engine::client::{
-    generate_with_builtin_with_sampling, BuiltinSamplingOverride,
-};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use tauri::{Emitter, Runtime, WebviewWindow};
@@ -43,7 +40,7 @@ pub(crate) fn loopback(endpoint: &str) -> bool {
 impl MeetOddsModel {
     pub fn new(client: reqwest::Client, config: ProviderConfig) -> Result<Self, String> {
         let local = match config.provider {
-            LLMProvider::BuiltInAI => true,
+            LLMProvider::AppleIntelligence => true,
             LLMProvider::Ollama => loopback(
                 config
                     .ollama_endpoint
@@ -76,44 +73,36 @@ impl Model for MeetOddsModel {
     fn token_count(&self, text: &str) -> usize {
         self.token_counter.as_ref().map(|count| count(text)).unwrap_or_else(|| {
             // ponytail: byte heuristic (UTF-8 bytes per token for Spanish ~3.5); wire the
-            // llama tokenizer via with_token_counter if prompts get clipped.
+            // model's tokenizer via with_token_counter if prompts get clipped.
             text.len() / 3 + 1
         })
     }
     // Keep one native tutoring request in flight. The core emits the reply
-    // before making a judge request; no competing analytic slot on llama-helper.
+    // before making a judge request; no competing analytic slot on the local model.
     fn generate<'a>(&'a self, prompt: Prompt, cancel: CancellationToken) -> ModelFuture<'a> {
         Box::pin(async move {
             if cancel.is_cancelled() {
                 return Err("cancelled".into());
             }
             let config = &self.config;
-            if config.provider == LLMProvider::BuiltInAI {
+            if config.provider == LLMProvider::AppleIntelligence {
                 static LOCAL: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
                 let lock = LOCAL.get_or_init(|| tokio::sync::Mutex::new(()));
                 let _slot = tokio::select! { biased;
                     _ = cancel.cancelled() => return Err("cancelled".into()),
                     slot = lock.lock() => slot,
                 };
-                return generate_with_builtin_with_sampling(
-                    &config.app_data_dir,
-                    &config.model,
+                // ponytail: Apple exposes temperature only; top_p/top_k are not forwarded
+                // (the judge's near-zero temperature is effectively greedy).
+                return crate::apple_intelligence::generate(
                     &prompt.system,
                     &prompt.user,
                     Some(prompt.max_tokens),
+                    Some(prompt.temperature),
                     Some(&cancel),
-                    Some(BuiltinSamplingOverride {
-                        temperature: prompt.temperature,
-                        top_p: prompt.top_p,
-                        top_k: if prompt.kind == CallKind::Judge {
-                            1
-                        } else {
-                            40
-                        },
-                    }),
                 )
                 .await
-                .map_err(|_| "The local tutoring model could not complete this request.".into());
+                .map_err(|e| if e.contains("cancelled") { "cancelled".into() } else { "The on-device tutoring model could not complete this request.".into() });
             }
             if config.provider == LLMProvider::OpenAICodex {
                 // Reuse the existing account provider, do not invent API access
@@ -257,8 +246,8 @@ mod tests {
     #[test]
     fn token_count_falls_back_to_byte_heuristic() {
         let config = ProviderConfig {
-            provider: LLMProvider::BuiltInAI,
-            model: "test-model".into(),
+            provider: LLMProvider::AppleIntelligence,
+            model: "system".into(),
             api_key: String::new(),
             app_data_dir: PathBuf::new(),
             ollama_endpoint: None,

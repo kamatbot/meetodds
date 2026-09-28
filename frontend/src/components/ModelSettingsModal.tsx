@@ -3,7 +3,6 @@ import { useSidebar } from './Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { useOllamaDownload } from '@/contexts/OllamaDownloadContext';
-import { BuiltInModelManager } from '@/components/BuiltInModelManager';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -32,7 +31,7 @@ import { toast } from 'sonner';
 import { OpenAICodexSettings } from '@/components/OpenAICodexSettings';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openai-codex' | 'openrouter' | 'builtin-ai' | 'custom-openai';
+  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openai-codex' | 'openrouter' | 'apple-intelligence' | 'custom-openai';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
@@ -172,8 +171,8 @@ export function ModelSettingsModal({
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
 
-  // Built-in AI models state
-  const [builtinAiModels, setBuiltinAiModels] = useState<any[]>([]);
+  // Apple Intelligence availability (checked when selected)
+  const [appleStatus, setAppleStatus] = useState<{ available: boolean; reason?: string | null } | null>(null);
 
   // Cache models by endpoint to avoid refetching when reverting endpoint changes
   const modelsCache = useRef<Map<string, OllamaModel[]>>(new Map());
@@ -233,7 +232,7 @@ export function ModelSettingsModal({
     openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,
     'openai-codex': codexModels.length > 0 ? codexModels : CODEX_FALLBACK_MODELS,
     openrouter: openRouterModels.map((m) => m.id),
-    'builtin-ai': builtinAiModels.map((m) => m.name),
+    'apple-intelligence': ['system'],
     'custom-openai': customOpenAIModel ? [customOpenAIModel] : [], // User specifies model manually
   };
 
@@ -257,7 +256,15 @@ export function ModelSettingsModal({
     (requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))) ||
     (modelConfig.provider === 'openai-codex' && !codexConnected) ||
     (modelConfig.provider === 'ollama' && ollamaEndpointChanged) ||
+    (modelConfig.provider === 'apple-intelligence' && appleStatus?.available === false) ||
     isCustomOpenAIInvalid;
+
+  useEffect(() => {
+    if (modelConfig.provider !== 'apple-intelligence') return;
+    invoke<{ available: boolean; reason?: string | null }>('api_apple_intelligence_status')
+      .then(setAppleStatus)
+      .catch(() => setAppleStatus({ available: false, reason: 'Could not check Apple Intelligence on this Mac.' }));
+  }, [modelConfig.provider]);
 
   useEffect(() => {
     const fetchModelConfig = async () => {
@@ -508,26 +515,6 @@ export function ModelSettingsModal({
     }
   };
 
-  const loadBuiltinAiModels = async () => {
-    if (builtinAiModels.length > 0) return; // Already loaded
-
-    try {
-      const data = (await invoke('builtin_ai_list_models')) as any[];
-      setBuiltinAiModels(data);
-
-      // Auto-select first available model if none selected
-      if (data.length > 0 && !modelConfig.model) {
-        const firstAvailable = data.find((m: any) => m.status?.type === 'available');
-        if (firstAvailable) {
-          setModelConfig((prev: ModelConfig) => ({ ...prev, model: firstAvailable.name }));
-        }
-      }
-    } catch (err) {
-      console.error('Error loading Built-in AI models:', err);
-      toast.error('Failed to load Built-in AI models');
-    }
-  };
-
   // Fetch OpenAI models from API
   const loadOpenAIModels = async (key: string | null) => {
     if (!key?.trim()) {
@@ -617,7 +604,7 @@ export function ModelSettingsModal({
     if (cachedModel && providerModels.includes(cachedModel)) {
       setModelConfig((prev: ModelConfig) => ({ ...prev, model: cachedModel }));
     }
-  }, [models, openRouterModels, builtinAiModels, openaiModels, codexModels, claudeModels, groqModels, modelConfig.provider]);
+  }, [models, openRouterModels, openaiModels, codexModels, claudeModels, groqModels, modelConfig.provider]);
 
   const handleSave = async () => {
     // For custom-openai provider, save the custom config first
@@ -853,11 +840,6 @@ export function ModelSettingsModal({
                   loadOpenRouterModels();
                 }
 
-                // Load Built-in AI models when selected
-                if (provider === 'builtin-ai') {
-                  loadBuiltinAiModels();
-                }
-
                 // Load custom OpenAI config when selected
                 if (provider === 'custom-openai') {
                   invoke<any>('api_get_custom_openai_config').then((config) => {
@@ -879,18 +861,18 @@ export function ModelSettingsModal({
                 <SelectValue placeholder="Select provider" />
               </SelectTrigger>
               <SelectContent className="max-h-64 overflow-y-auto">
-                <SelectItem value="builtin-ai">Built-in AI (Offline, No API needed)</SelectItem>
+                <SelectItem value="apple-intelligence">Apple Intelligence (on this Mac)</SelectItem>
+                <SelectItem value="openai-codex">OpenAI Codex (ChatGPT subscription)</SelectItem>
                 <SelectItem value="claude">Claude</SelectItem>
                 <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
-                <SelectItem value="openai-codex">OpenAI Codex (ChatGPT subscription)</SelectItem>
                 <SelectItem value="openai">OpenAI Cloud API</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
               </SelectContent>
             </Select>
 
-            {modelConfig.provider !== 'builtin-ai' && modelConfig.provider !== 'custom-openai' && (
+            {modelConfig.provider !== 'apple-intelligence' && modelConfig.provider !== 'custom-openai' && (
               <Popover open={modelComboboxOpen} onOpenChange={setModelComboboxOpen} modal={true}>
                 <PopoverTrigger asChild>
                   <Button
@@ -1398,17 +1380,15 @@ export function ModelSettingsModal({
           </div>
         )}
 
-        {/* Built-in AI Models Section */}
-        {modelConfig.provider === 'builtin-ai' && (
-          <div className="mt-6">
-            <BuiltInModelManager
-              selectedModel={modelConfig.model}
-              layout={layout}
-              onModelSelect={(model) =>
-                setModelConfig((prev: ModelConfig) => ({ ...prev, model }))
-              }
-            />
-          </div>
+        {/* Apple Intelligence status */}
+        {modelConfig.provider === 'apple-intelligence' && appleStatus && (
+          <Alert className={cn('mt-6', !appleStatus.available && 'border-orange-500 bg-orange-50')}>
+            <AlertDescription className={cn('text-sm', !appleStatus.available && 'text-orange-800')}>
+              {appleStatus.available
+                ? 'Summaries are generated on this Mac by Apple Intelligence. Meeting text never leaves your device.'
+                : appleStatus.reason || 'Apple Intelligence is unavailable on this Mac. Choose OpenAI Codex (ChatGPT subscription) instead.'}
+            </AlertDescription>
+          </Alert>
         )}
       </div>
 

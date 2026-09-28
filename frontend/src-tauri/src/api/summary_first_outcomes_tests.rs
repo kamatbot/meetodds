@@ -129,3 +129,48 @@ async fn local_recall_indexes_transcripts_without_creating_an_action() {
     let docs:i64=sqlx::query_scalar("SELECT COUNT(*) FROM meeting_memory_documents").fetch_one(&pool).await.unwrap(); assert!(docs>0);
     let actions:i64=sqlx::query_scalar("SELECT COUNT(*) FROM meeting_actions").fetch_one(&pool).await.unwrap(); assert_eq!(actions,0);
 }
+
+/// Real on-device check of the Apple Intelligence summary path and this parser:
+/// `MEETODDS_AI_TRANSCRIPT=/path/en.txt MEETODDS_AI_TRANSCRIPT_UNSUPPORTED=/path/hi.txt
+///  cargo test --lib -- --ignored apple_intelligence_long_meeting --nocapture`
+/// Transcripts must be synthetic; output text is not printed, only structure.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+#[ignore = "requires Apple Intelligence and a synthetic transcript file"]
+async fn apple_intelligence_long_meeting_summary_yields_parsed_actions() {
+    use crate::summary::llm_client::LLMProvider;
+    let ts = include_str!("../../../src/lib/post-meeting-flow.ts");
+    let instructions = ts.split("POST_MEETING_INSTRUCTIONS = `").nth(1).unwrap().split("`;").next().unwrap();
+    let template = crate::summary::templates::get_template("standard_meeting").unwrap();
+    let run = |text: String| {
+        let template = template.clone();
+        async move {
+            let detected = crate::summary::language_detection::detect_summary_language(&[text.clone()]).language;
+            crate::summary::generate_meeting_summary(
+                &reqwest::Client::new(), &LLMProvider::AppleIntelligence, "system", "", &text, instructions,
+                "standard_meeting", &template, 4096, None, None, None, None, None, None, None, None,
+                detected.as_deref(), None,
+            ).await
+        }
+    };
+    let text = std::fs::read_to_string(std::env::var("MEETODDS_AI_TRANSCRIPT").unwrap()).unwrap();
+    let started = std::time::Instant::now();
+    let (markdown, _, chunks) = run(text.clone()).await.unwrap();
+    if let Ok(out) = std::env::var("MEETODDS_AI_OUTPUT") { std::fs::write(out, &markdown).unwrap(); }
+    println!("words={} chunks={} seconds={:.1}", text.split_whitespace().count(), chunks, started.elapsed().as_secs_f64());
+    for marker in ["outcome", "decisions", "actions", "questions"] {
+        println!("marker {marker}: {}", markdown.contains(&format!("<!-- meetodds:{marker} -->")));
+    }
+    let pool = setup().await;
+    summary(&pool, "completed", &markdown).await;
+    let data = load_intelligence(&pool, "m", true).await.unwrap();
+    println!("parsed: actions={} decisions={} outcome={} owners={:?}", data.actions.len(), data.decisions.len(),
+        data.outcome.is_some(), data.actions.iter().map(|a| a.owner.clone()).collect::<Vec<_>>());
+    assert!(markdown.contains("<!-- meetodds:actions -->"));
+    assert!(!data.actions.is_empty());
+
+    let hindi = std::fs::read_to_string(std::env::var("MEETODDS_AI_TRANSCRIPT_UNSUPPORTED").unwrap()).unwrap();
+    let error = run(hindi).await.unwrap_err();
+    println!("unsupported language error: {error}");
+    assert!(error.contains("ChatGPT"));
+}

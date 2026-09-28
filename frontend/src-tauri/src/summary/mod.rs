@@ -18,7 +18,7 @@ pub struct CustomOpenAIConfig {
     /// API key for authentication (optional if server doesn't require it)
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
-    /// Model identifier to use (e.g., "gpt-4", "llama-3-70b", "mistral-7b")
+    /// Model identifier to use (e.g., "gpt-4", "mistral-7b")
     pub model: String,
     /// Maximum tokens for completion (optional)
     #[serde(rename = "maxTokens")]
@@ -36,7 +36,6 @@ pub mod llm_client;
 pub(crate) mod metadata;
 pub mod processor;
 pub mod service;
-pub mod summary_engine;
 pub mod template_commands;
 pub mod templates;
 

@@ -40,6 +40,7 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod anthropic;
 pub mod api;
+pub mod apple_intelligence;
 pub mod apple_speech;
 pub mod apple_translation;
 pub mod audio;
@@ -415,9 +416,6 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
-        .manage(summary::summary_engine::ModelManagerState(Arc::new(
-            tokio::sync::Mutex::new(None),
-        )))
         .setup(|_app| {
             log::info!("Application setup complete");
 
@@ -452,22 +450,6 @@ pub fn run() {
                     }
                     Err(e) => {
                         log::error!("Failed to initialize notification manager: {}", e);
-                    }
-                }
-            });
-
-            // Initialize ModelManager for summary engine (async, non-blocking)
-            let app_handle_for_model_manager = _app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                match summary::summary_engine::commands::init_model_manager_at_startup(
-                    &app_handle_for_model_manager,
-                )
-                .await
-                {
-                    Ok(_) => log::info!("ModelManager initialized successfully at startup"),
-                    Err(e) => {
-                        log::warn!("Failed to initialize ModelManager at startup: {}", e);
-                        log::warn!("ModelManager will be lazy-initialized on first use");
                     }
                 }
             });
@@ -698,6 +680,7 @@ pub fn run() {
             // api::api_save_auto_generate_setting,
             api::api_get_transcript_config,
             api::api_save_transcript_config,
+            apple_intelligence::api_apple_intelligence_status,
             apple_speech::apple_speech_capabilities,
             apple_speech::apple_speech_prepare,
             apple_translation::apple_translation_open_settings,
@@ -731,15 +714,6 @@ pub fn run() {
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
             summary::template_commands::api_validate_template,
-            // Built-in AI commands
-            summary::summary_engine::commands::builtin_ai_list_models,
-            summary::summary_engine::commands::builtin_ai_get_model_info,
-            summary::summary_engine::commands::builtin_ai_download_model,
-            summary::summary_engine::commands::builtin_ai_cancel_download,
-            summary::summary_engine::commands::builtin_ai_delete_model,
-            summary::summary_engine::commands::builtin_ai_is_model_ready,
-            summary::summary_engine::commands::builtin_ai_get_available_summary_model,
-            summary::summary_engine::commands::builtin_ai_get_recommended_model,
             openrouter::get_openrouter_models,
             audio::recording_preferences::get_recording_preferences,
             audio::recording_preferences::set_recording_preferences,
@@ -796,7 +770,6 @@ pub fn run() {
             onboarding::get_onboarding_status,
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
-            onboarding::complete_onboarding,
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,
@@ -834,12 +807,6 @@ pub fn run() {
                             log::warn!(
                                 "AppState not available for database cleanup (likely first launch)"
                             );
-                        }
-
-                        // Clean up sidecar
-                        log::info!("Cleaning up sidecar...");
-                        if let Err(e) = summary::summary_engine::force_shutdown_sidecar().await {
-                            log::error!("Failed to force shutdown sidecar: {}", e);
                         }
                     });
                     log::info!("Application cleanup complete");

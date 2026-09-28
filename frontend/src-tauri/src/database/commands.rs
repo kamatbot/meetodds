@@ -190,14 +190,11 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
     // Set default model configuration for fresh installs
     let pool = db_manager.pool();
     
-    let default_summary_model = crate::summary::summary_engine::commands::get_recommended_summary_model_for_current_system()
-        .unwrap_or("qwen3.5:2b");
-
-    // Default Summary Model: Built-in AI (Qwen recommendation for this system)
+    // Default Summary Model: on-device Apple Intelligence
     if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
         pool,
-        "builtin-ai",
-        default_summary_model,
+        crate::apple_intelligence::PROVIDER_ID,
+        crate::apple_intelligence::MODEL_ID,
         "large-v3", // Legacy settings column; unused by summaries but required
         None,
     ).await {

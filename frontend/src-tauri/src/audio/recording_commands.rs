@@ -80,7 +80,6 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     let _ = super::simple_level_monitor::stop_monitoring().await;
     let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
     if crate::summary::inference_priority::cancel_for_capture() > 0 {
-        let _ = crate::summary::summary_engine::client::shutdown_sidecar_gracefully().await;
         let _ = app.emit("local-summary-yielded", serde_json::json!({"message": "Local summary work was cancelled to prioritize recording. It can be restarted after this meeting."}));
     }
 
@@ -326,7 +325,6 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let _ = super::simple_level_monitor::stop_monitoring().await;
     let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
     if crate::summary::inference_priority::cancel_for_capture() > 0 {
-        let _ = crate::summary::summary_engine::client::shutdown_sidecar_gracefully().await;
         let _ = app.emit("local-summary-yielded", serde_json::json!({"message": "Local summary work was cancelled to prioritize recording. It can be restarted after this meeting."}));
     }
 

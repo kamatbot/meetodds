@@ -35,7 +35,7 @@ pnpm tauri:dev
 pnpm tauri:build
 ```
 
-Release packaging with the `llama-helper` sidecar uses `pnpm tauri:build:m5`
+Release packaging uses `pnpm tauri:build:m5`
 (see [M5 packaging](../frontend/scripts/build-macos-m5.sh)).
 
 ## Other platforms

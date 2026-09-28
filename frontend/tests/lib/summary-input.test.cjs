@@ -11,10 +11,18 @@ const { summaryTarget, sameSummaryTarget, approveSummaryInput, summaryFailureMes
 const fixture = () => ({ target: summaryTarget('openai-codex', 'account-model'), transcript: '[00:05] Me: We discussed an experiment.', notes: 'Private concern about ownership', notesUnavailable: false, manualNotes: '', prompt: 'Be concise', template: 'product_review' });
 
 test('known API, account and on-device providers have distinct routes', () => {
-  assert.equal(summaryTarget('builtin-ai', 'local').local, true);
+  assert.equal(summaryTarget('apple-intelligence', 'system').local, true);
+  assert.equal(summaryTarget('apple-intelligence', 'system').destination, 'on-device');
   assert.equal(summaryTarget('openai', 'api').local, false);
   assert.match(summaryTarget('openai-codex', 'account').label, /Codex allowance/);
   assert.notEqual(summaryTarget('openai', 'x').destination, summaryTarget('openai-codex', 'x').destination);
+});
+test('saved built-in model targets and approvals migrate to Apple Intelligence', () => {
+  const migrated = summaryTarget('builtin-ai', 'qwen3.5:4b');
+  assert.equal(migrated.provider, 'apple-intelligence'); assert.equal(migrated.model, 'system'); assert.equal(migrated.local, true);
+  const oldApproval = { provider: 'builtin-ai', model: 'qwen3.5:4b', destination: 'on-device', local: true, label: 'Built-in AI' };
+  assert.equal(sameSummaryTarget(oldApproval, summaryTarget('apple-intelligence', 'system')), true);
+  assert.equal(sameSummaryTarget(oldApproval, summaryTarget('openai-codex', 'x')), false);
 });
 test('only exact loopback hosts are considered local', () => {
   for (const host of ['localhost', '127.0.0.1', '[::1]']) assert.equal(summaryTarget('ollama', 'x', `http://${host}:11434`).local, true);

@@ -179,9 +179,6 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       const approval = readAutoSummaryApproval(localStorage, target);
       if (automatic && !approval) throw new Error('SUMMARY_APPROVAL_REQUIRED');
       if (target.local && await invoke<boolean>('is_recording')) throw new Error('Finish recording before starting a local summary.');
-      if (target.provider === 'builtin-ai' && !await invoke<boolean>('builtin_ai_is_model_ready', { modelName: target.model, refresh: true })) {
-        current.onOpenModelSettings?.(); throw new Error('The selected built-in model is not ready.');
-      }
       const turns = await allTranscripts(id);
       if (!turns.length) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
       if (automatic && !automaticEnabled()) { if (visible()) setSummaryStatus(previousStatus); release(); return; }

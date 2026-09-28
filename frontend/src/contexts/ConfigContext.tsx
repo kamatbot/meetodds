@@ -98,8 +98,8 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
+    provider: 'apple-intelligence',
+    model: 'system',
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });
@@ -369,7 +369,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     openrouter: [],
     openai: ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna'],
     'openai-codex': ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4'],
-    'builtin-ai': [],
+    'apple-intelligence': ['system'],
     'custom-openai': [],
   };
 

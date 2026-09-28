@@ -86,9 +86,9 @@ export function SummaryPanel(props: SummaryPanelProps) {
   const summaryDirty = editorDirty || legacyDirty;
   const viewState = getFinishedSummaryViewState({ hasSummary, hasTranscript: transcripts.length > 0, status: summaryStatus });
   const providerLabel = modelConfig.provider === 'openai-codex' ? 'Connected ChatGPT'
-    : modelConfig.provider === 'builtin-ai' ? 'Built-in AI'
+    : modelConfig.provider === 'apple-intelligence' ? 'Apple Intelligence'
       : modelConfig.provider === 'ollama' ? 'Ollama' : modelConfig.provider;
-  const providerDetail = `${providerLabel}${modelConfig.model ? ` · ${modelConfig.model}` : ''}${modelConfig.provider === 'builtin-ai' || modelConfig.provider === 'ollama' ? ' · on this Mac' : ''}`;
+  const providerDetail = `${providerLabel}${modelConfig.model ? ` · ${modelConfig.model}` : ''}${modelConfig.provider === 'apple-intelligence' || modelConfig.provider === 'ollama' ? ' · on this Mac' : ''}`;
 
   const handleEditorDirtyChange = useCallback((dirty: boolean) => {
     setEditorDirty(dirty);

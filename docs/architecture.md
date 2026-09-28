@@ -38,4 +38,4 @@ graph TD
 *   **Audio Engine:** Captures audio from the microphone and system, processes it, and prepares it for transcription.
 *   **Transcription Engine:** Apple Speech (SpeechAnalyzer) transcribes on-device through a Swift bridge: continuous live sessions per audio source, and an offline preset for imported audio and re-transcription.
 *   **Database:** A local SQLite database that stores meeting metadata, transcripts, and summaries.
-*   **Summary Engine:** Generates meeting summaries using various Large Language Models (LLMs), including local models via Ollama.
+*   **Summary Engine:** Generates meeting summaries using various Large Language Models (LLMs), including on-device Apple Intelligence (Foundation Models, via a Swift bridge compiled into the app) and local models via Ollama.
