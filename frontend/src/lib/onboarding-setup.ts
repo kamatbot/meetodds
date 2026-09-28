@@ -3,7 +3,10 @@ import { summaryTarget } from './summary-input';
 
 export type SummaryDestination = 'local' | 'chatgpt';
 
-export const ONBOARDING_STATUS_VERSION = '2.0';
+/** The fixed model name saved for the on-device Apple Intelligence provider. */
+export const APPLE_INTELLIGENCE_MODEL = 'system';
+
+export const ONBOARDING_STATUS_VERSION = '3.0';
 export const SUMMARY_DESTINATION_KEY = 'meetodds.onboarding.summaryDestination.v1';
 
 export interface SavedOnboardingProgress {
@@ -13,24 +16,41 @@ export interface SavedOnboardingProgress {
 }
 
 export function resolveOnboardingProgress(status: SavedOnboardingProgress): {
-  currentStep: 1 | 2;
+  currentStep: 1 | 2 | 3;
   completed: boolean;
 } {
   const savedStep = Number.isInteger(status.current_step) ? status.current_step : 1;
 
+  // Older versions numbered their steps differently (the four-step wizard, then
+  // the two-step Welcome/Permissions flow). Reusing a step number across an
+  // incompatible version would land the user on the wrong screen, so any
+  // version other than the current one safely resumes at the new first step.
+  // `completed` always carries forward regardless of version.
   if (status.version === ONBOARDING_STATUS_VERSION) {
     return {
-      currentStep: savedStep >= 2 ? 2 : 1,
+      currentStep: savedStep >= 1 && savedStep <= 3 ? (savedStep as 1 | 2 | 3) : 1,
       completed: status.completed,
     };
   }
 
-  // In the old four-step flow, step 4 was the permissions screen. Steps 1–3
-  // still need a summary destination, so they safely resume at the new first step.
   return {
-    currentStep: savedStep >= 4 ? 2 : 1,
+    currentStep: 1,
     completed: status.completed,
   };
+}
+
+/**
+ * Default Apple Speech locale for onboarding: the system locale when Apple
+ * Speech supports it, otherwise en-US.
+ */
+export function defaultAppleSpeechLocale(
+  systemLocale: string | null | undefined,
+  locales: Array<{ id: string }>,
+): string {
+  const normalize = (value: string) => value.replace('_', '-').toLowerCase();
+  const target = systemLocale ? normalize(systemLocale) : '';
+  const match = target ? locales.find((candidate) => normalize(candidate.id) === target) : undefined;
+  return match ? match.id : 'en-US';
 }
 
 export function readSummaryDestination(storage: Pick<Storage, 'getItem'>): SummaryDestination | null {
@@ -70,35 +90,6 @@ export function hasSavedSummaryApproval(
   }
 }
 
-export function isExactModelAvailable(
-  models: Array<{ name?: unknown; status?: unknown }>,
-  modelName: string,
-): boolean {
-  return Boolean(modelName && models.some((model) => model.name === modelName && model.status === 'Available'));
-}
-
-export function onboardingModelsReady(
-  destination: SummaryDestination,
-  transcriptionReady: boolean,
-  localSummaryReady: boolean,
-): boolean {
-  return transcriptionReady && (destination !== 'local' || localSummaryReady);
-}
-
-export function createDownloadStartGate() {
-  const attempted = new Set<string>();
-  return {
-    startOnce<T>(key: string, start: () => Promise<T>): Promise<T> | null {
-      if (attempted.has(key)) return null;
-      attempted.add(key);
-      return Promise.resolve().then(start);
-    },
-    retry<T>(start: () => Promise<T>): Promise<T> {
-      return Promise.resolve().then(start);
-    },
-  };
-}
-
 export interface PersistedSummaryConfiguration {
   provider: string;
   model: string;
@@ -112,7 +103,7 @@ interface CommitSummaryDestinationOptions {
   availableModels?: Array<string | { id?: string | null }>;
   model?: string;
   persistAndReadConfiguration: (
-    provider: 'builtin-ai' | 'openai-codex',
+    provider: 'apple-intelligence' | 'openai-codex',
     model: string,
   ) => Promise<PersistedSummaryConfiguration>;
   setAutoSummary: (enabled: boolean) => void;
@@ -132,10 +123,11 @@ export async function commitSummaryDestination({
     throw new Error('Connect your ChatGPT account before allowing automatic summaries.');
   }
 
-  const provider = destination === 'local' ? 'builtin-ai' : 'openai-codex';
+  const provider = destination === 'local' ? 'apple-intelligence' : 'openai-codex';
   const preferredModel = model?.trim();
+  // Apple Intelligence has one fixed on-device model; only ChatGPT needs a model choice.
   const selectedModel = destination === 'local'
-    ? preferredModel
+    ? APPLE_INTELLIGENCE_MODEL
     : preferredModel && availableModels.some((available) => {
       const id = typeof available === 'string' ? available : available?.id;
       return typeof id === 'string' && id.trim() === preferredModel;
@@ -143,9 +135,7 @@ export async function commitSummaryDestination({
       ? preferredModel
       : firstAvailableChatGPTModel(availableModels);
   if (!selectedModel) {
-    throw new Error(destination === 'local'
-      ? 'The recommended local summary model is not ready yet.'
-      : 'ChatGPT has not reported an available summary model.');
+    throw new Error('ChatGPT has not reported an available summary model.');
   }
 
   const saved = await persistAndReadConfiguration(provider, selectedModel);
