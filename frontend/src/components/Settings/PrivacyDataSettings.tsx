@@ -20,9 +20,8 @@ export default function PrivacyDataSettings() {
     void loadPreferences();
   }, [loadPreferences]);
 
-  const openLocation = async (type: 'database' | 'models' | 'recordings') => {
+  const openLocation = async (type: 'database' | 'recordings') => {
     if (type === 'database') await invoke('open_database_folder');
-    if (type === 'models') await invoke('open_models_folder');
     if (type === 'recordings') await invoke('open_recordings_folder');
   };
 
@@ -33,16 +32,6 @@ export default function PrivacyDataSettings() {
         description={storageLocations?.database || (isLoadingPreferences ? 'Loading storage location…' : 'Application database and local metadata')}
         control={(
           <button type="button" onClick={() => void openLocation('database')} className={openButtonClass}>
-            <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.75} /> Open
-          </button>
-        )}
-      />
-
-      <SettingRow
-        label="Models"
-        description={storageLocations?.models || (isLoadingPreferences ? 'Loading storage location…' : 'Downloaded transcription and local AI models')}
-        control={(
-          <button type="button" onClick={() => void openLocation('models')} className={openButtonClass}>
             <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.75} /> Open
           </button>
         )}

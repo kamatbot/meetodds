@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { emitTo } from '@tauri-apps/api/event';
-import { Captions, ChevronLeft, ChevronRight, Copy, Globe2, Maximize2, MessageSquareText, Rows3, ShieldCheck } from 'lucide-react';
+import { Captions, ChevronLeft, ChevronRight, Copy, Maximize2, MessageSquareText, Rows3, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranscriptHistory, useTranscriptSession } from '@/contexts/TranscriptContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
-import { useConfig } from '@/contexts/ConfigContext';
 import { useLiveMeetingTranslation } from '@/contexts/LiveMeetingTranslationContext';
 import { getLiveTranslationLanguage, liveTranslationSegmentKey } from '@/lib/live-translation';
 import { CAPTION_WINDOW_LABEL, CAPTION_RESET_EVENT } from '@/lib/live-captions';
@@ -30,7 +29,6 @@ interface TranscriptDrawerProps {
 export default function TranscriptDrawer({ isProcessingStop, isStopping, showModal, presentation = 'drawer' }: TranscriptDrawerProps) {
   const { transcripts, copyTranscript } = useTranscriptHistory();
   const { currentMeetingId, captionsVisible } = useTranscriptSession();
-  const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const liveTranslation = useLiveMeetingTranslation();
   const [visible, setVisible] = useState(true);
@@ -133,7 +131,6 @@ export default function TranscriptDrawer({ isProcessingStop, isStopping, showMod
         <div className="meeting-document-tools">
           <button type="button" onClick={() => setCompact(v => !v)} className="meeting-icon-button" aria-label={compact ? 'Use comfortable transcript spacing' : 'Use compact transcript spacing'} aria-pressed={compact} title={compact ? 'Comfortable spacing' : 'Compact spacing'}><Rows3 size={17} /></button>
           <button type="button" onClick={copyTranscript} disabled={!transcripts.length} className="meeting-icon-button" aria-label="Copy original transcript" title="Copy original transcript"><Copy size={16} /></button>
-          {transcriptModelConfig.provider === 'localWhisper' && <button type="button" className="meeting-icon-button" onClick={() => showModal('languageSettings')} aria-label="Spoken language" title="Spoken language"><Globe2 size={17} /></button>}
           {!isWorkspace && <button type="button" className="meeting-icon-button" onClick={() => setVisible(false)} aria-label="Hide transcript drawer"><ChevronRight size={17} /></button>}
         </div>
       </header>

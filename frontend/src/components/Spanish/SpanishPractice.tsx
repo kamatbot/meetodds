@@ -290,7 +290,7 @@ function ProfilesScreen({
     }
   };
 
-  const showReadinessBanner = readiness && (!readiness.whisperReady || !readiness.llmReady);
+  const showReadinessBanner = readiness && (!readiness.speechReady || !readiness.llmReady);
   const languageName = (profile: SpanishProfile) =>
     languages.find((candidate) => candidate.id === (profile.language ?? 'es'))?.name
       ?? (profile.language ?? 'es');
@@ -315,8 +315,8 @@ function ProfilesScreen({
         {showReadinessBanner && readiness && (
           <div className="mt-5 flex items-start gap-3 rounded-[11px] border border-warn/30 bg-warn/10 p-3.5 text-[12.5px] text-text">
             <div className="min-w-0 flex-1">
-              {!readiness.whisperReady && <p>Pick a multilingual Whisper model in Settings so the tutor can hear you.</p>}
-              {readiness.whisperReady && !readiness.llmReady && <p>{readiness.message ?? 'Set up an AI model in Settings to power the tutor.'}</p>}
+              {!readiness.speechReady && <p>{readiness.message ?? 'Apple Speech is unavailable on this Mac, so the tutor cannot hear you.'}</p>}
+              {readiness.speechReady && !readiness.llmReady && <p>{readiness.message ?? 'Set up an AI model in Settings to power the tutor.'}</p>}
             </div>
             <button
               type="button"

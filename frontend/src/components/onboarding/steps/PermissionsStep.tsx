@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Check, Loader2, Mic, RotateCw, Volume2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { DEFAULT_PARAKEET_MODEL } from '@/constants/modelDefaults';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { loadApprovedCapture, saveApprovedCapture } from '@/lib/capture-start';
@@ -256,7 +255,7 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
       }
 
       await completeOnboarding(() => {
-        setTranscriptModelConfig({ provider: 'parakeet', model: DEFAULT_PARAKEET_MODEL, apiKey: null });
+        setTranscriptModelConfig({ provider: 'appleSpeech', model: '', apiKey: null });
       });
       onComplete();
     } catch (failure) {

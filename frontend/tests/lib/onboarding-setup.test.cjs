@@ -249,7 +249,7 @@ test('onboarding exposes exactly two stages and capture preflight runs only afte
   assert.match(permissions, /loadApprovedCapture\(/);
   assert.match(permissions, /disabled=\{!approvedCapture \|\| !modelsReady \|\| busy !== null\}/);
   assert.match(permissions, /completeOnboarding\(\(\) =>/);
-  assert.match(permissions, /setTranscriptModelConfig\(\{ provider: 'parakeet'/);
+  assert.match(permissions, /setTranscriptModelConfig\(\{ provider: 'appleSpeech'/);
   const context = fs.readFileSync(path.resolve(__dirname, '../../src/contexts/OnboardingContext.tsx'), 'utf8');
   assert.match(context, /api_get_model_config/);
   assert.match(context, /builtin_ai_is_model_ready/);
