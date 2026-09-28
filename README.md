@@ -17,7 +17,7 @@ Most meeting assistants send audio or transcripts to a cloud service. MeetOdds i
 ### Fully local when you want it
 
 - Record microphone and system audio on your computer.
-- Transcribe locally with Whisper or Parakeet.
+- Transcribe on-device with Apple Speech (macOS 26 or later).
 - Generate summaries locally with the built-in `llama.cpp`-based helper or Ollama.
 - Keep recordings, transcripts, notes, and meeting history on your device.
 - Work without a cloud AI account after the required local models have been downloaded.
@@ -48,9 +48,8 @@ MeetOdds captures both microphone and system audio directly from the desktop app
 
 ### Live local transcription
 
-- Whisper and Parakeet transcription engines
-- Apple Silicon acceleration on macOS
-- Voice activity detection
+- Apple Speech (SpeechAnalyzer) on-device transcription, with provisional captions and final transcript lines
+- Imported audio and re-transcription use the same on-device engine
 - Separate recording and transcription paths so the saved recording is not dependent on transcript processing
 
 ### Docked meeting notes
@@ -163,7 +162,7 @@ The supported application consists of:
 
 - **Tauri 2 / Rust** for desktop integration, audio capture, persistence, transcription orchestration, and native functionality
 - **Next.js / React / TypeScript** for the user interface
-- **Whisper / Parakeet** for local transcription
+- **Apple Speech (SpeechAnalyzer)** for on-device transcription
 - **llama.cpp / Ollama** for local AI summaries
 - optional external AI providers, including ChatGPT-account access through the OpenAI Codex integration
 

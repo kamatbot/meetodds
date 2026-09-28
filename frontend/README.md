@@ -5,7 +5,7 @@ A modern desktop application for recording, transcribing, and analyzing meetings
 ## Features
 
 - Real-time audio recording from both microphone and system audio
-- Live transcription using Whisper ASR (locally running)
+- Live on-device transcription using Apple Speech (macOS 26 or later)
 - Native desktop integration using Tauri
 - Speaker diarization support
 - Rich text editor for note-taking
@@ -129,12 +129,12 @@ pnpm run tauri:build
 
 ## Local Transcription
 
-Current MeetOdds does not require a separate FastAPI service, Docker backend, or manually started whisper-server process. Local transcription is handled by the Rust/Tauri desktop app.
+Current MeetOdds does not require a separate FastAPI service, Docker backend, or speech server process. Transcription is Apple Speech on-device, driven by the Rust/Tauri desktop app.
 
-For build and acceleration details, see:
+For build details, see:
 
 - [Building from Source](../docs/BUILDING.md)
-- [GPU Acceleration](../docs/GPU_ACCELERATION.md)
+- [Apple Speech](../docs/APPLE_SPEECH.md)
 - [Architecture](../docs/architecture.md)
 
 ## Development

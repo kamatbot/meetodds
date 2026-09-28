@@ -12,8 +12,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Key Technology Stack
 - **Desktop App**: Tauri 2.x (Rust) + Next.js 14 + React 18
-- **Audio Processing**: Rust (cpal, whisper-rs, professional audio mixing)
-- **Transcription**: Whisper.cpp / whisper-rs and Parakeet paths in the Tauri app
+- **Platform**: macOS 26+ (Apple Silicon)
+- **Audio Processing**: Rust (cpal, ScreenCaptureKit, professional audio mixing)
+- **Transcription**: Apple Speech (SpeechAnalyzer/SpeechTranscriber, on-device) through a Swift bridge; the only engine
 - **App API Surface**: Tauri commands and events, not a separate FastAPI service
 - **LLM Integration**: Ollama (local), Claude, Groq, OpenRouter
 
@@ -38,12 +39,6 @@ pnpm install                # Install dependencies
 pnpm run dev                # Next.js dev server (port 3118)
 pnpm run tauri:dev          # Full Tauri development mode
 pnpm run tauri:build        # Production build
-
-# GPU-Specific Builds (for testing acceleration)
-pnpm run tauri:dev:metal    # macOS Metal GPU
-pnpm run tauri:dev:cuda     # NVIDIA CUDA
-pnpm run tauri:dev:vulkan   # AMD/Intel Vulkan
-pnpm run tauri:dev:cpu      # CPU-only (no GPU)
 ```
 
 ### Legacy Backend Archive
@@ -65,8 +60,8 @@ The archived FastAPI service had unauthenticated, development-oriented CORS beha
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Frontend (Tauri Desktop App)                  │
 │  ┌──────────────────┐  ┌─────────────────┐  ┌────────────────┐ │
-│  │   Next.js UI     │  │  Rust Backend   │  │ Whisper Engine │ │
-│  │  (React/TS)      │←→│  (Audio + IPC)  │←→│  (Local STT)   │ │
+│  │   Next.js UI     │  │  Rust Backend   │  │ Apple Speech   │ │
+│  │  (React/TS)      │←→│  (Audio + IPC)  │←→│ (Swift bridge) │ │
 │  └──────────────────┘  └─────────────────┘  └────────────────┘ │
 │         ↑ Tauri Events           ↑ Audio Pipeline               │
 └─────────────────────────────────────────────────────────────────┘
@@ -86,15 +81,16 @@ Raw Audio (Mic + System)
 │  (frontend/src-tauri/src/audio/pipeline.rs)                │
 └─────────────┬──────────────────────────┬───────────────────┘
               ↓                          ↓
-    ┌─────────────────┐        ┌─────────────────────┐
-    │ Recording Path  │        │ Transcription Path  │
-    │ (Pre-mixed)     │        │ (VAD-filtered)      │
-    └─────────────────┘        └─────────────────────┘
+    ┌─────────────────┐        ┌──────────────────────────┐
+    │ Recording Path  │        │ Transcription Path       │
+    │ (Pre-mixed)     │        │ (source-separated)       │
+    └─────────────────┘        └──────────────────────────┘
               ↓                          ↓
-    RecordingSaver.save()      WhisperEngine.transcribe()
+    RecordingSaver.save()      Apple SpeechAnalyzer sessions
+                               (transcription/apple.rs)
 ```
 
-**Key Insight**: The pipeline performs **professional audio mixing** (RMS-based ducking, clipping prevention) for recording, while simultaneously applying **Voice Activity Detection (VAD)** to send only speech segments to Whisper for transcription.
+**Key Insight**: The pipeline performs **professional audio mixing** (RMS-based ducking, clipping prevention) for the recording, while microphone and system audio go separately to one continuous Apple Speech session each. Partial results emit `live-transcript-preview`; only finals emit `transcript-update` and reach the recording journal. Imports and re-transcription decode the file and use Apple Speech's offline preset (`audio/common.rs`, `apple_speech.rs`). See [docs/APPLE_SPEECH.md](docs/APPLE_SPEECH.md).
 
 ### Audio Device Modularization (Recently Completed)
 
@@ -115,7 +111,7 @@ audio/
 │   ├── microphone.rs          # Microphone capture stream
 │   ├── system.rs              # System audio capture stream
 │   └── core_audio.rs          # macOS ScreenCaptureKit integration
-├── pipeline.rs                # Audio mixing and VAD processing
+├── pipeline.rs                # Audio mixing and Apple Speech input
 ├── recording_manager.rs       # High-level recording coordination
 ├── recording_commands.rs      # Tauri command interface
 └── recording_saver.rs         # Audio file writing
@@ -170,25 +166,11 @@ await listen<TranscriptUpdate>('transcript-update', (event) => {
 });
 ```
 
-### Whisper Model Management
+### Speech Languages
 
-**Model Storage Locations**:
-- **Development**: `frontend/models/`
-- **Production (macOS)**: `~/Library/Application Support/Meetily/models/`
-- **Production (Windows)**: `%APPDATA%\Meetily\models\`
+Apple Speech assets are managed by macOS. The app downloads a language's assets only when the user chooses **Download language** in Settings → Transcription (`apple_speech_prepare`); recording start, imports and re-transcription never download. The configured locale is stored as the transcript config `model` (provider `appleSpeech`). Configs saved by removed engines are read as Apple Speech in the system language (else en_US) without rewriting them.
 
-**Model Loading** (frontend/src-tauri/src/whisper_engine/whisper_engine.rs):
-```rust
-pub async fn load_model(&self, model_name: &str) -> Result<()> {
-    // Automatically detects GPU capabilities (Metal/CUDA/Vulkan)
-    // Falls back to CPU if GPU unavailable
-}
-```
-
-**GPU Acceleration**:
-- **macOS**: Metal + CoreML (automatically enabled)
-- **Windows/Linux**: CUDA (NVIDIA), Vulkan (AMD/Intel), or CPU
-- Configure via Cargo features: `--features cuda`, `--features vulkan`
+Model files downloaded by older versions (Whisper, Parakeet, built-in summary model) are never deleted automatically; Settings → Privacy & data offers a one-click delete (`legacy_models.rs`).
 
 ## Critical Development Patterns
 
@@ -275,7 +257,7 @@ macro_rules! perf_debug {
 Key components:
 - `AudioMixerRingBuffer`: Manages mic + system audio synchronization
 - `ProfessionalAudioMixer`: RMS-based ducking and mixing
-- `AudioPipelineManager`: Orchestrates VAD, mixing, and distribution
+- `AudioPipelineManager`: Orchestrates mixing and distribution to the recording writer and Apple Speech
 
 **Testing Audio Changes**:
 ```bash
@@ -315,7 +297,6 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 **Key Metrics** (emitted by pipeline):
 - Buffer sizes (mic/system)
 - Mixing window count
-- VAD detection rate
 - Dropped chunk warnings
 
 **Monitor via Developer Console**: The app includes real-time metrics display when recording.
@@ -323,21 +304,15 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 ## Platform-Specific Notes
 
 ### macOS
-- **Audio Capture**: Uses ScreenCaptureKit for system audio (macOS 13+)
-- **GPU**: Metal + CoreML automatically enabled
+- **Minimum version**: macOS 26 on Apple Silicon (Apple Speech SpeechAnalyzer)
+- **Audio Capture**: Uses ScreenCaptureKit for system audio
 - **Permissions**: Requires microphone + screen recording permissions
 - **System Audio**: Requires virtual audio device (BlackHole) for system capture
 
-### Windows
-- **Audio Capture**: Uses WASAPI (Windows Audio Session API)
-- **GPU**: CUDA (NVIDIA) or Vulkan (AMD/Intel) via Cargo features
-- **Build Tools**: Requires Visual Studio Build Tools with C++ workload
-- **System Audio**: Uses WASAPI loopback for system capture
-
-### Linux
-- **Audio Capture**: ALSA/PulseAudio
-- **GPU**: CUDA (NVIDIA) or Vulkan via Cargo features
-- **Dependencies**: Requires cmake, llvm, libomp
+### Windows / Linux
+Transcription requires Apple Speech. Other platforms can capture and save audio but cannot transcribe.
+- **Windows capture**: WASAPI; system audio via WASAPI loopback. Build Tools with the C++ workload are required.
+- **Linux capture**: ALSA/PulseAudio
 
 ## Performance Optimization Guidelines
 
@@ -345,14 +320,10 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 - Use `perf_debug!()` / `perf_trace!()` for hot-path logging (zero cost in release)
 - Batch audio metrics using `AudioMetricsBatcher` (pipeline.rs)
 - Pre-allocate buffers with `AudioBufferPool` (buffer_pool.rs)
-- VAD filtering reduces Whisper load by ~70% (only processes speech)
 
-### Whisper Transcription
-- **Model Selection**: Balance accuracy vs speed
-  - Development: `base` or `small` (fast iteration)
-  - Production: `medium` or `large-v3` (best quality)
-- **GPU Acceleration**: 5-10x faster than CPU
-- **Parallel Processing**: Available in `whisper_engine/parallel_processor.rs` for batch workloads
+### Apple Speech Transcription
+- Recognition runs partly in Apple's out-of-process speech service; measure whole-machine CPU (see [docs/perf/apple-speech-m1max.md](docs/perf/apple-speech-m1max.md)).
+- `cargo run --release --example perf_baseline -- --engine apple` is the live-path harness.
 
 ### Frontend Performance
 - React state updates batched via Sidebar context
@@ -364,11 +335,11 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 1. **Audio Chunk Size**: Pipeline expects consistent 48kHz sample rate. Resampling happens at capture time.
 
 2. **Platform Audio Quirks**:
-   - macOS: ScreenCaptureKit requires macOS 13+, needs screen recording permission
+   - macOS: ScreenCaptureKit needs screen recording permission
    - Windows: WASAPI exclusive mode can conflict with other apps
    - System audio requires virtual device (BlackHole on macOS, WASAPI loopback on Windows)
 
-3. **Whisper Model Loading**: Models are loaded once and cached. Changing models requires app restart or manual unload/reload.
+3. **Speech Language Assets**: A recording, import or re-transcription fails explicitly if the chosen language's Apple Speech assets are not installed; it never substitutes another language or downloads implicitly.
 
 4. **No Separate Backend Dependency**: Meeting persistence, transcription, and LLM features are handled by the Tauri app. Do not reintroduce the archived FastAPI backend as a supported requirement.
 
@@ -398,12 +369,14 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 **Audio System**:
 - [frontend/src-tauri/src/audio/recording_manager.rs](frontend/src-tauri/src/audio/recording_manager.rs) - Recording orchestration
-- [frontend/src-tauri/src/audio/pipeline.rs](frontend/src-tauri/src/audio/pipeline.rs) - Audio mixing and VAD
+- [frontend/src-tauri/src/audio/pipeline.rs](frontend/src-tauri/src/audio/pipeline.rs) - Audio mixing and Apple Speech input
 - [frontend/src-tauri/src/audio/recording_saver.rs](frontend/src-tauri/src/audio/recording_saver.rs) - Audio file writing
 
 **UI Components**:
 - [frontend/src/app/page.tsx](frontend/src/app/page.tsx) - Main recording interface
 - [frontend/src/components/Sidebar/SidebarProvider.tsx](frontend/src/components/Sidebar/SidebarProvider.tsx) - Global state management
 
-**Whisper Integration**:
-- [frontend/src-tauri/src/whisper_engine/whisper_engine.rs](frontend/src-tauri/src/whisper_engine/whisper_engine.rs) - Whisper model management and transcription
+**Apple Speech Integration**:
+- [frontend/src-tauri/src/apple_speech_bridge.swift](frontend/src-tauri/src/apple_speech_bridge.swift) - SpeechAnalyzer C ABI (live sessions and file transcription)
+- [frontend/src-tauri/src/apple_speech.rs](frontend/src-tauri/src/apple_speech.rs) - Rust side of the bridge, capabilities, language preparation
+- [frontend/src-tauri/src/audio/transcription/apple.rs](frontend/src-tauri/src/audio/transcription/apple.rs) - Live recording sessions

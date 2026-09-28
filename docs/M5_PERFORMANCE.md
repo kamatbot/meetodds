@@ -1,5 +1,7 @@
 # Apple Silicon and M5 performance
 
+> Historical (2026): Whisper has since been removed; Apple Speech is the only transcription engine. The Whisper runtime notes below no longer apply.
+
 Notes already compiles Whisper with Metal and Core ML on macOS. This milestone fixes the runtime and release-path gaps that prevented newer Apple Silicon machines from using that capacity effectively.
 
 ## Runtime changes
