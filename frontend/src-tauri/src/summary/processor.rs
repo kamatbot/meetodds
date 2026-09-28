@@ -531,7 +531,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `max_tokens` - Optional max tokens for completion (CustomOpenAI provider)
 /// * `temperature` - Optional temperature (CustomOpenAI provider)
 /// * `top_p` - Optional top_p (CustomOpenAI provider)
-/// * `app_data_dir` - Optional app data directory (BuiltInAI provider)
+/// * `app_data_dir` - Optional app data directory (OpenAI Codex provider)
 /// * `cancellation_token` - Optional cancellation token to stop processing
 /// * `summary_language` - Optional BCP-47 tag (e.g. "en-GB") to force summary output language
 /// * `detected_transcript_language` - Optional detected transcript language BCP-47 tag
@@ -618,7 +618,7 @@ pub async fn generate_meeting_summary(
         };
 
         // Strategy: Use single-pass for cloud providers or short transcripts
-        // Use multi-level chunking for Ollama/BuiltInAI with long transcripts
+        // Use multi-level chunking for Ollama with long transcripts
         // Note: CustomOpenAI is treated like cloud providers (unlimited context)
         if let Some(context) = apple_context {
             (content_to_summarize, successful_chunk_count) = apple_condense_transcript(
@@ -629,7 +629,7 @@ pub async fn generate_meeting_summary(
                 cancellation_token,
             )
             .await?;
-        } else if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI) || total_tokens < token_threshold {
+        } else if provider != &LLMProvider::Ollama || total_tokens < token_threshold {
             info!(
                 "Using single-pass summarization (tokens: {}, threshold: {})",
                 total_tokens, token_threshold

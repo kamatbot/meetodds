@@ -572,7 +572,7 @@ fn is_conversational_english(text: &str) -> bool {
 }
 
 fn uses_local_translation_worker(provider: &LLMProvider) -> bool {
-    matches!(provider, LLMProvider::Ollama | LLMProvider::BuiltInAI)
+    matches!(provider, LLMProvider::Ollama)
 }
 
 /// Output cap for a local translation of `text`, so a runaway generation can't hold the
@@ -590,7 +590,7 @@ fn local_translation_max_tokens(text: &str) -> u32 {
 fn uses_extended_translation_budget(provider: &LLMProvider) -> bool {
     matches!(
         provider,
-        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::OpenAICodex
+        LLMProvider::Ollama | LLMProvider::OpenAICodex
     )
 }
 
@@ -791,34 +791,6 @@ fn validate_candidate_readiness(
     app_data_dir: Option<&Path>,
 ) -> Result<(), String> {
     match &config.provider {
-        LLMProvider::BuiltInAI => {
-            if let Some(dir) = app_data_dir {
-                let dir_buf = dir.to_path_buf();
-                let path_result =
-                    crate::summary::summary_engine::models::get_model_path(&dir_buf, &config.model_name);
-                let exists = match path_result {
-                    Ok(ref p) => {
-                        p.exists()
-                            || dir.parent().map_or(false, |parent| {
-                                parent
-                                    .join("com.meetily.ai")
-                                    .join("models")
-                                    .join("summary")
-                                    .join(p.file_name().unwrap_or_default())
-                                    .exists()
-                            })
-                    }
-                    Err(_) => false,
-                };
-                if !exists {
-                    return Err(format!(
-                        "Built-in AI model '{}' is not downloaded. Download it in Settings → AI Models.",
-                        config.model_name
-                    ));
-                }
-            }
-            Ok(())
-        }
         LLMProvider::OpenAICodex => {
             if let Some(dir) = app_data_dir {
                 let auth_file = dir.join("openai-codex-auth.json");
@@ -892,31 +864,6 @@ async fn resolve_provider_candidates(
         }
         validate_candidate_readiness(&current, app_data_dir)?;
         push_unique_candidate(&mut candidates, current);
-    } else if engine == "builtin-ai" || engine == "local" {
-        let model = model_override
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| {
-                crate::summary::summary_engine::commands::recommend_summary_model(
-                    cfg!(target_os = "macos"),
-                    16,
-                )
-                .to_string()
-            });
-        let candidate = TranslationProviderConfig {
-            provider: LLMProvider::BuiltInAI,
-            provider_name: "builtin-ai".to_string(),
-            model_name: model,
-            api_key: String::new(),
-            ollama_endpoint: None,
-            custom_openai_endpoint: None,
-            max_tokens: None,
-            temperature: None,
-            top_p: None,
-        };
-        validate_candidate_readiness(&candidate, app_data_dir)?;
-        push_unique_candidate(&mut candidates, candidate);
     } else if engine == "ollama" {
         let setting = SettingsRepository::get_model_config(pool).await.ok().flatten();
         let model = model_override
@@ -1008,34 +955,6 @@ async fn warm_ollama_candidate(config: &TranslationProviderConfig) -> Result<(),
     Ok(())
 }
 
-/// Loads the built-in model and runs a one-token translation, so the first caption skips
-/// the model load and GPU warm-up. Also keeps the model loaded for the recording.
-async fn warm_builtin_candidate<R: Runtime>(
-    app: &AppHandle<R>,
-    config: &TranslationProviderConfig,
-) -> Result<(), String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Failed to resolve app data dir: {error}"))?;
-    crate::summary::summary_engine::sidecar::hold_warm_while_recording();
-    let english = resolve_language("en")?;
-    let (system_prompt, user_prompt) =
-        build_translation_prompts("Hola", None, english, None, None, None);
-    crate::summary::summary_engine::translate_with_builtin(
-        &app_data_dir,
-        &config.model_name,
-        &system_prompt,
-        &user_prompt,
-        Some(1),
-        &CancellationToken::new(),
-        &mut |_| {},
-    )
-    .await
-    .map_err(|error| format!("Failed to warm the built-in model: {error}"))?;
-    Ok(())
-}
-
 async fn translate_with_candidate<R: Runtime>(
     app: &AppHandle<R>,
     config: &TranslationProviderConfig,
@@ -1059,7 +978,6 @@ async fn translate_with_candidate<R: Runtime>(
         _ = cancellation_token.cancelled() => return Err("Live translation was cancelled.".to_string()),
     };
 
-    let attempt_started = Instant::now();
     let (system_prompt, user_prompt) =
         build_translation_prompts(text, source, target, context_text, glossary, context_hint);
     let app_data_dir = app.path().app_data_dir().ok();
@@ -1099,48 +1017,6 @@ async fn translate_with_candidate<R: Runtime>(
     };
 
     let connect_timeout = budgets.first_word.max(Duration::from_millis(3500));
-
-    if config.provider == LLMProvider::BuiltInAI {
-        let app_data_dir = app_data_dir
-            .as_ref()
-            .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
-        crate::summary::summary_engine::sidecar::hold_warm_while_recording();
-        // Streams like the cloud providers. Cancelling (superseded caption) or a timeout
-        // aborts only this generation in the helper and frees the permit.
-        let mut streamed = String::new();
-        let mut first_word_ms: Option<u64> = None;
-        let mut on_delta = |delta: &str| {
-            if delta.is_empty() {
-                return;
-            }
-            streamed.push_str(delta);
-            let first = *first_word_ms.get_or_insert_with(|| {
-                attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64
-            });
-            emit_text(&streamed, first);
-        };
-        let future = crate::summary::summary_engine::translate_with_builtin(
-            app_data_dir,
-            &config.model_name,
-            &system_prompt,
-            &user_prompt,
-            max_tokens,
-            cancellation_token,
-            &mut on_delta,
-        );
-        let result = timeout(budgets.attempt, future)
-            .await
-            .map_err(|_| {
-                format!(
-                    "translation exceeded {}ms attempt limit",
-                    budgets.attempt.as_millis()
-                )
-            })?
-            .map_err(|error| error.to_string())?;
-        let first = first_word_ms
-            .unwrap_or_else(|| attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64);
-        return Ok((result, first));
-    }
 
     if config.provider == LLMProvider::OpenAICodex {
         let dir = app_data_dir
@@ -1270,10 +1146,7 @@ pub(crate) async fn resolve_provider_config(pool: &SqlitePool) -> Result<Transla
     let mut top_p = None;
 
     match &provider {
-        LLMProvider::Ollama
-        | LLMProvider::BuiltInAI
-        | LLMProvider::OpenAICodex
-        | LLMProvider::AppleIntelligence => {}
+        LLMProvider::Ollama | LLMProvider::OpenAICodex | LLMProvider::AppleIntelligence => {}
         LLMProvider::CustomOpenAI => {
             let config = SettingsRepository::get_custom_openai_config(pool)
                 .await
@@ -1359,10 +1232,6 @@ pub async fn api_prepare_live_translation<R: Runtime>(
     let warmed = match preferred.provider {
         LLMProvider::Ollama => {
             warm_ollama_candidate(preferred).await?;
-            true
-        }
-        LLMProvider::BuiltInAI => {
-            warm_builtin_candidate(&app, preferred).await?;
             true
         }
         _ => false,
@@ -1744,7 +1613,6 @@ mod tests {
     #[test]
     fn local_providers_are_single_flight() {
         assert!(uses_local_translation_worker(&LLMProvider::Ollama));
-        assert!(uses_local_translation_worker(&LLMProvider::BuiltInAI));
         assert!(!uses_local_translation_worker(&LLMProvider::OpenAICodex));
         assert!(!uses_local_translation_worker(&LLMProvider::OpenAI));
     }
@@ -1761,7 +1629,6 @@ mod tests {
     #[test]
     fn local_and_codex_providers_receive_extended_budget() {
         assert!(uses_extended_translation_budget(&LLMProvider::OpenAICodex));
-        assert!(uses_extended_translation_budget(&LLMProvider::BuiltInAI));
         assert!(uses_extended_translation_budget(&LLMProvider::Ollama));
         assert!(!uses_extended_translation_budget(&LLMProvider::Groq));
         assert!(!uses_extended_translation_budget(&LLMProvider::Claude));
@@ -1856,50 +1723,6 @@ mod tests {
 
         clear_provider_health().await;
         assert!(!provider_is_cooling_down(&config).await);
-    }
-
-    /// Real model and helper, e.g. `MEETODDS_LLAMA_HELPER=target/release/llama-helper
-    /// cargo test --lib -- --ignored builtin_translation_streams --nocapture`
-    #[tokio::test]
-    #[ignore = "needs a release llama-helper and the downloaded Qwen 3.5 4B model"]
-    async fn builtin_translation_streams_before_completion() {
-        let app_data_dir = std::path::PathBuf::from(std::env::var("HOME").unwrap())
-            .join("Library/Application Support/com.meetodds.app");
-        let text = "हमें शुक्रवार से पहले रिपोर्ट पूरी करनी होगी, और फिर ग्राहक को भेजनी होगी।";
-        let (system, user) =
-            build_translation_prompts(text, None, resolve_language("en").unwrap(), None, None, None);
-        for run in ["cold", "warm"] {
-            let started = Instant::now();
-            let mut streamed = String::new();
-            let mut deltas = Vec::new();
-            let result = crate::summary::summary_engine::translate_with_builtin(
-                &app_data_dir,
-                "qwen3.5:4b",
-                &system,
-                &user,
-                Some(local_translation_max_tokens(text)),
-                &CancellationToken::new(),
-                &mut |delta| {
-                    streamed.push_str(delta);
-                    deltas.push((clean_translation_output(&streamed), started.elapsed()));
-                },
-            )
-            .await
-            .unwrap();
-            let done = started.elapsed();
-            println!(
-                "{run}: {} deltas, first {:?} ({:?}), done {:?}: {:?}",
-                deltas.len(),
-                deltas[0].1,
-                deltas[0].0,
-                done,
-                result
-            );
-            assert!(deltas.len() > 3, "{deltas:?}");
-            assert!(deltas[0].1 + Duration::from_millis(100) < done, "first delta only at {:?}", deltas[0].1);
-            assert_eq!(deltas.last().unwrap().0, clean_translation_output(&result), "no jump at the end");
-        }
-        crate::summary::summary_engine::force_shutdown_sidecar().await.unwrap();
     }
 
     #[test]

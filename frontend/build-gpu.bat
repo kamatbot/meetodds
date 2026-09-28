@@ -126,65 +126,6 @@ if defined TAURI_GPU_FEATURE (
     echo ⚠️ No specific GPU feature detected or forced
 )
 
-REM Build llama-helper
-echo.
-echo 🦙 Building llama-helper sidecar (release)...
-
-set "HELPER_DIR=..\llama-helper"
-if not exist "%HELPER_DIR%" (
-    echo ❌ Could not find llama-helper directory at %HELPER_DIR%
-    exit /b 1
-)
-
-set "HELPER_FEATURES="
-if defined TAURI_GPU_FEATURE (
-    set "HELPER_FEATURES=--features !TAURI_GPU_FEATURE!"
-)
-
-echo    Building in %HELPER_DIR% with features: %HELPER_FEATURES%
-pushd "%HELPER_DIR%"
-call cargo build --release %HELPER_FEATURES%
-if errorlevel 1 (
-    echo ❌ Failed to build llama-helper
-    popd
-    exit /b 1
-)
-popd
-echo ✅ llama-helper built successfully
-
-REM Detect target triple
-echo.
-echo 🎯 Detecting target triple...
-for /f "tokens=2" %%i in ('rustc -vV ^| findstr "host:"') do set TARGET_TRIPLE=%%i
-echo    Target: !TARGET_TRIPLE!
-
-REM Copy binary
-set "BINARIES_DIR=src-tauri\binaries"
-if not exist "%BINARIES_DIR%" mkdir "%BINARIES_DIR%"
-
-REM Clean old binaries
-del /q "%BINARIES_DIR%\llama-helper*" 2>nul
-
-set "BASE_BINARY=llama-helper.exe"
-set "SIDECAR_BINARY=llama-helper-!TARGET_TRIPLE!.exe"
-set "SRC_PATH=..\target\release\%BASE_BINARY%"
-set "DEST_PATH=%BINARIES_DIR%\%SIDECAR_BINARY%"
-
-if not exist "%SRC_PATH%" (
-    REM Fallback check
-    set "SRC_PATH=target\release\%BASE_BINARY%"
-)
-
-if exist "%SRC_PATH%" (
-    copy /Y "%SRC_PATH%" "%DEST_PATH%" >nul
-    echo ✅ Copied binary to %DEST_PATH%
-) else (
-    echo ❌ Binary not found at %SRC_PATH%
-    echo ⚠️ Contents of ..\target\release:
-    dir "..\target\release"
-    exit /b 1
-)
-
 REM Build using npm scripts
 echo.
 echo 📦 Building complete Tauri application...

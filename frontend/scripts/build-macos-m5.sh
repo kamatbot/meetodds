@@ -35,15 +35,6 @@ fi
 
 workspace_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$workspace_root/frontend"
-helper_target_dir="${CARGO_TARGET_DIR:-$workspace_root/target}"
-if [[ "$helper_target_dir" != /* ]]; then helper_target_dir="$PWD/$helper_target_dir"; fi
-target_triple="$(rustc -vV | awk '/^host:/{print $2}')"
-sidecar_path="src-tauri/binaries/llama-helper-${target_triple}"
-
-echo "Building llama-helper sidecar for ${target_triple}"
-cargo build --manifest-path "$workspace_root/llama-helper/Cargo.toml" --release --features metal
-mkdir -p "$(dirname "$sidecar_path")"
-install -m 755 "$helper_target_dir/release/llama-helper" "$sidecar_path"
 
 # Auto-detect or allow override of macOS codesigning identity
 signing_identity="${APPLE_SIGNING_IDENTITY:-}"

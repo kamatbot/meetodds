@@ -85,7 +85,7 @@ impl SettingsRepository {
             "ollama" => "ollamaApiKey",
             "groq" => "groqApiKey",
             "openrouter" => "openRouterApiKey",
-            "builtin-ai" | "apple-intelligence" => return Ok(()), // No API key needed
+            "apple-intelligence" => return Ok(()), // No API key needed
             "openai-codex" => return Ok(()), // Uses MeetOdds-owned OAuth tokens
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -124,7 +124,7 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
-            "builtin-ai" | "apple-intelligence" => return Ok(None), // No API key needed
+            "apple-intelligence" => return Ok(None), // No API key needed
             "openai-codex" => return Ok(None), // OAuth credentials live outside SQLite
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -252,7 +252,7 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
-            "builtin-ai" | "apple-intelligence" => return Ok(()), // No API key needed
+            "apple-intelligence" => return Ok(()), // No API key needed
             "openai-codex" => return Ok(()), // OAuth credentials live outside SQLite
             _ => {
                 return Err(sqlx::Error::Protocol(

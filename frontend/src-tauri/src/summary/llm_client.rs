@@ -74,7 +74,6 @@ pub enum LLMProvider {
     Groq,
     Ollama,
     OpenRouter,
-    BuiltInAI,
     AppleIntelligence,
     CustomOpenAI,
 }
@@ -89,9 +88,10 @@ impl LLMProvider {
             "groq" => Ok(Self::Groq),
             "ollama" => Ok(Self::Ollama),
             "openrouter" => Ok(Self::OpenRouter),
-            "builtin-ai" | "local-llama" | "localllama" => Ok(Self::BuiltInAI),
             "custom-openai" => Ok(Self::CustomOpenAI),
             "apple-intelligence" => Ok(Self::AppleIntelligence),
+            // Legacy ids of the removed built-in model, migrated to Apple Intelligence.
+            "builtin-ai" | "local-llama" | "localllama" => Ok(Self::AppleIntelligence),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
         }
     }
@@ -163,7 +163,7 @@ pub fn build_chat_request(
                 header_map,
             )
         }
-        LLMProvider::BuiltInAI | LLMProvider::OpenAICodex | LLMProvider::AppleIntelligence => {
+        LLMProvider::OpenAICodex | LLMProvider::AppleIntelligence => {
             return Err("This provider does not use the chat completions API".to_string());
         }
     };
@@ -251,7 +251,7 @@ pub fn build_chat_request(
 /// * `max_tokens` - Optional max output tokens (all providers except Codex)
 /// * `temperature` - Optional temperature (for CustomOpenAI provider)
 /// * `top_p` - Optional top_p (for CustomOpenAI provider)
-/// * `app_data_dir` - Optional app data directory (for BuiltInAI provider)
+/// * `app_data_dir` - Optional app data directory (for the OpenAI Codex provider)
 /// * `cancellation_token` - Optional token to cancel the request
 ///
 /// # Returns
@@ -305,23 +305,6 @@ pub async fn generate_summary(
             cancellation_token,
         )
         .await;
-    }
-
-    // Handle BuiltInAI provider separately (uses local sidecar, no HTTP API)
-    if provider == &LLMProvider::BuiltInAI {
-        let app_data_dir = app_data_dir
-            .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
-
-        return crate::summary::summary_engine::generate_with_builtin(
-            app_data_dir,
-            model_name,
-            system_prompt,
-            user_prompt,
-            max_tokens,
-            cancellation_token,
-        )
-        .await
-        .map_err(|e| e.to_string());
     }
 
     let request_future = build_chat_request(
@@ -417,9 +400,37 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::Claude => "Claude",
         LLMProvider::Groq => "Groq",
         LLMProvider::Ollama => "Ollama",
-        LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::AppleIntelligence => "Apple Intelligence",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_provider_ids_parse_and_legacy_builtin_migrates() {
+        assert_eq!(LLMProvider::from_str("apple-intelligence"), Ok(LLMProvider::AppleIntelligence));
+        assert_eq!(LLMProvider::from_str("openai-codex"), Ok(LLMProvider::OpenAICodex));
+        for legacy in ["builtin-ai", "local-llama", "localllama"] {
+            assert_eq!(LLMProvider::from_str(legacy), Ok(LLMProvider::AppleIntelligence));
+        }
+        assert!(LLMProvider::from_str("nope").is_err());
+    }
+
+    #[tokio::test]
+    async fn summary_builtin_setting_migrates_to_apple_intelligence_keeping_keys() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE settings (id TEXT PRIMARY KEY, provider TEXT, model TEXT, openaiApiKey TEXT)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO settings VALUES ('1', 'builtin-ai', 'qwen3.5:4b', 'kept')")
+            .execute(&pool).await.unwrap();
+        sqlx::query(include_str!("../../migrations/20260928120000_builtin_ai_to_apple_intelligence.sql"))
+            .execute(&pool).await.unwrap();
+        let row: (String, String, String) = sqlx::query_as("SELECT provider, model, openaiApiKey FROM settings")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(row, ("apple-intelligence".into(), "system".into(), "kept".into()));
     }
 }

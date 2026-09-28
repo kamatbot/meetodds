@@ -173,23 +173,23 @@ pub async fn complete_onboarding<R: Runtime>(
     state: tauri::State<'_, AppState>,
     model: String,
 ) -> Result<(), String> {
-    info!("Completing onboarding with builtin-ai model: {}", model);
+    info!("Completing onboarding with on-device summary model: {}", model);
 
     // Step 1: Save model configuration to SQLite database FIRST
     let pool = state.db_manager.pool();
 
-    // Onboarding always uses builtin-ai (local LLM)
+    // Onboarding defaults summaries to on-device Apple Intelligence
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
-        "builtin-ai",
-        &model,
+        crate::apple_intelligence::PROVIDER_ID,
+        crate::apple_intelligence::MODEL_ID,
         "large-v3",
         None,
     ).await {
-        error!("Failed to save builtin-ai model config: {}", e);
-        return Err(format!("Failed to save builtin-ai model config: {}", e));
+        error!("Failed to save summary model config: {}", e);
+        return Err(format!("Failed to save summary model config: {}", e));
     }
-    info!("Saved builtin-ai model config: model={}", model);
+    info!("Saved Apple Intelligence summary model config");
 
     // Save transcription model config (parakeet provider) - always parakeet
     if let Err(e) = SettingsRepository::save_transcript_config(

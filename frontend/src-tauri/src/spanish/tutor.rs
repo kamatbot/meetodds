@@ -116,7 +116,7 @@ pub struct Prompt {
 pub type ModelFuture<'a> = Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
 pub trait Model: Send + Sync {
     fn generate<'a>(&'a self, prompt: Prompt, cancellation: CancellationToken) -> ModelFuture<'a>;
-    /// False for the built-in single-request llama-helper. True only after the
+    /// False for a single-request on-device model. True only after the
     /// adapter establishes independent capacity, not just async HTTP support.
     fn parallel_requests(&self) -> bool {
         false
@@ -325,7 +325,7 @@ impl<M: Model> TutorEngine<M> {
             let (r, j) = tokio::join!(reply_future, judge_future);
             (r?, j?)
         } else {
-            // Critical for Qwen 3.5 4B: analytic work starts AFTER the reply event.
+            // Critical for a single-slot local model: analytic work starts AFTER the reply event.
             let r = reply_future.await?;
             let j = judge_future.await?;
             (r, j)
