@@ -5,7 +5,7 @@ use rubato::{
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::audio_processing::{
@@ -15,8 +15,6 @@ use super::devices::AudioDevice;
 use super::recording_state::{
     AudioChunk, AudioError, DeviceType, RecordingState, SendAudioChunkError,
 };
-use super::vad::{ContinuousVadProcessor, SpeechSegment};
-use super::transcription::{live_preview::PreviewAudio, preview_control::PREVIEW_GATE};
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -297,7 +295,7 @@ impl AudioCapture {
                 }
             } else {
                 info!("ℹ️ RNNoise noise suppression DISABLED for microphone '{}' (flag: RNNOISE_APPLY_ENABLED=false)", device.name);
-                info!("   Whisper handles noise well internally - RNNoise is optional");
+                info!("   Speech recognition handles noise well internally - RNNoise is optional");
                 None
             };
 
@@ -433,7 +431,7 @@ impl AudioCapture {
 
         // CRITICAL FIX: Resample to 48kHz if device uses different sample rate
         // This fixes Bluetooth devices (like Sony WH-1000XM4) that report 16kHz or 44.1kHz
-        // Without this, audio is sped up 3x and VAD fails
+        // Without this, audio is sped up 3x and speech recognition fails
         //
         // IMPORTANT: Uses PERSISTENT resampler with BUFFERING to preserve energy across chunks
         // Creating a new resampler per chunk causes energy amplification (173.5% RMS)
@@ -722,27 +720,11 @@ impl AudioCapture {
     }
 }
 
-// Display-only caption lane. Snapshots of the open utterance are offered to the
-// preview decoder at most this often; it decodes the last MAX_WINDOW of speech
-// so the caption shows the sentence in progress, not just a 2-3 s tail.
-// ponytail: fixed cadence; the preview task itself duty-cycles on decode time.
-pub const LIVE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(600);
-pub const LIVE_PREVIEW_MIN_SPEECH_MS: u32 = 500;
-pub const LIVE_PREVIEW_MAX_WINDOW_MS: u32 = 6_000;
-
-/// Silero redemption window for live recording, in ms. 450 ms bridges natural
-/// word gaps and keystroke transients while typing without delaying finalization.
-pub const LIVE_VAD_REDEMPTION_MS: u32 = 450;
-
-/// VAD-driven audio processing pipeline
-/// Uses Voice Activity Detection to segment canonical speech while also exposing
-/// disposable rolling snapshots for the subtitle preview lane.
+/// Audio processing pipeline: mixes microphone + system audio for the recording
+/// writer and forwards source-separated audio to Apple Speech.
 pub struct AudioPipeline {
     receiver: mpsc::UnboundedReceiver<AudioChunk>,
-    transcription_sender: mpsc::UnboundedSender<AudioChunk>,
     state: Arc<RecordingState>,
-    mic_vad_processor: Option<ContinuousVadProcessor>,
-    system_vad_processor: Option<ContinuousVadProcessor>,
     apple_speech_sender: Option<super::transcription::apple::AppleAudioSender>,
     apple_speech_enabled: bool,
     sample_rate: u32,
@@ -756,19 +738,12 @@ pub struct AudioPipeline {
 
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::Sender<AudioChunk>>,
-    // Latest-only speculative subtitle lane. `watch` intentionally drops old snapshots.
-    live_preview_sender: Option<watch::Sender<Option<PreviewAudio>>>,
-    mic_live_preview_last_emit: Option<std::time::Instant>,
-    system_live_preview_last_emit: Option<std::time::Instant>,
-    live_preview_revision: u64,
 }
 
 impl AudioPipeline {
     pub fn new(
         receiver: mpsc::UnboundedReceiver<AudioChunk>,
-        transcription_sender: mpsc::UnboundedSender<AudioChunk>,
         state: Arc<RecordingState>,
-        target_chunk_duration_ms: u32,
         sample_rate: u32,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
@@ -800,40 +775,15 @@ impl AudioPipeline {
             system_device_kind,
         );
 
-        let redemption_time = LIVE_VAD_REDEMPTION_MS;
-
-        let create_vad_processor =
-            |source: &str| match ContinuousVadProcessor::new(sample_rate, redemption_time) {
-                Ok(processor) => {
-                    info!(
-                        "VAD-driven pipeline: {} segments retain their source channel",
-                        source
-                    );
-                    processor
-                }
-                Err(e) => {
-                    error!("Failed to create {} VAD processor: {}", source, e);
-                    panic!("{} VAD processor creation failed: {}", source, e);
-                }
-            };
         let apple_speech_enabled = apple_speech_sender.is_some();
-        // Apple has its own continuous recognition/detection. Do not load or run Silero too.
-        let mic_vad_processor = (!apple_speech_enabled).then(|| create_vad_processor("microphone"));
-        let system_vad_processor = (!apple_speech_enabled).then(|| create_vad_processor("system audio"));
 
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
         let mixer = ProfessionalAudioMixer::new(sample_rate);
 
-        // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
-        let _ = target_chunk_duration_ms;
-
         Self {
             receiver,
-            transcription_sender,
             state,
-            mic_vad_processor,
-            system_vad_processor,
             apple_speech_sender,
             apple_speech_enabled,
             sample_rate,
@@ -846,16 +796,12 @@ impl AudioPipeline {
 
             mixer,
             recording_sender_for_mixed: None, // Will be set by manager
-            live_preview_sender: None,
-            mic_live_preview_last_emit: None,
-            system_live_preview_last_emit: None,
-            live_preview_revision: 0,
         }
     }
 
-    /// Run the VAD-driven audio processing pipeline
+    /// Run the audio processing pipeline
     pub async fn run(mut self) -> Result<()> {
-        info!("VAD-driven audio pipeline started - segments sent in real-time based on speech detection");
+        info!("Audio pipeline started");
 
         // CRITICAL FIX: Continue processing until channel is closed, not based on recording state
         // This ensures ALL chunks are processed during shutdown, fixing premature meeting completion
@@ -870,7 +816,7 @@ impl AudioPipeline {
                     // Multiple flush signals may be sent to ensure processing
                     if chunk.chunk_id >= u64::MAX - 10 {
                         info!(
-                            "📥 Received FLUSH signal #{} - flushing VAD processor",
+                            "📥 Received FLUSH signal #{} - flushing mixed audio tail",
                             u64::MAX - chunk.chunk_id
                         );
                         self.flush_remaining_audio()?;
@@ -944,8 +890,6 @@ impl AudioPipeline {
                                 warn!("Apple Speech input stopped/overflowed; audio recording continues. Retry from saved audio.");
                             }
                         }
-                    } else if let Err(error) = self.process_source_audio(chunk.device_type, &chunk.data) {
-                        warn!("Transcription processing failed; recording audio was retained: {}", error);
                     }
                 }
                 None => {
@@ -958,120 +902,11 @@ impl AudioPipeline {
             }
         }
 
-        // Flush any remaining VAD segments
+        // Flush the remaining mixed-audio tail
         self.flush_remaining_audio()?;
 
-        info!("VAD-driven audio pipeline ended");
+        info!("Audio pipeline ended");
         Ok(())
-    }
-
-    fn process_source_audio(&mut self, device_type: DeviceType, samples: &[f32]) -> Result<()> {
-        let preview_due = self.live_preview_due(&device_type);
-        let (segments, live_snapshot) = match &device_type {
-            DeviceType::Microphone => {
-                let Some(processor) = self.mic_vad_processor.as_mut() else { return Ok(()); };
-                let segments = processor.process_audio(samples)?;
-                let preview = if preview_due {
-                    processor.live_speech_snapshot(
-                        LIVE_PREVIEW_MIN_SPEECH_MS,
-                        LIVE_PREVIEW_MAX_WINDOW_MS,
-                    )
-                } else {
-                    None
-                };
-                (segments, preview)
-            }
-            DeviceType::System => {
-                let Some(processor) = self.system_vad_processor.as_mut() else { return Ok(()); };
-                let segments = processor.process_audio(samples)?;
-                let preview = if preview_due {
-                    processor.live_speech_snapshot(
-                        LIVE_PREVIEW_MIN_SPEECH_MS,
-                        LIVE_PREVIEW_MAX_WINDOW_MS,
-                    )
-                } else {
-                    None
-                };
-                (segments, preview)
-            }
-        };
-
-        self.send_speech_segments(device_type.clone(), segments);
-        if let Some(snapshot) = live_snapshot {
-            self.send_live_preview_snapshot(device_type, snapshot);
-        }
-        Ok(())
-    }
-
-    fn live_preview_due(&self, device_type: &DeviceType) -> bool {
-        if self.live_preview_sender.is_none() || PREVIEW_GATE.epoch().is_none() {
-            return false;
-        }
-        let last = match device_type {
-            DeviceType::Microphone => self.mic_live_preview_last_emit,
-            DeviceType::System => self.system_live_preview_last_emit,
-        };
-        last.map_or(true, |instant| instant.elapsed() >= LIVE_PREVIEW_INTERVAL)
-    }
-
-    fn send_live_preview_snapshot(&mut self, device_type: DeviceType, snapshot: SpeechSegment) {
-        let Some(epoch) = PREVIEW_GATE.epoch() else { return; };
-        let Some(sender) = self.live_preview_sender.as_ref().cloned() else {
-            return;
-        };
-
-        self.live_preview_revision = self.live_preview_revision.wrapping_add(1);
-        let preview_chunk = AudioChunk {
-            data: snapshot.samples,
-            sample_rate: 16_000,
-            timestamp: snapshot.start_timestamp_ms / 1000.0,
-            chunk_id: self.live_preview_revision,
-            device_type: device_type.clone(),
-        };
-
-        // `watch` retains exactly one value. If ASR is slower than capture, stale
-        // snapshots disappear automatically instead of building subtitle backlog.
-        if sender.send(Some(PreviewAudio { audio: preview_chunk, epoch })).is_ok() {
-            let now = std::time::Instant::now();
-            match device_type {
-                DeviceType::Microphone => self.mic_live_preview_last_emit = Some(now),
-                DeviceType::System => self.system_live_preview_last_emit = Some(now),
-            }
-        }
-    }
-
-    fn send_speech_segments(&mut self, device_type: DeviceType, segments: Vec<SpeechSegment>) {
-        let source_name = match &device_type {
-            DeviceType::Microphone => "microphone",
-            DeviceType::System => "system audio",
-        };
-
-        for segment in segments {
-            let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-            if segment.samples.len() < 800 {
-                debug!(
-                    "Dropping short {} VAD segment: {:.1}ms ({} samples)",
-                    source_name,
-                    duration_ms,
-                    segment.samples.len()
-                );
-                continue;
-            }
-
-            let transcription_chunk = AudioChunk {
-                data: segment.samples,
-                sample_rate: 16_000,
-                timestamp: segment.start_timestamp_ms / 1000.0,
-                chunk_id: self.chunk_id_counter,
-                device_type: device_type.clone(),
-            };
-
-            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                warn!("Failed to send {} VAD segment: {}", source_name, e);
-            } else {
-                self.chunk_id_counter += 1;
-            }
-        }
     }
 
     fn flush_remaining_audio(&mut self) -> Result<()> {
@@ -1084,20 +919,7 @@ impl AudioPipeline {
                     .map_err(|_| anyhow::anyhow!("Final recording window could not be queued; recovery is required"))?;
             }
         }
-        info!(
-            "Flushing source-separated VAD processors after {} input chunks",
-            self.processed_chunks
-        );
-
-        if let Some(processor) = self.mic_vad_processor.as_mut() { match processor.flush() {
-            Ok(segments) => self.send_speech_segments(DeviceType::Microphone, segments),
-            Err(e) => warn!("Failed to flush microphone VAD processor: {}", e),
-        } }
-        if let Some(processor) = self.system_vad_processor.as_mut() { match processor.flush() {
-            Ok(segments) => self.send_speech_segments(DeviceType::System, segments),
-            Err(e) => warn!("Failed to flush system-audio VAD processor: {}", e),
-        } }
-
+        info!("Flushed mixed audio after {} input chunks", self.processed_chunks);
         Ok(())
     }
 }
@@ -1120,9 +942,6 @@ impl AudioPipelineManager {
     pub fn start(
         &mut self,
         state: Arc<RecordingState>,
-        transcription_sender: mpsc::UnboundedSender<AudioChunk>,
-        live_preview_sender: Option<watch::Sender<Option<PreviewAudio>>>,
-        target_chunk_duration_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::Sender<AudioChunk>>,
         mic_device_name: String,
@@ -1151,9 +970,7 @@ impl AudioPipelineManager {
         // Create and start pipeline with device information for adaptive mixing
         let mut pipeline = AudioPipeline::new(
             audio_receiver,
-            transcription_sender,
             state.clone(),
-            target_chunk_duration_ms,
             sample_rate,
             mic_device_name,
             mic_device_kind,
@@ -1165,7 +982,6 @@ impl AudioPipelineManager {
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
         // This ensures both mic AND system audio are captured in recordings
         pipeline.recording_sender_for_mixed = recording_sender;
-        pipeline.live_preview_sender = live_preview_sender;
 
         let handle = tokio::spawn(async move { pipeline.run().await });
 
@@ -1253,45 +1069,17 @@ impl Default for AudioPipelineManager {
 mod performance_regression_tests {
     use super::*;
     use super::super::device_detection::InputDeviceKind;
-    static GATE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    fn pipeline(receiver: mpsc::UnboundedReceiver<AudioChunk>, finals: mpsc::UnboundedSender<AudioChunk>) -> AudioPipeline {
-        AudioPipeline::new(receiver, finals, RecordingState::new(), 0, 48_000,
+    fn pipeline(receiver: mpsc::UnboundedReceiver<AudioChunk>) -> AudioPipeline {
+        AudioPipeline::new(receiver, RecordingState::new(), 48_000,
             "test microphone".into(), InputDeviceKind::Wired,
             "test system".into(), InputDeviceKind::Wired, None)
     }
 
     #[tokio::test]
-    async fn captions_off_blocks_preview_but_keeps_final_transcripts() {
-        let _guard = GATE_TEST.lock().unwrap();
-        PREVIEW_GATE.set_active(true);
-        PREVIEW_GATE.set_enabled(false);
-        let (_input, receiver) = mpsc::unbounded_channel();
-        let (finals, mut output) = mpsc::unbounded_channel();
-        let mut pipeline = pipeline(receiver, finals);
-        let (previews, preview_output) = watch::channel(None);
-        pipeline.live_preview_sender = Some(previews);
-        let segment = SpeechSegment { samples: vec![0.1; 1600], start_timestamp_ms: 0.0, end_timestamp_ms: 100.0, confidence: 0.9 };
-        assert!(!pipeline.live_preview_due(&DeviceType::Microphone));
-        pipeline.send_live_preview_snapshot(DeviceType::Microphone, segment.clone());
-        assert!(preview_output.borrow().is_none());
-        pipeline.send_speech_segments(DeviceType::Microphone, vec![segment.clone()]);
-        assert_eq!(output.try_recv().unwrap().data, segment.samples);
-        PREVIEW_GATE.set_enabled(true);
-        pipeline.send_live_preview_snapshot(DeviceType::Microphone, segment);
-        let epoch = preview_output.borrow().as_ref().unwrap().epoch;
-        assert!(PREVIEW_GATE.accepts(epoch));
-        PREVIEW_GATE.set_enabled(false);
-        PREVIEW_GATE.set_enabled(true);
-        assert!(!PREVIEW_GATE.accepts(epoch));
-        PREVIEW_GATE.set_active(false);
-    }
-
-    #[tokio::test]
     async fn channel_close_drains_saved_audio_and_preserves_tail() {
         let (input, receiver) = mpsc::unbounded_channel();
-        let (finals, _output) = mpsc::unbounded_channel();
-        let mut pipeline = pipeline(receiver, finals);
+        let mut pipeline = pipeline(receiver);
         let (saved, mut audio) = mpsc::channel(4);
         pipeline.recording_sender_for_mixed = Some(saved);
         // 640ms: one normal mixing window plus a 40ms final window.

@@ -145,9 +145,8 @@ impl TruePeakLimiter {
 /// - Perceptually accurate (not just simple RMS)
 ///
 /// Loudness target for microphone audio. -16 LUFS (streaming/podcast level)
-/// rather than -23 (broadcast dialog): Silero VAD missed about half of the
-/// speech at -23, and the microphone is normalized before it reaches the VAD.
-/// Measured in `vad::tests::vad_detection_vs_normalizer_target`.
+/// rather than -23 (broadcast dialog): the former voice-activity gate missed about
+/// half of the speech at -23. Kept for recording and recognition level parity.
 pub const TARGET_LUFS: f64 = -16.0;
 
 pub struct LoudnessNormalizer {

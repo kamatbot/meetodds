@@ -202,22 +202,13 @@ async fn get_current_recording_state() -> RecordingState {
     if is_paused { RecordingState::Paused } else { RecordingState::Recording }
 }
 
+/// Recording needs finished setup; Apple Speech checks its language assets at start.
 async fn check_can_record<R: Runtime>(app: &AppHandle<R>) -> bool {
-    let onboarding_complete = match crate::onboarding::load_onboarding_status(app).await {
+    match crate::onboarding::load_onboarding_status(app).await {
         Ok(status) => status.completed,
         Err(e) => {
             log::warn!("Tray: Failed to load onboarding status: {}, assuming complete", e);
             true
-        }
-    };
-    if onboarding_complete {
-        return true;
-    }
-    match crate::parakeet_engine::commands::parakeet_has_available_models().await {
-        Ok(has_models) => has_models,
-        Err(e) => {
-            log::warn!("Tray: Failed to check Parakeet models: {}, assuming not ready", e);
-            false
         }
     }
 }
@@ -242,7 +233,7 @@ fn build_menu<R: Runtime>(
     let mut builder = MenuBuilder::new(app);
     if !can_record {
         builder = builder.item(
-            &MenuItemBuilder::new("⏳ Downloading transcription model...")
+            &MenuItemBuilder::new("Finish setup to record")
                 .enabled(false)
                 .build(app)?,
         );

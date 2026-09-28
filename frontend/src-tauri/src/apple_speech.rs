@@ -12,8 +12,10 @@ use std::{
 use tokio::sync::mpsc;
 
 pub const PROVIDER: &str = "appleSpeech";
+/// Spoken language used when neither a saved choice nor a supported system language exists.
+pub const DEFAULT_LOCALE: &str = "en_US";
 #[cfg(not(target_os = "macos"))]
-const UNAVAILABLE: &str = "Apple Speech requires macOS 26 or later and supported hardware. Choose Whisper or Parakeet on this Mac.";
+const UNAVAILABLE: &str = "Apple Speech requires macOS 26 or later and supported hardware.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeechLocale {
@@ -146,7 +148,7 @@ impl SpeechSession {
                     .into(),
             ),
             Err(_) => Err(
-                "Apple Speech did not respond in time. Try again or choose Whisper or Parakeet."
+                "Apple Speech did not respond in time. Try again."
                     .into(),
             ),
         }
@@ -246,6 +248,24 @@ pub async fn apple_speech_capabilities() -> Result<Capabilities, String> {
             _ => Err("Could not read Apple Speech availability.".into()),
         }
     }
+}
+
+/// Default spoken language: the closest supported system language, else en_US.
+/// Used for fresh installs and for configs saved by older engines.
+pub async fn default_locale() -> String {
+    pick_default_locale(apple_speech_capabilities().await.ok().and_then(|c| c.system_locale))
+}
+
+/// Locale saved for Apple Speech, if any. Configs from older engines (localWhisper,
+/// parakeet, cloud providers) carry no Apple locale and use `default_locale()`.
+pub fn saved_locale(provider: &str, model: &str) -> Option<String> {
+    (provider == PROVIDER && !model.trim().is_empty()).then(|| model.to_string())
+}
+
+fn pick_default_locale(system_locale: Option<String>) -> String {
+    system_locale
+        .filter(|locale| !locale.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_LOCALE.to_string())
 }
 
 pub async fn prepare(locale: &str, download: bool) -> Result<String, String> {
@@ -383,63 +403,6 @@ pub async fn transcribe_file(
     }
 }
 
-/// Short utterances used by language practice share the existing provider trait.
-/// Meeting capture never uses this batch adapter: it keeps continuous sessions open.
-pub(crate) struct AppleSpeechProvider {
-    pub locale: String,
-}
-
-#[async_trait::async_trait]
-impl crate::audio::transcription::provider::TranscriptionProvider for AppleSpeechProvider {
-    async fn transcribe(
-        &self,
-        audio: Vec<f32>,
-        language: Option<String>,
-    ) -> Result<
-        crate::audio::transcription::provider::TranscriptResult,
-        crate::audio::transcription::provider::TranscriptionError,
-    > {
-        use crate::audio::transcription::provider::{TranscriptResult, TranscriptionError};
-        let locale = language
-            .as_deref()
-            .filter(|l| !l.is_empty() && *l != "auto")
-            .unwrap_or(&self.locale);
-        let result = async {
-            let mut session = SpeechSession::start(locale).await?;
-            session.push(&audio, 16_000, 0.0)?;
-            session.finish();
-            let mut text = Vec::new();
-            loop {
-                match session.next(Duration::from_secs(30)).await? {
-                    SpeechEvent::Result {
-                        text: part,
-                        is_final: true,
-                        ..
-                    } => text.push(part),
-                    SpeechEvent::Finished => return Ok::<_, String>(text.join(" ")),
-                    _ => {}
-                }
-            }
-        }
-        .await
-        .map_err(TranscriptionError::EngineFailed)?;
-        Ok(TranscriptResult {
-            text: result,
-            confidence: None,
-            is_partial: false,
-        })
-    }
-    async fn is_model_loaded(&self) -> bool {
-        true
-    }
-    async fn get_current_model(&self) -> Option<String> {
-        Some(self.locale.clone())
-    }
-    fn provider_name(&self) -> &'static str {
-        "Apple Speech"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,6 +419,27 @@ mod tests {
                 ..
             }
         ));
+    }
+    #[test]
+    fn default_locale_prefers_supported_system_language() {
+        assert_eq!(pick_default_locale(Some("fr_FR".into())), "fr_FR");
+        assert_eq!(pick_default_locale(Some(" ".into())), DEFAULT_LOCALE);
+        assert_eq!(pick_default_locale(None), DEFAULT_LOCALE);
+    }
+    #[test]
+    fn legacy_transcript_configs_map_to_apple_default() {
+        assert_eq!(saved_locale(PROVIDER, "de_DE").as_deref(), Some("de_DE"));
+        for (provider, model) in [("localWhisper", "small-q5_1"), ("parakeet", "parakeet-tdt-0.6b-v3-int8"), ("deepgram", "nova"), (PROVIDER, "")] {
+            assert_eq!(saved_locale(provider, model), None, "{provider}");
+        }
+    }
+    #[test]
+    fn capabilities_without_system_locale_still_parse() {
+        let event: SpeechEvent = serde_json::from_str(
+            r#"{"kind":"capabilities","available":false,"reason":"x","locales":[]}"#,
+        )
+        .unwrap();
+        assert!(matches!(event, SpeechEvent::Capabilities { system_locale: None, .. }));
     }
     #[test]
     fn registration_is_removed_on_drop() {

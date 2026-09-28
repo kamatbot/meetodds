@@ -612,54 +612,32 @@ pub async fn api_get_api_key<R: Runtime>(
     }
 }
 
+/// Transcription is Apple Speech only. Stored configs from older versions
+/// (localWhisper, parakeet, cloud providers) are read as Apple Speech with the
+/// system language when supported, else en_US. Nothing is rewritten on read.
 #[tauri::command]
 pub async fn api_get_transcript_config<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     _auth_token: Option<String>,
 ) -> Result<Option<TranscriptConfig>, String> {
-    log_info!("api_get_transcript_config called (native)");
-    let pool = state.db_manager.pool();
-
-    match SettingsRepository::get_transcript_config(pool).await {
-        Ok(Some(config)) => {
-            log_info!(
-                "Found transcript config: provider={}, model={}",
-                &config.provider,
-                &config.model
-            );
-            match SettingsRepository::get_transcript_api_key(pool, &config.provider).await {
-                Ok(api_key) => {
-                    log_info!("Successfully retrieved transcript config and API key.");
-                    Ok(Some(TranscriptConfig {
-                        provider: config.provider,
-                        model: config.model,
-                        api_key,
-                    }))
-                }
-                Err(e) => {
-                    log_error!(
-                        "Failed to get transcript API key for provider {}: {}",
-                        &config.provider,
-                        e
-                    );
-                    Err(e.to_string())
-                }
-            }
-        }
-        Ok(None) => {
-            log_info!("No transcript config found, returning default.");
-            Ok(Some(TranscriptConfig {
-                provider: "localWhisper".to_string(),
-                model: crate::config::DEFAULT_WHISPER_MODEL.to_string(),
-                api_key: None,
-            }))
-        }
-        Err(e) => {
+    let stored = SettingsRepository::get_transcript_config(state.db_manager.pool())
+        .await
+        .map_err(|e| {
             log_error!("Failed to get transcript config: {}", e);
-            Err(e.to_string())
-        }
-    }
+            e.to_string()
+        })?;
+    let saved_locale =
+        stored.and_then(|c| crate::apple_speech::saved_locale(&c.provider, &c.model));
+    let model = match saved_locale {
+        Some(locale) => locale,
+        None => crate::apple_speech::default_locale().await,
+    };
+    Ok(Some(TranscriptConfig {
+        provider: crate::apple_speech::PROVIDER.to_string(),
+        model,
+        api_key: None,
+    }))
 }
 
 #[tauri::command]
@@ -668,69 +646,24 @@ pub async fn api_save_transcript_config<R: Runtime>(
     state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
-    api_key: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let _engine_guard = crate::audio::common::acquire_engine_lifecycle_lock().await;
     if crate::audio::recording_commands::is_recording().await {
-        return Err("Stop recording before changing the transcription engine or language.".into());
+        return Err("Stop recording before changing the transcription language.".into());
     }
-    log_info!(
-        "api_save_transcript_config called (native) for provider '{}'",
-        &provider
-    );
-    let pool = state.db_manager.pool();
-
-    if let Err(e) = SettingsRepository::save_transcript_config(pool, &provider, &model).await {
-        log_error!("Failed to save transcript config: {}", e);
-        return Err(e.to_string());
+    if provider != crate::apple_speech::PROVIDER {
+        return Err(format!("Unsupported transcription engine '{}'.", provider));
     }
-
-    if let Some(key) = api_key {
-        if !key.is_empty() {
-            log_info!("API key provided, saving for transcript provider...");
-            if let Err(e) = SettingsRepository::save_transcript_api_key(pool, &provider, &key).await
-            {
-                log_error!("Failed to save transcript API key: {}", e);
-                return Err(e.to_string());
-            }
-        }
-    }
-
-    log_info!("Successfully saved transcript configuration.");
+    SettingsRepository::save_transcript_config(state.db_manager.pool(), &provider, &model)
+        .await
+        .map_err(|e| {
+            log_error!("Failed to save transcript config: {}", e);
+            e.to_string()
+        })?;
     Ok(
         serde_json::json!({ "status": "success", "message": "Transcript configuration saved successfully" }),
     )
-}
-
-#[tauri::command]
-pub async fn api_get_transcript_api_key<R: Runtime>(
-    _app: AppHandle<R>,
-    state: tauri::State<'_, AppState>,
-    provider: String,
-    _auth_token: Option<String>,
-) -> Result<String, String> {
-    log_info!(
-        "api_get_transcript_api_key called (native) for provider '{}'",
-        &provider
-    );
-    match SettingsRepository::get_transcript_api_key(&state.db_manager.pool(), &provider).await {
-        Ok(key) => {
-            log_info!(
-                "Successfully retrieved transcript API key for provider '{}'.",
-                &provider
-            );
-            Ok(key.unwrap_or_default())
-        }
-        Err(e) => {
-            log_error!(
-                "Failed to get transcript API key for provider '{}': {}",
-                &provider,
-                e
-            );
-            Err(e.to_string())
-        }
-    }
 }
 
 #[tauri::command]
