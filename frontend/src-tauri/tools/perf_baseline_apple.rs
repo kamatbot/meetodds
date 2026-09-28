@@ -166,7 +166,7 @@ pub fn gt_metrics(finals: &[Final], partials: &[(f64, f64)], repeats: usize, per
 
 async fn start(locale: &str) -> Result<(SpeechSession, f64)> {
     let t = Instant::now();
-    let s = SpeechSession::start(locale).await.map_err(|e| anyhow!("Apple Speech start: {}", e))?;
+    let s = SpeechSession::start(locale, true).await.map_err(|e| anyhow!("Apple Speech start: {}", e))?;
     Ok((s, t.elapsed().as_secs_f64() * 1000.0))
 }
 

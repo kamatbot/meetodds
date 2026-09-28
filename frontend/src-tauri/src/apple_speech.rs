@@ -70,7 +70,7 @@ mod ffi {
             download: bool,
             callback: Callback,
         );
-        pub fn md_speech_start(id: u64, locale: *const c_char, callback: Callback);
+        pub fn md_speech_start(id: u64, locale: *const c_char, partials: bool, callback: Callback);
         /// 0 = accepted, 1 = queue full (session keeps running), 2 = closed/invalid.
         pub fn md_speech_push(
             id: u64,
@@ -148,10 +148,11 @@ impl SpeechSession {
         }
     }
 
-    pub async fn start(locale: &str) -> Result<Self, String> {
+    /// `partials: false` requests finals only (no volatile results).
+    pub async fn start(locale: &str, partials: bool) -> Result<Self, String> {
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = locale;
+            let _ = (locale, partials);
             return Err(UNAVAILABLE.into());
         }
         #[cfg(target_os = "macos")]
@@ -159,7 +160,7 @@ impl SpeechSession {
             let locale = locale_string(locale)?;
             let mut session = Self::register();
             unsafe {
-                ffi::md_speech_start(session.id, locale.as_ptr(), receive);
+                ffi::md_speech_start(session.id, locale.as_ptr(), partials, receive);
             }
             match session.next(Duration::from_secs(30)).await? {
                 SpeechEvent::Ready { .. } => Ok(session),
@@ -301,7 +302,7 @@ impl crate::audio::transcription::provider::TranscriptionProvider for AppleSpeec
             .filter(|l| !l.is_empty() && *l != "auto")
             .unwrap_or(&self.locale);
         let result = async {
-            let mut session = SpeechSession::start(locale).await?;
+            let mut session = SpeechSession::start(locale, false).await?;
             if !session.push(&audio, 16_000, 0.0)? {
                 return Err("Apple Speech could not accept this audio.".into());
             }
@@ -386,7 +387,7 @@ mod tests {
             .find(|locale| locale.installed && locale.id.replace('_', "-") == "en-US")
             .expect("Install English (US) through Settings before this explicit smoke check");
         assert!(!prepare(&locale.id, false).await.unwrap().is_empty());
-        let mut session = SpeechSession::start(&locale.id).await.unwrap();
+        let mut session = SpeechSession::start(&locale.id, false).await.unwrap();
         session.finish();
         assert!(matches!(
             session.next(Duration::from_secs(10)).await.unwrap(),

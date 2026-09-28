@@ -43,6 +43,7 @@ private final class Session: @unchecked Sendable {
 
     let id: UInt64
     let callback: SpeechCallback?
+    let partials: Bool
     private let lock = NSLock()
     private let deliveryLock = NSLock()
     private var continuation: AsyncStream<Frame>.Continuation?
@@ -56,9 +57,10 @@ private final class Session: @unchecked Sendable {
     private var converterInputFormat: AVAudioFormat?
     private var needsInputAnchor = true
 
-    init(id: UInt64, callback: SpeechCallback?) {
+    init(id: UInt64, callback: SpeechCallback?, partials: Bool) {
         self.id = id
         self.callback = callback
+        self.partials = partials
     }
 
     func start(localeID: String) {
@@ -161,7 +163,11 @@ private final class Session: @unchecked Sendable {
         guard await SpeechTranscriber.installedLocales.contains(where: { $0.identifier == locale.identifier }) else {
             throw BridgeError.localeUnavailable
         }
-        let transcriber = SpeechTranscriber(locale: locale, preset: .timeIndexedProgressiveTranscription)
+        // Captions off: finals only (volatile results would be encoded, routed and dropped).
+        // fastResults stays: without it end-of-speech -> final went from ~0.56 s to ~1.56 s.
+        let transcriber = partials
+            ? SpeechTranscriber(locale: locale, preset: .timeIndexedProgressiveTranscription)
+            : SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.fastResults], attributeOptions: [.audioTimeRange])
         guard let outputFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw BridgeError.notReady
         }
@@ -283,10 +289,10 @@ public func md_speech_prepare(_ id: UInt64, _ localeCString: UnsafePointer<CChar
 }
 
 @_cdecl("md_speech_start")
-public func md_speech_start(_ id: UInt64, _ localeCString: UnsafePointer<CChar>?, _ callback: SpeechCallback?) {
+public func md_speech_start(_ id: UInt64, _ localeCString: UnsafePointer<CChar>?, _ partials: Bool, _ callback: SpeechCallback?) {
     let localeID = localeCString.map(String.init(cString:)) ?? ""
     guard isSupportedRuntime() else { emitError(callback, id, "Apple local speech requires macOS 26 or later on Apple Silicon."); emit(callback, id, ["kind": "finished"]); return }
-    let session = Session(id: id, callback: callback)
+    let session = Session(id: id, callback: callback, partials: partials)
     SpeechSessions.shared.install(session)
     session.start(localeID: localeID)
 }

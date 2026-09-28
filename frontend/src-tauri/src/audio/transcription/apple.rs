@@ -121,22 +121,24 @@ impl Live {
     }
 }
 
-/// One capture source: sample clock and its Apple session. A full Swift queue continues
-/// in a new session anchored at the sample clock; the previous one finishes in
-/// `retiring` (its queued audio is still finalized).
+/// One capture source: sample clock and its Apple session. A captions toggle or a full
+/// Swift queue continues in a new session anchored at the sample clock; the previous
+/// one finishes in `retiring` (its queued audio is still finalized).
 pub struct Source {
     name: &'static str,
     live: Option<Live>,
+    partials: bool,
     retiring: Vec<Live>,
     clock: SampleClock,
     pub restarts: u32,
 }
 
 impl Source {
-    pub fn new(name: &'static str, session: SpeechSession) -> Self {
+    pub fn new(name: &'static str, session: SpeechSession, partials: bool) -> Self {
         Self {
             name,
             live: Some(Live::new(session)),
+            partials,
             retiring: Vec::new(),
             clock: SampleClock::default(),
             restarts: 0,
@@ -154,8 +156,9 @@ impl Source {
         }
     }
 
-    async fn restart(&mut self, locale: &str) -> Result<(), String> {
-        let next = Live::new(SpeechSession::start(locale).await?);
+    async fn restart(&mut self, locale: &str, partials: bool) -> Result<(), String> {
+        let next = Live::new(SpeechSession::start(locale, partials).await?);
+        self.partials = partials;
         self.restarts += 1;
         if let Some(old) = self.live.replace(next) {
             old.session.finish();
@@ -165,18 +168,22 @@ impl Source {
     }
 
     /// Returns true when input was dropped or a session overflowed (caller warns).
-    pub async fn accept(&mut self, locale: &str, chunk: AudioChunk, dropped_secs: f64) -> Result<bool, String> {
+    pub async fn accept(&mut self, locale: &str, chunk: AudioChunk, dropped_secs: f64, partials: bool) -> Result<bool, String> {
         let rate = chunk.sample_rate;
         self.clock.skip(dropped_secs);
         let at = self.clock.accept(chunk.data.len(), rate, chunk.timestamp)?;
         let secs = chunk.data.len() as f64 / rate as f64;
         let behind = dropped_secs > 0.0;
+        if partials != self.partials {
+            // Captions toggled: partials vs finals-only.
+            self.restart(locale, partials).await?;
+        }
         let Some(live) = &mut self.live else { return Ok(behind) };
         if live.session.push(&chunk.data, rate, live.timeline.place(at, secs))? {
             return Ok(behind);
         }
         // The recognizer is ~10 s behind. Keep live transcription going.
-        self.restart(locale).await?;
+        self.restart(locale, self.partials).await?;
         if let Some(live) = &mut self.live {
             if !live.session.push(&chunk.data, rate, live.timeline.place(at, secs))? {
                 return Err("Apple Speech cannot accept live audio.".into());
@@ -269,13 +276,15 @@ impl PreparedApple {
         let Some(config) = config.filter(|c| c.provider == crate::apple_speech::PROVIDER) else {
             return Ok(None);
         };
+        // Captions off: finals only. Toggling captions later restarts at the sample clock.
+        let partials = super::preview_control::PREVIEW_GATE.enabled();
         let mic = if microphone {
-            Some(Source::new("microphone", SpeechSession::start(&config.model).await?))
+            Some(Source::new("microphone", SpeechSession::start(&config.model, partials).await?, partials))
         } else {
             None
         };
         let sys = if system {
-            Some(Source::new("system", SpeechSession::start(&config.model).await?))
+            Some(Source::new("system", SpeechSession::start(&config.model, partials).await?, partials))
         } else {
             None
         };
@@ -322,7 +331,8 @@ impl PreparedApple {
                                 queued_us[i].fetch_sub(duration_us(chunk.data.len(), chunk.sample_rate), Ordering::AcqRel);
                                 let source = if i == 0 { &mut microphone } else { &mut system };
                                 if let Some(source) = source.as_mut() {
-                                    if source.accept(&locale, input.chunk, input.dropped_secs).await? {
+                                    let partials = super::preview_control::PREVIEW_GATE.enabled();
+                                    if source.accept(&locale, input.chunk, input.dropped_secs, partials).await? {
                                         warn_behind(&app, &mut last_warning);
                                     }
                                 }
@@ -578,13 +588,13 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires macOS 26+, supported hardware, and installed English speech assets"]
     async fn apple_native_full_queue_restarts_without_ending() {
-        let session = SpeechSession::start("en_US").await.unwrap();
-        let mut source = Source::new("microphone", session);
+        let session = SpeechSession::start("en_US", false).await.unwrap();
+        let mut source = Source::new("microphone", session, false);
         let tone: Vec<f32> = (0..48000).map(|i| 0.1 * (i as f32 * 0.03).sin()).collect();
         for i in 0..30 {
             let mut input = chunk(DeviceType::Microphone, 0, i as f64 + 1.0);
             input.data = tone.clone();
-            source.accept("en_US", input, 0.0).await.unwrap();
+            source.accept("en_US", input, 0.0, false).await.unwrap();
         }
         assert!(source.restarts >= 1, "the Swift queue should have filled");
         source.finish();
