@@ -39,6 +39,7 @@ pub mod analytics;
 pub mod anthropic;
 pub mod api;
 pub mod apple_speech;
+pub mod apple_translation;
 pub mod audio;
 pub mod calendar;
 pub mod config;
@@ -761,6 +762,7 @@ pub fn run() {
             api::api_save_transcript_config,
             apple_speech::apple_speech_capabilities,
             apple_speech::apple_speech_prepare,
+            apple_translation::apple_translation_open_settings,
             audio::transcription::preview_control::get_live_preview_enabled,
             audio::transcription::preview_control::set_live_preview_enabled,
             api::api_get_transcript_api_key,

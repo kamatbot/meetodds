@@ -6,9 +6,11 @@ pub fn compile() {
     }
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let source = manifest.join("src/apple_speech_bridge.swift");
+    let translation = manifest.join("src/apple_translation_bridge.swift");
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let object = out.join("meetodds_apple_speech.o");
     println!("cargo:rerun-if-changed={}", source.display());
+    println!("cargo:rerun-if-changed={}", translation.display());
     println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
 
     let target_arch = match env::var("CARGO_CFG_TARGET_ARCH")
@@ -32,10 +34,12 @@ pub fn compile() {
             &target,
             "-O",
             "-enable-library-evolution",
+            "-wmo",
             "-o",
         ])
         .arg(&object)
         .arg(&source)
+        .arg(&translation)
         .output()
         .expect("launch xcrun swiftc for Apple Speech bridge");
     if !output.status.success() {
@@ -77,6 +81,7 @@ pub fn compile() {
     // Weak-linking keeps macOS 14/15 launches valid. The bridge performs its own
     // macOS 26 runtime check before touching SpeechAnalyzer APIs.
     println!("cargo:rustc-link-arg=-Wl,-weak_framework,Speech");
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,Translation");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=CoreMedia");
     println!("cargo:rustc-link-lib=swiftCore");

@@ -19,6 +19,12 @@ path = "src/main.rs"
 name = "perf_baseline"
 path = "tools/perf_baseline.rs"
 
+# Real Apple Translation check (installed pairs only, never downloads):
+#   cargo run --example apple_translation_check
+[[example]]
+name = "apple_translation_check"
+path = "tools/apple_translation_check.rs"
+
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
