@@ -7,6 +7,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -46,6 +47,9 @@ pub struct WhisperEngine {
     // Cleared whenever the context changes because a state pins its own model.
     live_state: Arc<std::sync::Mutex<Option<whisper_rs::WhisperState>>>,
     preview_state: Arc<std::sync::Mutex<Option<whisper_rs::WhisperState>>>,
+    // Language id the latest live canonical decode auto-detected (-1 = none yet).
+    // Preview decodes reuse it instead of paying whisper's detection encoder pass.
+    last_detected_lang: AtomicI32,
     current_model: Arc<RwLock<Option<String>>>,
     available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     // State tracking for smart logging
@@ -57,6 +61,12 @@ pub struct WhisperEngine {
     cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
     // Active downloads tracking to prevent concurrent downloads
     active_downloads: Arc<RwLock<HashSet<String>>>, // Set of models currently being downloaded
+}
+
+/// whisper.cpp abort callback for caption-lane decodes: true once a canonical
+/// (saved-transcript) decode is waiting for or holding the local-inference permit.
+unsafe extern "C" fn abort_preview_for_canonical(_user_data: *mut std::ffi::c_void) -> bool {
+    crate::audio::transcription::worker::canonical_transcription_busy()
 }
 
 impl WhisperEngine {
@@ -176,6 +186,7 @@ impl WhisperEngine {
             current_context: Arc::new(RwLock::new(None)),
             live_state: Arc::new(std::sync::Mutex::new(None)),
             preview_state: Arc::new(std::sync::Mutex::new(None)),
+            last_detected_lang: AtomicI32::new(-1),
             current_model: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
             // Initialize state tracking
@@ -377,6 +388,7 @@ impl WhisperEngine {
     }
 
     fn clear_live_state(&self) {
+        self.last_detected_lang.store(-1, Ordering::Relaxed);
         if let Ok(mut slot) = self.live_state.lock() {
             slot.take();
         }
@@ -586,9 +598,15 @@ impl WhisperEngine {
         let adaptive_config = hardware_profile.get_whisper_config();
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
+        // Auto-detect costs an extra encoder pass per call; the caption lane reuses the
+        // language the saved transcript last detected. Canonical decodes still detect per call.
+        let detected = match self.last_detected_lang.load(Ordering::Relaxed) {
+            id if id >= 0 => whisper_rs::get_lang_str(id),
+            _ => None,
+        };
         let (language_code, should_translate) = match language.as_deref() {
-            Some("auto") | None => (None, false),
-            Some("auto-translate") => (None, true),
+            Some("auto") | None => (detected, false),
+            Some("auto-translate") => (detected, true),
             Some(lang) => (Some(lang), false),
         };
         params.set_language(language_code);
@@ -601,10 +619,18 @@ impl WhisperEngine {
         params.set_suppress_blank(true);
         params.set_suppress_non_speech_tokens(true);
         params.set_temperature(0.0);
+        params.set_temperature_inc(0.0); // Disposable lane: no fallback re-decodes.
         params.set_no_speech_thold(0.45);
         params.set_max_len(96);
         params.set_single_segment(true);
         params.set_n_threads(adaptive_config.max_threads.unwrap_or(2).clamp(1, 2) as i32);
+        // Give up at the next encoder/decoder step once a canonical decode is waiting;
+        // whisper_full then returns an error and the caption is discarded. Never set
+        // this on canonical params: the counter is non-zero while canonical runs.
+        // Raw callback on purpose: whisper-rs 0.13.2 set_abort_callback_safe is unsound.
+        unsafe {
+            params.set_abort_callback(Some(abort_preview_for_canonical));
+        }
 
         let mut cached_slot = self.preview_state.try_lock().ok();
         let mut fresh_state = None;
@@ -709,7 +735,9 @@ impl WhisperEngine {
         // Additional suppression to reduce C library verbosity
         params.set_suppress_blank(true);
         params.set_suppress_non_speech_tokens(true);
-        params.set_temperature(adaptive_config.temperature);
+        // Live starts at 0.0 like stock whisper; the default temperature_inc fallback
+        // still re-decodes hotter when a pass fails the entropy/logprob checks.
+        params.set_temperature(if live { 0.0 } else { adaptive_config.temperature });
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
@@ -745,6 +773,11 @@ impl WhisperEngine {
             None => fresh_state.insert(ctx.create_state()?),
         };
         state.full(params, &audio_data)?;
+        if live && language_code.is_none() {
+            if let Ok(id) = state.full_lang_id_from_state() {
+                self.last_detected_lang.store(id, Ordering::Relaxed);
+            }
+        }
         let num_segments = state.full_n_segments()?;
 
         let mut result = String::new();

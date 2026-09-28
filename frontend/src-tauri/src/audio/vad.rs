@@ -115,6 +115,13 @@ impl ContinuousVadProcessor {
         while self.buffer.len() >= self.chunk_size {
             let chunk: Vec<f32> = self.buffer.drain(..self.chunk_size).collect();
             self.process_chunk(&chunk)?;
+            // Silero keeps every frame until a SpeechEnd drains it, so a silent channel
+            // (muted mic, empty system audio) grows ~230 MB/hour. Outside speech keep only
+            // the pre-speech pad. Our own state (current_speech, preview snapshot, sample
+            // counters) never indexes silero's buffer while out of speech.
+            if !self.in_speech {
+                self.session.trim_start_silence();
+            }
 
             // Extract any completed speech segments
             while let Some(segment) = self.speech_segments.pop_front() {
@@ -1032,5 +1039,47 @@ mod tests {
             processor.resample_input_buffer.len(), 2,
             "Remaining 2 samples must be preserved in resample_input_buffer"
         );
+    }
+    #[test]
+    fn test_vad_silence_keeps_silero_buffer_bounded() {
+        // A silent channel used to grow silero's session buffer by ~230 MB/hour.
+        let mut processor =
+            ContinuousVadProcessor::new(48000, crate::audio::pipeline::LIVE_VAD_REDEMPTION_MS)
+                .expect("processor");
+        let silence = vec![0.0f32; 1024];
+        for _ in 0..(48000 * 60 / 1024) {
+            assert!(processor.process_audio(&silence).expect("process").is_empty());
+        }
+        // The 300 ms pre-speech pad plus at most one 30 ms frame.
+        let buffered = processor.session.session_audio_samples();
+        assert!(buffered <= 16 * (300 + 30), "silero kept {} samples of silence", buffered);
+    }
+
+    #[test]
+    fn test_vad_speech_after_long_silence_keeps_pre_speech_pad() {
+        let Some(speech) = continuous_speech_16k(3) else {
+            eprintln!("jfk.wav fixture missing, skipping");
+            return;
+        };
+        let silence_ms = 10_000usize;
+        let mut audio = vec![0.0f32; silence_ms * 16];
+        audio.extend_from_slice(&speech);
+        audio.extend(std::iter::repeat(0.0f32).take(2 * 16000));
+
+        let mut processor =
+            ContinuousVadProcessor::new(16000, crate::audio::pipeline::LIVE_VAD_REDEMPTION_MS)
+                .expect("processor");
+        let mut segments = Vec::new();
+        for chunk in audio.chunks(1024) {
+            segments.extend(processor.process_audio(chunk).expect("process"));
+        }
+        segments.extend(processor.flush().expect("flush"));
+
+        let first = segments.first().expect("speech after silence yields a segment");
+        // Silero pads the start by 300 ms before its onset frame, reaching back into
+        // the silence that was being trimmed. The padded span must be intact.
+        let (start, end) = (first.start_timestamp_ms as usize * 16, first.end_timestamp_ms as usize * 16);
+        assert!(start < silence_ms * 16, "segment at {} ms has no pre-speech pad", first.start_timestamp_ms);
+        assert_eq!(first.samples, audio[start..end]);
     }
 }

@@ -37,11 +37,12 @@ static CANONICAL_TRANSCRIPTION_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 // otherwise doubles CPU/GPU contention under Whisper and Parakeet.
 static LOCAL_TRANSCRIPTION_PERMIT: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::new(1)));
 
-pub(crate) fn canonical_transcription_busy() -> bool {
+// `pub` (not `pub(crate)`) so tools/perf_baseline.rs drives the same gate as the app.
+pub fn canonical_transcription_busy() -> bool {
     CANONICAL_TRANSCRIPTION_ACTIVE.load(Ordering::Acquire) > 0
 }
 
-pub(crate) fn try_acquire_preview_permit() -> Option<OwnedSemaphorePermit> {
+pub fn try_acquire_preview_permit() -> Option<OwnedSemaphorePermit> {
     if canonical_transcription_busy() {
         return None;
     }
@@ -59,21 +60,25 @@ pub(crate) fn try_acquire_preview_permit() -> Option<OwnedSemaphorePermit> {
     Some(permit)
 }
 
-struct CanonicalTranscriptionGuard {
+pub struct CanonicalTranscriptionGuard {
     permit: Option<OwnedSemaphorePermit>,
 }
 
 impl CanonicalTranscriptionGuard {
-    async fn acquire() -> Self {
-        let permit = LOCAL_TRANSCRIPTION_PERMIT
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("local transcription permit is never closed");
+    pub async fn acquire() -> Self {
+        // Count as busy while still waiting, so an in-flight preview decode sees it
+        // and stops early. The guard exists before the await: if this future is
+        // dropped while queued, Drop still undoes the count.
         CANONICAL_TRANSCRIPTION_ACTIVE.fetch_add(1, Ordering::Release);
-        Self {
-            permit: Some(permit),
-        }
+        let mut guard = Self { permit: None };
+        guard.permit = Some(
+            LOCAL_TRANSCRIPTION_PERMIT
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("local transcription permit is never closed"),
+        );
+        guard
     }
 }
 
@@ -95,6 +100,8 @@ mod permit_tests {
 
         tokio::task::yield_now().await;
         assert!(!canonical.is_finished());
+        // A queued canonical decode is already visible, so the running preview can stop.
+        assert!(canonical_transcription_busy());
 
         drop(preview);
         let canonical = canonical.await.expect("canonical task completes");
@@ -102,6 +109,18 @@ mod permit_tests {
         assert!(try_acquire_preview_permit().is_none());
 
         drop(canonical);
+        assert!(!canonical_transcription_busy());
+        let preview = try_acquire_preview_permit().expect("preview acquires the idle permit");
+
+        // A canonical waiter dropped before it gets the permit must not stay counted.
+        let waiting = tokio::spawn(CanonicalTranscriptionGuard::acquire());
+        tokio::task::yield_now().await;
+        assert!(canonical_transcription_busy());
+        waiting.abort();
+        assert!(waiting.await.is_err());
+        assert!(!canonical_transcription_busy());
+
+        drop(preview);
         assert!(try_acquire_preview_permit().is_some());
     }
 }
