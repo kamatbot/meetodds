@@ -829,7 +829,6 @@ pub fn run() {
             onboarding::get_onboarding_status,
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
-            onboarding::complete_onboarding,
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,

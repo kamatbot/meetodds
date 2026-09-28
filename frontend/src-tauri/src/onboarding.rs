@@ -1,11 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
-use log::{info, warn, error};
+use log::{info, warn};
 use anyhow::Result;
-
-use crate::state::AppState;
-use crate::database::repositories::setting::SettingsRepository;
 
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -165,60 +162,6 @@ pub async fn reset_onboarding_status_cmd<R: Runtime>(
     reset_onboarding_status(&app)
         .await
         .map_err(|e| format!("Failed to reset onboarding status: {}", e))
-}
-
-#[tauri::command]
-pub async fn complete_onboarding<R: Runtime>(
-    app: AppHandle<R>,
-    state: tauri::State<'_, AppState>,
-    model: String,
-) -> Result<(), String> {
-    info!("Completing onboarding with on-device summary model: {}", model);
-
-    // Step 1: Save model configuration to SQLite database FIRST
-    let pool = state.db_manager.pool();
-
-    // Onboarding defaults summaries to on-device Apple Intelligence
-    if let Err(e) = SettingsRepository::save_model_config(
-        pool,
-        crate::apple_intelligence::PROVIDER_ID,
-        crate::apple_intelligence::MODEL_ID,
-        "large-v3",
-        None,
-    ).await {
-        error!("Failed to save summary model config: {}", e);
-        return Err(format!("Failed to save summary model config: {}", e));
-    }
-    info!("Saved Apple Intelligence summary model config");
-
-    // Save transcription model config (parakeet provider) - always parakeet
-    if let Err(e) = SettingsRepository::save_transcript_config(
-        pool,
-        "parakeet",
-        crate::config::DEFAULT_PARAKEET_MODEL,
-    ).await {
-        error!("Failed to save transcription model config: {}", e);
-        return Err(format!("Failed to save transcription model config: {}", e));
-    }
-    info!("Saved transcription model config: provider=parakeet, model={}", crate::config::DEFAULT_PARAKEET_MODEL);
-
-    // Step 2: Only NOW mark onboarding as complete (after DB operations succeed)
-    let mut status = load_onboarding_status(&app)
-        .await
-        .map_err(|e| format!("Failed to load onboarding status: {}", e))?;
-
-    status.completed = true;
-    status.current_step = 4; // Max step (4 on macOS with permissions, 3 on other platforms)
-    status.model_status.parakeet = "downloaded".to_string();
-    status.model_status.summary = "downloaded".to_string();
-    status.model_status.selected_summary_model = Some(model.clone());
-
-    save_onboarding_status(&app, &status)
-        .await
-        .map_err(|e| format!("Failed to save completed onboarding status: {}", e))?;
-
-    info!("Onboarding completed successfully with model: {}", model);
-    Ok(())
 }
 
 #[cfg(test)]
