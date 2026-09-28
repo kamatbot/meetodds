@@ -5,7 +5,10 @@ export interface ApprovedSummaryInput { text: string; customPrompt: string; targ
 
 export function summaryTarget(provider: string, model: string, endpoint?: string | null): SummaryTarget {
   if (!model.trim()) throw new Error('Select a summary model in Settings before continuing.');
-  if (provider === 'builtin-ai') return { provider, model, destination: 'on-device', local: true, label: 'Built-in AI · on this device' };
+  // 'builtin-ai' is the removed built-in model; its saved choices migrate to Apple Intelligence.
+  if (provider === 'apple-intelligence' || provider === 'builtin-ai') {
+    return { provider: 'apple-intelligence', model: 'system', destination: 'on-device', local: true, label: 'Apple Intelligence · on this device' };
+  }
   const hosts: Record<string, [string, string]> = {
     'openai-codex': ['https://chatgpt.com/backend-api/codex', 'ChatGPT account · Codex allowance'],
     openai: ['https://api.openai.com/v1', 'OpenAI API · separate API billing'],
@@ -28,6 +31,9 @@ export function summaryTarget(provider: string, model: string, endpoint?: string
 }
 
 export function sameSummaryTarget(a: SummaryTarget, b: SummaryTarget): boolean {
+  // An approval saved for the removed built-in model carries over to Apple Intelligence (both on-device).
+  if (a.provider === 'builtin-ai') a = summaryTarget(a.provider, a.model || 'system');
+  if (b.provider === 'builtin-ai') b = summaryTarget(b.provider, b.model || 'system');
   return a.provider === b.provider && a.model === b.model && a.destination === b.destination;
 }
 

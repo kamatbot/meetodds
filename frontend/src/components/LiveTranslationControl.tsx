@@ -91,7 +91,6 @@ export function LiveTranslationControl({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">Auto · best available</SelectItem>
-                  <SelectItem value="builtin-ai">Local AI · On-device GGUF</SelectItem>
                   <SelectItem value="ollama">Ollama · Local server</SelectItem>
                   <SelectItem value="groq">Groq · instant</SelectItem>
                   <SelectItem value="openai">OpenAI · ChatGPT subscription</SelectItem>

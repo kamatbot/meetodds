@@ -87,7 +87,6 @@ export default function LiveTranslationSettingsSection() {
             className={selectClass}
           >
             <option value="auto">Auto · best available</option>
-            <option value="builtin-ai">Local AI (On-device Built-in)</option>
             <option value="ollama">Ollama (Local)</option>
             <option value="openai">OpenAI (ChatGPT subscription)</option>
             <option value="groq">Groq (Fast Cloud)</option>

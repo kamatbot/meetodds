@@ -17,7 +17,7 @@ test('the registry is native, synchronized, and released on drop', () => {
   assert.match(gate, /Arc<Mutex<HashSet<String>>>/); assert.match(gate, /impl Drop for SummaryLease/);
   assert.match(gate, /active.remove\(&self.meeting_id\)/);
 });
-test('built-in local jobs respect capture before resetting a process', () => {
+test('on-device local jobs respect capture before resetting a process', () => {
   assert.ok(commands.indexOf('recording_commands::is_recording().await') < commands.indexOf('SummaryProcessesRepository::create_or_reset_process'));
 });
 test('summary polling no longer logs meeting titles', () => {

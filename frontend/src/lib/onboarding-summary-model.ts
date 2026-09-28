@@ -9,12 +9,9 @@ interface OnboardingSummaryModelStatus {
   summaryModelDownloaded: boolean;
 }
 
-const SUMMARY_MODEL_SIZES_MB: Record<string, number> = {
-  'qwen3.5:2b': 1221,
-  'qwen3.5:4b': 2614,
-  'gemma3:1b': 1019,
-  'gemma3:4b': 2374,
-};
+// ponytail: the built-in summary models (and their download sizes) were removed.
+// Kept only for this branch's pre-merge onboarding imports; delete once nothing imports it.
+const SUMMARY_MODEL_SIZES_MB: Record<string, number> = {};
 
 export function resolveOnboardingSummaryModelStatus({
   selectedModel,
