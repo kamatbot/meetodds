@@ -13,7 +13,7 @@ export function OnboardingContainer({
   hero,
   children,
   step,
-  totalSteps = 4,
+  totalSteps = 3,
   stepOffset = 0,
   hideProgress = false,
   className,
