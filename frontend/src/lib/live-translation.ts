@@ -1,7 +1,11 @@
 export type TranslationDisplayMode = 'bilingual' | 'translated';
 export type LiveTranslationStatus = 'queued' | 'translating' | 'translated' | 'error';
 export type LiveTranslationSpeed = 'instant' | 'balanced' | 'accurate';
-export type LiveTranslationEngine = 'auto' | 'builtin-ai' | 'ollama' | 'summary' | 'groq' | 'openai' | 'openai-codex' | 'claude';
+export type LiveTranslationEngine = 'auto' | 'apple' | 'summary' | 'groq' | 'openai' | 'openai-codex' | 'claude';
+
+const LIVE_TRANSLATION_ENGINES: LiveTranslationEngine[] = ['auto', 'apple', 'summary', 'groq', 'openai', 'openai-codex', 'claude'];
+// Removed local LLM engines (the built-in model and Ollama) move to Apple Translation.
+const RETIRED_LOCAL_ENGINES = ['builtin-ai', 'local', 'ollama'];
 
 export interface LiveTranslationLanguage {
   code: string;
@@ -117,9 +121,10 @@ export function loadLiveTranslationSettings(): LiveTranslationSettings {
     const speed: LiveTranslationSpeed = ['instant', 'balanced', 'accurate'].includes(parsed.speed ?? '')
       ? parsed.speed as LiveTranslationSpeed
       : 'instant';
-    const engine: LiveTranslationEngine = ['auto', 'builtin-ai', 'ollama', 'summary', 'groq', 'openai', 'openai-codex', 'claude'].includes(parsed.engine ?? '')
-      ? parsed.engine as LiveTranslationEngine
-      : 'auto';
+    const savedEngine = String(parsed.engine ?? '');
+    const engine: LiveTranslationEngine = LIVE_TRANSLATION_ENGINES.includes(savedEngine as LiveTranslationEngine)
+      ? savedEngine as LiveTranslationEngine
+      : RETIRED_LOCAL_ENGINES.includes(savedEngine) ? 'apple' : 'auto';
     const contextTurns: 0 | 2 | 4 = parsed.contextTurns === 0 || parsed.contextTurns === 4 ? parsed.contextTurns : 2;
     return {
       enabled: parsed.enabled === true,

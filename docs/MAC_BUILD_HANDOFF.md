@@ -1,5 +1,7 @@
 # Mac app build handoff — 2026-09-22
 
+> Historical handoff. Later builds removed Whisper and Parakeet; Apple Speech is the only transcription engine and the app requires macOS 26.
+
 Build from a fresh checkout of GitHub `main`, not a feature branch. The next
 prepared app version is **0.4.25**. No 0.4.24 app was successfully packaged.
 Increment all four version entries before any subsequent app build attempt:
@@ -41,8 +43,8 @@ pnpm --dir frontend install --frozen-lockfile
 pnpm --dir frontend run tauri:build:m5:app
 ```
 
-The established packer builds the real `llama-helper` sidecar and bundles FFmpeg.
-Do not use source-check `TAURI_CONFIG` overrides that remove either resource.
+The established packer bundles FFmpeg; summaries use Apple Intelligence through the compiled-in Swift bridge.
+Do not use source-check `TAURI_CONFIG` overrides that remove bundled resources.
 With the default Cargo target directory, the app is
 `target/release/bundle/macos/MeetOdds.app`. This command does not build a DMG or updater.
 Signing depends on credentials installed on the new Mac; verify signature and

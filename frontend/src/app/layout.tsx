@@ -20,7 +20,6 @@ import { ConfigProvider } from '@/contexts/ConfigContext'
 import { CalendarAwarenessProvider } from '@/contexts/CalendarAwarenessContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
-import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
@@ -94,7 +93,7 @@ function MainAppLayout({ children }: { children: React.ReactNode }) {
         <AnalyticsProvider><RecordingStateProvider><TranscriptProvider><ConfigProvider><CalendarAwarenessProvider><LiveMeetingTranslationProvider>
           <LiveCaptionBridge />
           <OllamaDownloadProvider><OnboardingProvider><SidebarProvider><TooltipProvider><RecordingPostProcessingProvider><ImportDialogProvider onOpen={handleOpenImportDialog}>
-            <NotesNavigationBridge /><DownloadProgressToastProvider />
+            <NotesNavigationBridge />
             {showOnboarding ? <OnboardingFlow onComplete={handleOnboardingComplete} /> : <AppShell>{children}</AppShell>}
             <ImportDropOverlay visible={showDropOverlay} />
             <ConditionalImportDialog showImportDialog={showImportDialog} handleImportDialogClose={handleImportDialogClose} importFilePath={importFilePath} />

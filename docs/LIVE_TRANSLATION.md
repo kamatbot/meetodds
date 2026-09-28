@@ -15,15 +15,24 @@ The selected target and display mode are stored locally for the next session. Li
 
 ## Provider behavior
 
-Live translation reuses the summarization provider selected under **Model Settings**. This includes:
+Choose the translation engine in the **Translate** popover or **Settings › Live translation**:
 
-- OpenAI Codex through the connected ChatGPT subscription;
-- OpenAI Cloud API;
-- Claude, Groq, and OpenRouter;
-- Ollama and MeetOdds Built-in AI;
-- custom OpenAI-compatible servers.
+- **Apple Translation · on this Mac** translates on-device with Apple's Translation framework (macOS 26+). No text leaves the Mac.
+- OpenAI Codex through the connected ChatGPT subscription, or the OpenAI Cloud API;
+- Groq and Claude;
+- **Summary provider** reuses the summarization provider selected under **Model Settings** (including OpenRouter, Ollama and custom OpenAI-compatible servers).
+- **Auto** tries configured fast cloud APIs, then the summary provider, then Apple Translation. With nothing configured it uses Apple Translation directly.
 
 When a cloud provider is selected, only the transcript text needed for the current translation request is sent to that provider. Audio remains in the existing recording/transcription pipeline.
+
+Saved settings that used the removed built-in model or the Ollama engine now use Apple Translation.
+
+## Apple Translation
+
+- **Source language** is the meeting's spoken language: the Apple Speech locale chosen in Settings › Transcription, English for Parakeet and `.en` Whisper models, otherwise the transcription language preference, and for automatic Whisper language, detection on the caption text. If the target equals the spoken language, the caption is shown unchanged.
+- **Language assets are never downloaded by MeetOdds.** Turning translation on checks the language pair. If it is not installed, the control shows "Apple Translation language not installed" with an **Open Language & Region** button; install the pair in **System Settings › General › Language & Region › Translation Languages…**. Unsupported pairs (for example Bengali, Urdu, Czech, Romanian, Hungarian as of macOS 27) show a clear message; pick ChatGPT or a cloud engine for them.
+- Preparing an installed pair creates one reusable session for it and loads the model, so the first caption is not served cold. Captions are translated one at a time; a newer revision cancels the older request.
+- Apple Translation returns whole sentences rather than streamed words. Glossary, meeting context and model override do not apply to it.
 
 ## Low-latency architecture
 
@@ -39,13 +48,13 @@ The transcript UI renders the original turn first. Translation begins afterward 
 - The native layer also has a bounded worker pool and a 30-second hard timeout.
 - Translation latency and the active provider/model are visible in the translation control.
 
-Cloud translation is allowed limited parallelism for lower wall-clock latency. Local providers are kept single-flight so local generation does not compete aggressively with Whisper or Parakeet for the CPU/GPU budget reserved for meeting transcription.
+Cloud translation is allowed limited parallelism for lower wall-clock latency. Apple Translation and Ollama are kept single-flight so on-device work does not compete aggressively with transcription.
 
 ## Supported target languages
 
 MeetOdds currently offers English, Spanish, French, German, Italian, Portuguese, Dutch, Swedish, Norwegian, Danish, Finnish, Polish, Czech, Romanian, Hungarian, Turkish, Russian, Ukrainian, Arabic, Hebrew, Hindi, Bengali, Urdu, Thai, Vietnamese, Indonesian, Malay, Simplified Chinese, Traditional Chinese, Japanese, and Korean.
 
-Source language is detected automatically by the selected model. Names, product terms, numbers, dates, URLs, and speaker intent are explicitly preserved in the translation instruction.
+Source language is detected automatically by the selected model (Apple Translation uses the meeting's spoken language, above). Names, product terms, numbers, dates, URLs, and speaker intent are explicitly preserved in the translation instruction.
 
 ## Boundaries
 

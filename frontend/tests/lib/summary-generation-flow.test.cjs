@@ -36,7 +36,6 @@ function harness(options = {}) {
         case 'api_get_summary': return current;
         case 'api_get_model_config': return { ...config };
         case 'is_recording': return options.recording || false;
-        case 'builtin_ai_is_model_ready': return options.modelReady !== false;
         case 'api_get_meeting_transcripts': return options.incomplete ? { transcripts: [turns[0]], total_count: 2, has_more: true } : { transcripts: args.limit === 1 ? [turns[0]] : turns, total_count: 2, has_more: args.limit === 1 };
         case 'api_get_meeting_notes': return { notesMarkdown: 'PRIVATE OBSERVATION' };
         case 'api_get_manual_notes': if (options.notesError) throw Error('notes unavailable'); return { content: 'MEETING NOTE' };
@@ -153,7 +152,7 @@ test('incomplete transcript or unavailable notes fail before model dispatch', as
   }
 });
 test('local models cannot contend with an active recording', async () => {
-  const h = harness({ recording: true, config: { provider: 'builtin-ai', model: 'local-model' } });
+  const h = harness({ recording: true, config: { provider: 'apple-intelligence', model: 'system' } });
   await h.flush(); await h.start(); assert.equal(h.jobs.length, 0); assert.equal(h.reviews.length, 0);
 });
 test('failed or empty provider output never projects new actions', async () => {

@@ -11,10 +11,10 @@ const helpers = {};
 vm.runInNewContext(compile('src/lib/live-captions.ts'), { exports: helpers });
 const settings = { enabled: true, sourceLanguage: 'auto', targetLanguage: 'en', displayMode: 'bilingual', speed: 'instant', engine: 'auto', contextTurns: 2, modelOverride: '', glossary: '', contextHint: '' };
 const speech = (revision = 1, patch = {}) => ({ text: `Buenos días ${revision}`, source: 'microphone', speaker: 'me', speakerLabel: 'Me', revision, audioStartTime: 1, audioEndTime: 3 + revision / 2, latencyMs: 50, ...patch });
-function harness() {
+function harness(settingsPatch = {}) {
   const slots = []; let cursor = 0; let dirty = true; let effects = []; let result;
   let inputs = [[], speech(), 'meeting-a'];
-  const listeners = new Map(); const jobs = []; const cancelled = [];
+  const listeners = new Map(); const jobs = []; const cancelled = []; const prepared = []; let segmentKeyCalls = 0;
   const equal = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
   const react = {
     useState(initial) { const i = cursor++; if (!slots[i]) slots[i] = { value: typeof initial === 'function' ? initial() : initial }; return [slots[i].value, next => { const value = typeof next === 'function' ? next(slots[i].value) : next; if (!Object.is(value, slots[i].value)) { slots[i].value = value; dirty = true; } }]; },
@@ -27,20 +27,20 @@ function harness() {
     react,
     '@tauri-apps/api/core': { invoke(command, args) {
       if (command === 'api_translate_live_text') return new Promise((resolve, reject) => jobs.push({ args, resolve, reject }));
-      if (command === 'api_prepare_live_translation') return Promise.resolve({ provider: 'openai-codex', model: 'account-model', warmed: false });
+      if (command === 'api_prepare_live_translation') return prepared.push(args), Promise.resolve({ provider: 'openai-codex', model: 'account-model', warmed: false });
       if (command === 'api_cancel_live_translation') { cancelled.push(args.requestId); return Promise.resolve(true); }
       return Promise.resolve();
     } },
     '@tauri-apps/api/event': { listen: async (name, handler) => { listeners.set(name, handler); return () => listeners.delete(name); } },
     '@/lib/live-captions': helpers,
-    '@/lib/live-translation': { DEFAULT_LIVE_TRANSLATION_SETTINGS: { ...settings, enabled: false }, loadLiveTranslationSettings: () => ({ ...settings }), saveLiveTranslationSettings: () => {}, liveTranslationSegmentKey: t => t.sequence_id === undefined ? t.id : `sequence-${t.sequence_id}` },
+    '@/lib/live-translation': { DEFAULT_LIVE_TRANSLATION_SETTINGS: { ...settings, enabled: false }, loadLiveTranslationSettings: () => ({ ...settings, ...settingsPatch }), saveLiveTranslationSettings: () => {}, liveTranslationSegmentKey: t => { segmentKeyCalls++; return t.sequence_id === undefined ? t.id : `sequence-${t.sequence_id}`; } },
   };
   const exported = {};
   vm.runInNewContext(compile('src/hooks/useLiveTranslation.ts'), { exports: exported, require: name => { if (!modules[name]) throw Error(`Unmocked module ${name}`); return modules[name]; }, queueMicrotask, console });
   const render = () => { let count = 0; while (dirty) { if (++count > 50) throw Error('Render loop'); dirty = false; cursor = 0; effects = []; result = exported.useLiveTranslation(...inputs); effects.forEach(fn => fn()); } };
   const flush = async () => { for (let i = 0; i < 10; i++) { render(); await Promise.resolve(); } render(); };
   return {
-    flush, jobs, cancelled, get value() { return result; },
+    flush, jobs, cancelled, prepared, get value() { return result; }, get segmentKeyCalls() { return segmentKeyCalls; },
     async input(preview, session = inputs[2], transcripts = inputs[0]) { inputs = [transcripts, preview, session]; dirty = true; await flush(); },
     async update(patch) { result.updateSettings(patch); await flush(); },
     async delta(job, text) { listeners.get('live-translation-delta')?.({ payload: { requestId: job.args.requestId, text, provider: 'mock' } }); await flush(); },
@@ -121,4 +121,59 @@ test('instant preview-to-final handoff seeds translation immediately without lat
   await h.input(null, 'meeting-a', [turn]);
   assert.equal(h.value.translations['sequence-9']?.translatedText, 'Good morning everyone');
   assert.equal(h.value.translations['sequence-9']?.status, 'translated');
+});
+test('a finalized turn identical to the translated preview is not translated twice', async () => {
+  const h = harness(); await h.flush(); const first = h.jobs[0];
+  await h.finish(first, 'Good morning everyone');
+  // A turn finalized meanwhile gives the final job different context, so the result cache misses.
+  const earlier = { id: 'turn0', sequence_id: 8, text: 'Hola', speaker_source: 'system', speaker_label: 'Them' };
+  const turn = { id: 'turn1', sequence_id: 9, text: ` ${speech(1).text} `, speaker_source: 'microphone', speaker_label: 'Me' };
+  const finalJobs = () => h.jobs.filter(j => !j.args.requestId.startsWith('live-preview')).map(j => j.args.text);
+  await h.input(null, 'meeting-a', [earlier, turn]);
+  assert.deepEqual(finalJobs(), ['Hola'], 'only the other turn is translated');
+  assert.equal(h.value.translations['sequence-9']?.translatedText, 'Good morning everyone');
+  assert.equal(h.value.translations['sequence-9']?.status, 'translated');
+  await h.input(null, 'meeting-a', [earlier, turn, { id: 'turn2', sequence_id: 10, text: 'Otra frase', speaker_source: 'microphone', speaker_label: 'Me' }]);
+  assert.deepEqual(finalJobs(), ['Hola', 'Otra frase'], 'not re-queued as backfill later');
+});
+test('handoff seed survives the uncached canonical job placeholder', async () => {
+  const h = harness(); await h.flush(); const first = h.jobs[0];
+  await h.finish(first, 'Good morning everyone');
+  const turn = { id: 'turn1', sequence_id: 9, text: `${speech(1).text} amigos`, speaker_source: 'microphone', speaker_label: 'Me' };
+  await h.input(null, 'meeting-a', [turn]);
+  assert.equal(h.value.translations['sequence-9']?.translatedText, 'Good morning everyone');
+  assert.equal(h.value.translations['sequence-9']?.status, 'translating');
+  assert.ok(h.jobs.some(j => j.args.text === turn.text), 'a longer final turn is still translated');
+});
+test('streaming deltas do not rescan or re-enqueue backfill turns', async () => {
+  const h = harness(); await h.flush(); const first = h.jobs[0];
+  const turns = Array.from({ length: 10 }, (_, i) => i + 1).map(n => ({ id: `turn${n}`, sequence_id: n, text: `Frase ${n}`, speaker_label: 'Me' }));
+  await h.input(speech(1), 'meeting-a', turns);
+  const jobs = h.jobs.length; const cancelled = h.cancelled.length; const keyCalls = h.segmentKeyCalls;
+  await h.delta(first, 'Good'); await h.delta(first, 'Good morning');
+  assert.equal(h.value.previewTranslation.translatedText, 'Good morning');
+  assert.equal(h.jobs.length, jobs); assert.equal(h.cancelled.length, cancelled);
+  assert.ok(h.segmentKeyCalls - keyCalls < turns.length, `backfill rescanned on deltas (${h.segmentKeyCalls - keyCalls} key computations)`);
+});
+test('the Apple engine prepares its language pair and routes captions to Apple Translation', async () => {
+  const h = harness({ engine: 'apple' }); await h.flush();
+  assert.equal(h.prepared.at(-1).translationEngine, 'apple');
+  assert.equal(h.prepared.at(-1).targetLanguage, 'en');
+  assert.equal(h.jobs[0].args.translationEngine, 'apple');
+  await h.update({ targetLanguage: 'es' });
+  assert.equal(h.prepared.at(-1).targetLanguage, 'es', 'a new target re-checks the pair');
+});
+test('saved built-in and Ollama translation engines migrate to Apple Translation', () => {
+  const load = engine => {
+    const store = { 'meetodds.liveTranslation.v2': JSON.stringify({ ...settings, engine }) };
+    const window = { localStorage: { getItem: key => store[key] ?? null } };
+    const lib = {}; vm.runInNewContext(compile('src/lib/live-translation.ts'), { exports: lib, window });
+    return lib.loadLiveTranslationSettings().engine;
+  };
+  assert.equal(load('builtin-ai'), 'apple');
+  assert.equal(load('ollama'), 'apple');
+  assert.equal(load('apple'), 'apple');
+  assert.equal(load('openai'), 'openai', 'ChatGPT and cloud engines are unchanged');
+  assert.equal(load('groq'), 'groq');
+  assert.equal(load('nonsense'), 'auto');
 });

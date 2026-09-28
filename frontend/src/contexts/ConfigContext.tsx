@@ -7,7 +7,6 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
-import { DEFAULT_WHISPER_MODEL } from '@/constants/modelDefaults';
 
 export interface OllamaModel {
   name: string;
@@ -18,7 +17,6 @@ export interface OllamaModel {
 
 export interface StorageLocations {
   database: string;
-  models: string;
   recordings: string;
 }
 
@@ -100,16 +98,16 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
+    provider: 'apple-intelligence',
+    model: 'system',
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });
 
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'localWhisper',
-    model: DEFAULT_WHISPER_MODEL,
+    provider: 'appleSpeech',
+    model: 'en_US',
     apiKey: null
   });
 
@@ -199,10 +197,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const config = await configService.getTranscriptConfig();
         if (config) {
           console.log('[ConfigContext] Loaded saved transcript config:', config);
+          // Rust serves configs saved by removed engines as Apple Speech.
           setTranscriptModelConfig({
-            provider: config.provider || 'localWhisper',
-            model: config.model || DEFAULT_WHISPER_MODEL,
-            apiKey: config.apiKey || null
+            provider: 'appleSpeech',
+            model: config.model || 'en_US',
+            apiKey: null
           });
         }
       } catch (error) {
@@ -370,7 +369,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     openrouter: [],
     openai: ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna'],
     'openai-codex': ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4'],
-    'builtin-ai': [],
+    'apple-intelligence': ['system'],
     'custom-openai': [],
   };
 
@@ -439,15 +438,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       }
 
       // Load storage locations
-      const [dbDir, modelsDir, recordingsDir] = await Promise.all([
+      const [dbDir, recordingsDir] = await Promise.all([
         invoke<string>('get_database_directory'),
-        invoke<string>('whisper_get_models_directory'),
         invoke<string>('get_default_recordings_folder_path')
       ]);
 
       setStorageLocations({
         database: dbDir,
-        models: modelsDir,
         recordings: recordingsDir
       });
 

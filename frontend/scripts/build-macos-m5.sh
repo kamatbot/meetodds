@@ -35,15 +35,6 @@ fi
 
 workspace_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$workspace_root/frontend"
-helper_target_dir="${CARGO_TARGET_DIR:-$workspace_root/target}"
-if [[ "$helper_target_dir" != /* ]]; then helper_target_dir="$PWD/$helper_target_dir"; fi
-target_triple="$(rustc -vV | awk '/^host:/{print $2}')"
-sidecar_path="src-tauri/binaries/llama-helper-${target_triple}"
-
-echo "Building llama-helper sidecar for ${target_triple}"
-cargo build --manifest-path "$workspace_root/llama-helper/Cargo.toml" --release --features metal
-mkdir -p "$(dirname "$sidecar_path")"
-install -m 755 "$helper_target_dir/release/llama-helper" "$sidecar_path"
 
 # Auto-detect or allow override of macOS codesigning identity
 signing_identity="${APPLE_SIGNING_IDENTITY:-}"
@@ -61,8 +52,8 @@ echo "Signing with identity: $signing_identity"
 
 if [[ "${APP_ONLY:-0}" == "1" ]]; then
   echo "Packaging a fast release app only (no DMG or updater artifact)"
-  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app -- --features metal,coreml
+  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app
 else
   echo "Packaging full distributable release: App bundle and signed DMG installer"
-  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app,dmg -- --features metal,coreml
+  pnpm exec tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$signing_identity\"}}}" --bundles app,dmg
 fi

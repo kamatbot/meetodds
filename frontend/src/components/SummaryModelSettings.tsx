@@ -15,8 +15,8 @@ interface SummaryModelSettingsProps {
 
 export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsProps) {
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
+    provider: 'apple-intelligence',
+    model: 'system',
     whisperModel: 'large-v3',
     apiKey: null,
     ollamaEndpoint: null,
@@ -27,7 +27,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     try {
       const data = await invoke('api_get_model_config') as any;
       if (data && data.provider !== null) {
-        if (data.provider !== 'ollama' && data.provider !== 'builtin-ai' && !data.apiKey) {
+        if (data.provider !== 'ollama' && data.provider !== 'apple-intelligence' && !data.apiKey) {
           try {
             data.apiKey = await invoke('api_get_api_key', { provider: data.provider }) as string;
           } catch (error) {

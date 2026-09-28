@@ -2,17 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { emitTo } from '@tauri-apps/api/event';
-import { Captions, ChevronLeft, ChevronRight, Copy, Globe2, Maximize2, MessageSquareText, Rows3, ShieldCheck } from 'lucide-react';
+import { Captions, ChevronLeft, ChevronRight, Copy, Maximize2, MessageSquareText, Rows3, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranscriptHistory, useTranscriptSession } from '@/contexts/TranscriptContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
-import { useConfig } from '@/contexts/ConfigContext';
 import { useLiveMeetingTranslation } from '@/contexts/LiveMeetingTranslationContext';
 import { getLiveTranslationLanguage, liveTranslationSegmentKey } from '@/lib/live-translation';
 import { CAPTION_WINDOW_LABEL, CAPTION_RESET_EVENT } from '@/lib/live-captions';
 import NotedTranscriptView from '@/components/Notes/NotedTranscriptView';
 import { LiveTranslationControl } from '@/components/LiveTranslationControl';
 import type { ModalType } from '@/hooks/useModalState';
+import type { TranscriptSegmentData } from '@/types';
 import './live-meeting.css';
 
 const DRAWER_VISIBLE_KEY = 'meetodds.meeting.transcriptDrawer.visible';
@@ -29,7 +29,6 @@ interface TranscriptDrawerProps {
 export default function TranscriptDrawer({ isProcessingStop, isStopping, showModal, presentation = 'drawer' }: TranscriptDrawerProps) {
   const { transcripts, copyTranscript } = useTranscriptHistory();
   const { currentMeetingId, captionsVisible } = useTranscriptSession();
-  const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const liveTranslation = useLiveMeetingTranslation();
   const [visible, setVisible] = useState(true);
@@ -63,16 +62,29 @@ export default function TranscriptDrawer({ isProcessingStop, isStopping, showMod
     return () => window.removeEventListener('meetodds:toggle-transcript-drawer', toggle);
   }, []);
 
-  const segments = useMemo(() => transcripts.map(transcript => {
-    const translation = liveTranslation.translations[liveTranslationSegmentKey(transcript)];
-    return {
-      id: transcript.id, timestamp: transcript.audio_start_time ?? 0, endTime: transcript.audio_end_time,
-      text: transcript.text, confidence: transcript.confidence, speaker: transcript.speaker,
-      speaker_label: transcript.speaker_label, speaker_source: transcript.speaker_source, speaker_confidence: transcript.speaker_confidence,
-      translated_text: translation?.translatedText, translation_status: translation?.status,
-      translation_error: translation?.error, translation_latency_ms: translation?.latencyMs,
-    };
-  }), [transcripts, liveTranslation.translations]);
+  // Reuse the previous row object when none of its fields changed, so a translation
+  // delta re-renders only the memoized transcript row it belongs to.
+  const segmentCacheRef = useRef(new Map<string, TranscriptSegmentData>());
+  const segments = useMemo(() => {
+    const previous = segmentCacheRef.current;
+    const next = new Map<string, TranscriptSegmentData>();
+    const rows = transcripts.map(transcript => {
+      const translation = liveTranslation.translations[liveTranslationSegmentKey(transcript)];
+      const segment: TranscriptSegmentData = {
+        id: transcript.id, timestamp: transcript.audio_start_time ?? 0, endTime: transcript.audio_end_time,
+        text: transcript.text, confidence: transcript.confidence, speaker: transcript.speaker,
+        speaker_label: transcript.speaker_label, speaker_source: transcript.speaker_source, speaker_confidence: transcript.speaker_confidence,
+        translated_text: translation?.translatedText, translation_status: translation?.status,
+        translation_error: translation?.error, translation_latency_ms: translation?.latencyMs,
+      };
+      const cached = previous.get(segment.id);
+      const row = cached && (Object.keys(segment) as (keyof TranscriptSegmentData)[]).every(key => Object.is(cached[key], segment[key])) ? cached : segment;
+      next.set(row.id, row);
+      return row;
+    });
+    segmentCacheRef.current = next;
+    return rows;
+  }, [transcripts, liveTranslation.translations]);
 
   const beginResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -119,7 +131,6 @@ export default function TranscriptDrawer({ isProcessingStop, isStopping, showMod
         <div className="meeting-document-tools">
           <button type="button" onClick={() => setCompact(v => !v)} className="meeting-icon-button" aria-label={compact ? 'Use comfortable transcript spacing' : 'Use compact transcript spacing'} aria-pressed={compact} title={compact ? 'Comfortable spacing' : 'Compact spacing'}><Rows3 size={17} /></button>
           <button type="button" onClick={copyTranscript} disabled={!transcripts.length} className="meeting-icon-button" aria-label="Copy original transcript" title="Copy original transcript"><Copy size={16} /></button>
-          {transcriptModelConfig.provider === 'localWhisper' && <button type="button" className="meeting-icon-button" onClick={() => showModal('languageSettings')} aria-label="Spoken language" title="Spoken language"><Globe2 size={17} /></button>}
           {!isWorkspace && <button type="button" className="meeting-icon-button" onClick={() => setVisible(false)} aria-label="Hide transcript drawer"><ChevronRight size={17} /></button>}
         </div>
       </header>

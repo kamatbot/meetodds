@@ -1,0 +1,424 @@
+{
+  "config": {
+    "captions_off": false,
+    "capture_rate_hz": 48000,
+    "chunk_samples": 1024,
+    "dsp": "full",
+    "engine": "apple",
+    "fixture": "../../frontend/src-tauri/tests/fixtures/jfk.wav",
+    "gap_ms": 1500,
+    "idle_secs": 20,
+    "model": "en_US",
+    "preset": "timeIndexedProgressiveTranscription (volatileResults, fastResults, audioTimeRange)",
+    "repeats": 6,
+    "typing": false,
+    "typing_level": 0.0,
+    "typing_only_secs_each_end": 0.0
+  },
+  "generated_at": "2026-09-28T04:49:12.664359+00:00",
+  "idle": {
+    "chunks_per_session": 937,
+    "cpu_percent_of_one_core": 0.9720404256427879,
+    "cpu_secs": 0.194323,
+    "cpu_sys_secs": 0.147923,
+    "cpu_user_secs": 0.0464,
+    "other_processes": {
+      "loadavg_at_end": "{ 4.32 18.31 35.15 }",
+      "speech_services": [],
+      "speech_services_cpu_percent_of_one_core": 0.0,
+      "speech_services_cpu_secs": 0.0,
+      "top_processes": [
+        {
+          "comm": "/System/Library/CoreServices/RemoteManagement/ScreensharingAgent.bundle/Contents/MacOS/ScreensharingAgent",
+          "cpu_secs": 8.17999999999995,
+          "pid": 6804
+        },
+        {
+          "comm": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+          "cpu_secs": 7.699999999999818,
+          "pid": 35187
+        },
+        {
+          "comm": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+          "cpu_secs": 3.6100000000000136,
+          "pid": 37659
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/SharedFrameworks/DVTITunesSoftware.framework/Versions/A/XPCServices/com.apple.dt.Xcode.ITunesSoftwareService.xpc/Contents/MacOS/com.apple.dt.Xcode.ITunesSoftwareService",
+          "cpu_secs": 2.4399999999999977,
+          "pid": 41037
+        },
+        {
+          "comm": "/System/Library/CoreServices/RemoteManagement/screensharingd.bundle/Contents/MacOS/screensharingd",
+          "cpu_secs": 1.559999999999988,
+          "pid": 6803
+        },
+        {
+          "comm": "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+          "cpu_secs": 1.259999999999991,
+          "pid": 37697
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/Developer/usr/bin/ibtoold",
+          "cpu_secs": 1.19,
+          "pid": 21959
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/Developer/usr/bin/ibtoold",
+          "cpu_secs": 1.19,
+          "pid": 21956
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/Developer/usr/bin/ibtoold",
+          "cpu_secs": 1.18,
+          "pid": 21961
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/Developer/usr/bin/ibtoold",
+          "cpu_secs": 1.18,
+          "pid": 21958
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/Developer/usr/bin/ibtoold",
+          "cpu_secs": 1.17,
+          "pid": 21963
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/Developer/usr/bin/ibtoold",
+          "cpu_secs": 1.17,
+          "pid": 21964
+        }
+      ]
+    },
+    "peak_threads": 15,
+    "results_on_silence": 0,
+    "secs_fed_to_recognizer_per_session": -0.0,
+    "session_start_ms": [
+      81.053291,
+      4.09025
+    ],
+    "sessions": 2,
+    "wall_secs": 19.99124675
+  },
+  "live": {
+    "audio_secs": 74.90325,
+    "cpu_percent_of_one_core": 4.440221076844968,
+    "cpu_secs": 3.3319649999999994,
+    "cpu_sys_secs": 1.0058079999999998,
+    "cpu_user_secs": 2.326157,
+    "finals": 12,
+    "finals_after_input_closed": 0,
+    "fragmentation": {
+      "finals_outside_speech": 0,
+      "finals_per_utterance": {
+        "max": 2.0,
+        "mean": 2.0,
+        "median": 2.0,
+        "min": 2.0,
+        "n": 6,
+        "p95": 2.0
+      }
+    },
+    "ground_truth": {
+      "caption_update_interval_ms": {
+        "max": 1931.6457920000003,
+        "mean": 991.7408699827582,
+        "median": 958.3236250000009,
+        "min": 86.40137500001583,
+        "n": 58,
+        "p95": 1916.8542500000003
+      },
+      "speech_offset_in_clip_secs": 10.18,
+      "speech_onset_in_clip_secs": 0.34,
+      "speech_start_to_first_partial_ms": {
+        "max": 783.6367499999999,
+        "mean": 768.4370415000012,
+        "median": 767.1149579999983,
+        "min": 749.3888330000045,
+        "n": 6,
+        "p95": 783.6367499999999
+      },
+      "speech_start_to_first_text_ms": {
+        "max": 783.6367499999999,
+        "mean": 768.4370415000012,
+        "median": 767.1149579999983,
+        "min": 749.3888330000045,
+        "n": 6,
+        "p95": 783.6367499999999
+      },
+      "utterance_end_to_final_ms": {
+        "max": 1535.3857079999998,
+        "mean": 720.7426318333331,
+        "median": 563.9839579999971,
+        "min": 543.0405829999945,
+        "n": 6,
+        "p95": 1535.3857079999998
+      },
+      "utterances_without_final": 0,
+      "wer": 0.0,
+      "words_hyp": 132,
+      "words_ref": 132
+    },
+    "input_closed_ms": 74927.764458,
+    "microphone_fed_runs_ms": [
+      [
+        0.0,
+        74903.25
+      ]
+    ],
+    "other_processes": {
+      "loadavg_at_end": "{ 3.79 14.94 32.36 }",
+      "speech_services": [
+        {
+          "comm": "/System/Library/Frameworks/Speech.framework/Versions/A/XPCServices/localspeechrecognition.xpc/Contents/MacOS/localspeechrecognition",
+          "cpu_secs": 3.16,
+          "pid": 21903
+        },
+        {
+          "comm": "/usr/libexec/aned",
+          "cpu_secs": 0.01999999999998181,
+          "pid": 954
+        }
+      ],
+      "speech_services_cpu_percent_of_one_core": 4.23771048746518,
+      "speech_services_cpu_secs": 3.179999999999982,
+      "top_processes": [
+        {
+          "comm": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+          "cpu_secs": 29.970000000000255,
+          "pid": 35187
+        },
+        {
+          "comm": "/System/Library/CoreServices/RemoteManagement/ScreensharingAgent.bundle/Contents/MacOS/ScreensharingAgent",
+          "cpu_secs": 28.879999999999995,
+          "pid": 6804
+        },
+        {
+          "comm": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+          "cpu_secs": 11.230000000000018,
+          "pid": 37659
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/SharedFrameworks/DVTITunesSoftware.framework/Versions/A/XPCServices/com.apple.dt.Xcode.ITunesSoftwareService.xpc/Contents/MacOS/com.apple.dt.Xcode.ITunesSoftwareService",
+          "cpu_secs": 9.680000000000007,
+          "pid": 41037
+        },
+        {
+          "comm": "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+          "cpu_secs": 6.079999999999984,
+          "pid": 37697
+        },
+        {
+          "comm": "/System/Library/CoreServices/RemoteManagement/screensharingd.bundle/Contents/MacOS/screensharingd",
+          "cpu_secs": 5.230000000000004,
+          "pid": 6803
+        },
+        {
+          "comm": "/Users/mk/Library/Application Support/Claude/claude-code/2.1.281/claude.app/Contents/MacOS/claude",
+          "cpu_secs": 4.569999999999993,
+          "pid": 39246
+        },
+        {
+          "comm": "/System/Library/Frameworks/Speech.framework/Versions/A/XPCServices/localspeechrecognition.xpc/Contents/MacOS/localspeechrecognition",
+          "cpu_secs": 3.16,
+          "pid": 21903
+        },
+        {
+          "comm": "/Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/154.0.8037.57/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)",
+          "cpu_secs": 2.8799999999999955,
+          "pid": 37776
+        },
+        {
+          "comm": "/Users/mk/Library/Application Support/Claude/claude-code/2.1.281/claude.app/Contents/MacOS/claude",
+          "cpu_secs": 2.6299999999999955,
+          "pid": 39636
+        },
+        {
+          "comm": "/usr/libexec/replayd",
+          "cpu_secs": 2.4499999999999886,
+          "pid": 37453
+        },
+        {
+          "comm": "/Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/154.0.8037.57/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service)",
+          "cpu_secs": 1.6399999999999864,
+          "pid": 37631
+        }
+      ]
+    },
+    "partial_texts": [
+      "And",
+      "And so",
+      "And so,",
+      "And so, my",
+      "And so, my f"
+    ],
+    "partials": 162,
+    "partials_requested": true,
+    "peak_threads": 17,
+    "secs_fed_to_recognizer": {
+      "microphone": 74.90325,
+      "system": -0.0
+    },
+    "segments": [
+      {
+        "after_input_closed": false,
+        "end_ms": 7800.0,
+        "ready_ms": 8878.769957999999,
+        "speech_end_to_text_ms": 1078.769957999999,
+        "speech_start_to_text_ms": 8578.769957999999,
+        "start_ms": 300.0,
+        "text": "And so, my fellow Americans, ask not what your country can do for you."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 10680.0,
+        "ready_ms": 11715.385708,
+        "speech_end_to_text_ms": 1035.3857079999998,
+        "speech_start_to_text_ms": 3315.385708,
+        "start_ms": 8400.0,
+        "text": "Ask what you can do for your country."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 20280.0,
+        "ready_ms": 21361.660792,
+        "speech_end_to_text_ms": 1081.6607919999988,
+        "speech_start_to_text_ms": 8581.660791999999,
+        "start_ms": 12780.0,
+        "text": "And so, my fellow Americans, ask not what your country can do for you."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 22500.0,
+        "ready_ms": 23218.882167,
+        "speech_end_to_text_ms": 718.8821669999998,
+        "speech_start_to_text_ms": 2698.8821669999998,
+        "start_ms": 20520.0,
+        "text": "Ask what you can do for your country."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 32759.999999999996,
+        "ready_ms": 33826.748541999994,
+        "speech_end_to_text_ms": 1066.7485419999975,
+        "speech_start_to_text_ms": 8326.748541999994,
+        "start_ms": 25500.0,
+        "text": "And so, my fellow Americans, ask not what your country can do for you."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 34980.0,
+        "ready_ms": 35714.062875,
+        "speech_end_to_text_ms": 734.0628750000033,
+        "speech_start_to_text_ms": 2714.0628750000033,
+        "start_ms": 33000.0,
+        "text": "Ask what you can do for your country."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 45240.0,
+        "ready_ms": 46318.915917,
+        "speech_end_to_text_ms": 1078.9159169999984,
+        "speech_start_to_text_ms": 8338.915916999998,
+        "start_ms": 37980.0,
+        "text": "And so, my fellow Americans, ask not what your country can do for you."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 47460.0,
+        "ready_ms": 48192.3505,
+        "speech_end_to_text_ms": 732.3505000000005,
+        "speech_start_to_text_ms": 2712.3505000000005,
+        "start_ms": 45480.0,
+        "text": "Ask what you can do for your country."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 57720.0,
+        "ready_ms": 58801.575583000005,
+        "speech_end_to_text_ms": 1081.5755830000053,
+        "speech_start_to_text_ms": 8341.575583000005,
+        "start_ms": 50460.0,
+        "text": "And so, my fellow Americans, ask not what your country can do for you."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 59940.0,
+        "ready_ms": 60679.483958,
+        "speech_end_to_text_ms": 739.4839579999971,
+        "speech_start_to_text_ms": 2659.483957999997,
+        "start_ms": 58020.0,
+        "text": "Ask what you can do for your country."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 70200.0,
+        "ready_ms": 71274.762292,
+        "speech_end_to_text_ms": 1074.7622919999994,
+        "speech_start_to_text_ms": 8334.762292,
+        "start_ms": 62940.0,
+        "text": "And so, my fellow Americans, ask not what your country can do for you."
+      },
+      {
+        "after_input_closed": false,
+        "end_ms": 72420.0,
+        "ready_ms": 73142.415583,
+        "speech_end_to_text_ms": 722.4155829999945,
+        "speech_start_to_text_ms": 2642.4155829999945,
+        "start_ms": 70500.0,
+        "text": "Ask what you can do for your country."
+      }
+    ],
+    "session_restarts": {
+      "microphone": 0,
+      "system": 0
+    },
+    "session_start_ms": [
+      4.002333,
+      4.022708
+    ],
+    "sessions": 2,
+    "speech_secs_total": 56.099999999999994,
+    "stats": {
+      "segment_audio_secs": {
+        "max": 7.5,
+        "mean": 4.675,
+        "median": 7.259999999999996,
+        "min": 1.92,
+        "n": 12,
+        "p95": 7.5
+      },
+      "speech_end_to_text_ms": {
+        "max": 1081.6607919999988,
+        "mean": 928.7511562499994,
+        "median": 1066.7485419999975,
+        "min": 718.8821669999998,
+        "n": 12,
+        "p95": 1081.5755830000053
+      },
+      "speech_start_to_text_ms": {
+        "max": 8581.660791999999,
+        "mean": 5603.751156249999,
+        "median": 8326.748541999994,
+        "min": 2642.4155829999945,
+        "n": 12,
+        "p95": 8578.769957999999
+      }
+    },
+    "stop_drain_ms": 112.75587500000256,
+    "system_session_results_on_silence": 0,
+    "system_session_text_results_on_silence": 0,
+    "wall_secs": 75.040520333
+  },
+  "machine": {
+    "build_profile": "release",
+    "cpu": "Apple M1 Max",
+    "git_commit": "25e514630669b2e3e30730175a6c20633aa9edd7",
+    "git_describe": "25e5146 merge: live transcription preemption, Whisper decode savings, bounded VAD buffer",
+    "logical_cores": "10",
+    "memory_bytes": "34359738368",
+    "os": "macOS 27.0 (26A428)",
+    "physical_cores": "10",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew)"
+  }
+}

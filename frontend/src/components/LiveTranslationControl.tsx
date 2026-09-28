@@ -1,6 +1,7 @@
 'use client';
 
 import { Languages, Loader2, Trash2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,7 +46,7 @@ export function LiveTranslationControl({
 }: LiveTranslationControlProps) {
   const target = getLiveTranslationLanguage(settings.targetLanguage);
   const isWorking = activeCount > 0 || queuedCount > 0;
-  const subscriptionOrLocalPath = ['openai-codex', 'ollama', 'builtin-ai'].includes(lastProvider ?? '');
+  const subscriptionPath = lastProvider === 'openai-codex';
 
   return (
     <Popover>
@@ -91,8 +92,7 @@ export function LiveTranslationControl({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">Auto · best available</SelectItem>
-                  <SelectItem value="builtin-ai">Local AI · On-device GGUF</SelectItem>
-                  <SelectItem value="ollama">Ollama · Local server</SelectItem>
+                  <SelectItem value="apple">Apple Translation · on this Mac</SelectItem>
                   <SelectItem value="groq">Groq · instant</SelectItem>
                   <SelectItem value="openai">OpenAI · ChatGPT subscription</SelectItem>
                   <SelectItem value="claude">Claude · Haiku</SelectItem>
@@ -153,7 +153,7 @@ export function LiveTranslationControl({
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Model override</Label>
-                <Input value={settings.modelOverride} onChange={(event) => updateSettings({ modelOverride: event.target.value })} placeholder="Leave blank for provider default" disabled={!settings.enabled || settings.engine === 'auto'} />
+                <Input value={settings.modelOverride} onChange={(event) => updateSettings({ modelOverride: event.target.value })} placeholder="Leave blank for provider default" disabled={!settings.enabled || settings.engine === 'auto' || settings.engine === 'apple'} />
               </div>
             </div>
           </details>
@@ -171,14 +171,19 @@ export function LiveTranslationControl({
               </div>
               {lastProvider && <p className="mt-1 truncate text-muted-foreground">{lastProvider}{lastModel ? ` / ${lastModel}` : ''}</p>}
               {lastFallbackReason && <p className="mt-2 line-clamp-2 text-amber-700">Trying another provider: {lastFallbackReason}</p>}
-              {subscriptionOrLocalPath && <p className="mt-2 text-muted-foreground">Connected ChatGPT and local models can take a little longer to start than dedicated translation APIs. MeetOdds keeps the last translated phrase visible while they catch up.</p>}
+              {subscriptionPath && <p className="mt-2 text-muted-foreground">Connected ChatGPT can take a little longer to start than dedicated translation APIs. MeetOdds keeps the last translated phrase visible while it catches up.</p>}
               {lastError && <p className="mt-2 line-clamp-3 text-destructive">{lastError}</p>}
+              {lastError?.includes('Translation Languages') && (
+                <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => void invoke('apple_translation_open_settings').catch(() => undefined)}>
+                  Open Language &amp; Region
+                </Button>
+              )}
             </div>
           )}
 
           <div className="flex items-center justify-between gap-3 border-t pt-3">
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Auto tries configured fast translation APIs first, then your current summary provider—including connected ChatGPT or a local model. Floating captions always show only the selected target language; the saved original transcript is unchanged.
+              Auto tries configured fast translation APIs first, then your current summary provider—including connected ChatGPT—then Apple Translation on this Mac. Floating captions always show only the selected target language; the saved original transcript is unchanged.
             </p>
             <Button type="button" variant="ghost" size="icon" onClick={clearTranslations} disabled={translatedCount === 0 && !isWorking} title="Clear live translations">
               <Trash2 className="h-4 w-4" />

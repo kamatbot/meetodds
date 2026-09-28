@@ -24,7 +24,7 @@ pub struct SaveTranscriptConfigRequest {
 
 pub struct SettingsRepository;
 
-// Transcript providers: localWhisper, deepgram, elevenLabs, groq, openai
+// Transcript provider: appleSpeech (model = locale). Older rows may name removed engines.
 // Summary providers: openai, claude, ollama, groq, added openrouter
 // NOTE: Handle data exclusion in the higher layer as this is database abstraction layer(using SELECT *)
 
@@ -85,7 +85,7 @@ impl SettingsRepository {
             "ollama" => "ollamaApiKey",
             "groq" => "groqApiKey",
             "openrouter" => "openRouterApiKey",
-            "builtin-ai" => return Ok(()),   // No API key needed
+            "apple-intelligence" => return Ok(()), // No API key needed
             "openai-codex" => return Ok(()), // Uses MeetOdds-owned OAuth tokens
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -124,7 +124,7 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
-            "builtin-ai" => return Ok(None),   // No API key needed
+            "apple-intelligence" => return Ok(None), // No API key needed
             "openai-codex" => return Ok(None), // OAuth credentials live outside SQLite
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -173,67 +173,6 @@ impl SettingsRepository {
         Ok(())
     }
 
-    pub async fn save_transcript_api_key(
-        pool: &SqlitePool,
-        provider: &str,
-        api_key: &str,
-    ) -> std::result::Result<(), sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
-        };
-
-        let query = format!(
-            r#"
-            INSERT INTO transcript_settings (id, provider, model, "{}")
-            VALUES ('1', 'localWhisper', '{}', $1)
-            ON CONFLICT(id) DO UPDATE SET
-                "{}" = $1
-            "#,
-            api_key_column,
-            crate::config::DEFAULT_WHISPER_MODEL,
-            api_key_column
-        );
-        sqlx::query(&query).bind(api_key).execute(pool).await?;
-
-        Ok(())
-    }
-
-    pub async fn get_transcript_api_key(
-        pool: &SqlitePool,
-        provider: &str,
-    ) -> std::result::Result<Option<String>, sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(None), // Parakeet doesn't need an API key
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
-        };
-
-        let query = format!(
-            "SELECT {} FROM transcript_settings WHERE id = '1' LIMIT 1",
-            api_key_column
-        );
-        let api_key = sqlx::query_scalar(&query).fetch_optional(pool).await?;
-        Ok(api_key)
-    }
-
     pub async fn delete_api_key(
         pool: &SqlitePool,
         provider: &str,
@@ -252,7 +191,7 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
-            "builtin-ai" => return Ok(()),   // No API key needed
+            "apple-intelligence" => return Ok(()), // No API key needed
             "openai-codex" => return Ok(()), // OAuth credentials live outside SQLite
             _ => {
                 return Err(sqlx::Error::Protocol(

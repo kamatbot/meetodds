@@ -28,6 +28,7 @@ adaptive translation router
       +-- OpenAI / gpt-4o-mini
       +-- Claude / claude-haiku-4-5-20251001
       +-- configured summary provider as compatibility fallback
+      +-- Apple Translation on this Mac (final fallback / explicit engine)
       |
       v
 streamed SSE deltas ----------> translated caption
@@ -37,9 +38,11 @@ streamed SSE deltas ----------> translated caption
 
 | Mode | First-word budget | Provider attempt | Total fallback chain |
 | --- | ---: | ---: | ---: |
-| Instant | 2.8 s (12s local) | 10 s (25s local) | 15 s (30s local) |
-| Balanced | 4.5 s (12s local) | 16 s (25s local) | 24 s (30s local) |
-| Accurate | 10 s (12s local) | 30 s (25s local) | 35 s (30s local) |
+| Instant | 2.8 s (12s Ollama) | 10 s (25s Ollama) | 15 s (30s Ollama) |
+| Balanced | 4.5 s (12s Ollama) | 16 s (25s Ollama) | 24 s (30s Ollama) |
+| Accurate | 10 s (12s Ollama) | 30 s (25s Ollama) | 35 s (30s Ollama) |
+
+Apple Translation is not an LLM stream: each caption has a 10 s request limit.
 
 A provider that repeatedly misses the first-word budget is temporarily cooled down. The next configured fast provider is attempted automatically.
 
@@ -50,9 +53,14 @@ Summary quality and live-caption latency are different optimization problems. Au
 - Groq: `llama-3.1-8b-instant`
 - OpenAI API: `gpt-4o-mini`
 - Anthropic: `claude-haiku-4-5-20251001`
-- Current summary provider: final fallback for compatibility, including ChatGPT/Codex, Ollama, Built-in AI, OpenRouter, and custom OpenAI endpoints.
+- Current summary provider: compatibility fallback, including ChatGPT/Codex, Ollama, OpenRouter, and custom OpenAI endpoints.
+- Apple Translation (on this Mac): last resort, and used directly when nothing else is configured.
 
-Users can explicitly select Groq/OpenAI/Claude/current-summary-provider and optionally override the model.
+Users can explicitly select Apple Translation/Groq/OpenAI/Claude/current-summary-provider and optionally override the model of LLM engines.
+
+## On-device translation
+
+The built-in llama.cpp model is no longer used for translation. The on-device engine is Apple's Translation framework through `apple_translation_bridge.swift` (compiled with the Apple Speech bridge; same numeric-id C ABI) and `apple_translation.rs`. See [LIVE_TRANSLATION.md](LIVE_TRANSLATION.md#apple-translation) for source-language selection and installing languages. Measured on an M-series Mac under heavy load (macOS 27, es→en, 5 short sentences): the first request in a process took 1.1–1.8 s (model load), later requests 0.4–1.0 s whether the session was new or reused (single outliers up to 3.8 s under load); the model load is what prepare's warm-up removes. `cargo run --example apple_translation_check` repeats the measurement on installed pairs only.
 
 ## Context and terminology
 

@@ -6,9 +6,13 @@ pub fn compile() {
     }
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let source = manifest.join("src/apple_speech_bridge.swift");
+    let translation = manifest.join("src/apple_translation_bridge.swift");
+    let intelligence = manifest.join("src/apple_intelligence_bridge.swift");
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let object = out.join("meetodds_apple_speech.o");
     println!("cargo:rerun-if-changed={}", source.display());
+    println!("cargo:rerun-if-changed={}", translation.display());
+    println!("cargo:rerun-if-changed={}", intelligence.display());
     println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
 
     let target_arch = match env::var("CARGO_CFG_TARGET_ARCH")
@@ -19,7 +23,7 @@ pub fn compile() {
         "x86_64" => "x86_64",
         other => panic!("unsupported macOS Swift architecture: {}", other),
     };
-    let deployment = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "14.2".into());
+    let deployment = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "26.0".into());
     let target = format!("{}-apple-macosx{}", target_arch, deployment);
     let output = Command::new("xcrun")
         .args([
@@ -27,15 +31,19 @@ pub fn compile() {
             "macosx",
             "swiftc",
             "-parse-as-library",
+            "-wmo",
             "-c",
             "-target",
             &target,
             "-O",
             "-enable-library-evolution",
+            "-wmo",
             "-o",
         ])
         .arg(&object)
         .arg(&source)
+        .arg(&translation)
+        .arg(&intelligence)
         .output()
         .expect("launch xcrun swiftc for Apple Speech bridge");
     if !output.status.success() {
@@ -74,9 +82,11 @@ pub fn compile() {
         "cargo:rustc-link-search=native={}",
         toolchain_swift.display()
     );
-    // Weak-linking keeps macOS 14/15 launches valid. The bridge performs its own
-    // macOS 26 runtime check before touching SpeechAnalyzer APIs.
+    // The app requires macOS 26. Weak-linking is retained so a launch on an
+    // unsupported OS still reaches the bridge's own availability check.
     println!("cargo:rustc-link-arg=-Wl,-weak_framework,Speech");
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,Translation");
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,FoundationModels");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=CoreMedia");
     println!("cargo:rustc-link-lib=swiftCore");

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Upload,
   Globe,
@@ -6,7 +6,6 @@ import {
   AlertCircle,
   CheckCircle2,
   X,
-  Cpu,
   FileAudio,
   Clock,
   HardDrive,
@@ -35,8 +34,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { useImportAudio, ImportResult } from '@/hooks/useImportAudio';
 import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
-import { LANGUAGES } from '@/constants/languages';
-import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import { useAppleSpeechLocales } from '@/hooks/useAppleSpeechLocales';
 
 
 interface ImportAudioDialogProps {
@@ -72,10 +70,11 @@ export function ImportAudioDialog({
 }: ImportAudioDialogProps) {
   const router = useRouter();
   const { refetchMeetings } = useSidebar();
-  const { selectedLanguage, transcriptModelConfig } = useConfig();
+  const { transcriptModelConfig } = useConfig();
+  const configuredLocale = transcriptModelConfig.model || 'en_US';
 
   const [title, setTitle] = useState('');
-  const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  const [selectedLang, setSelectedLang] = useState(configuredLocale);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [titleModifiedByUser, setTitleModifiedByUser] = useState(false);
 
@@ -84,15 +83,7 @@ export function ImportAudioDialog({
   // (e.g. drag-drop path), we still need the initialization effect to run.
   const prevOpenRef = useRef(false);
 
-  // Use centralized model fetching hook
-  const {
-    availableModels,
-    selectedModelKey,
-    setSelectedModelKey,
-    loadingModels,
-    fetchModels,
-    resetSelection,
-  } = useTranscriptionModels(transcriptModelConfig);
+  const { locales, loadingLocales, fetchLocales } = useAppleSpeechLocales();
 
   const handleImportComplete = useCallback((result: ImportResult) => {
     toast.success(`Import complete! ${result.segments_count} segments created.`);
@@ -134,10 +125,9 @@ export function ImportAudioDialog({
     // Only initialize when transitioning from closed (false) to open (true)
     if (open && !wasOpen) {
       reset();
-      resetSelection();
       setTitle('');
       setTitleModifiedByUser(false);
-      setSelectedLang(selectedLanguage || 'auto');
+      setSelectedLang(configuredLocale);
       setShowAdvanced(false);
 
       // Validate preselected file if provided
@@ -149,10 +139,9 @@ export function ImportAudioDialog({
         });
       }
 
-      // Fetch available models using centralized hook
-      fetchModels();
+      fetchLocales();
     }
-  }, [open, preselectedFile, selectedLanguage, transcriptModelConfig, reset, resetSelection, validateFile, fetchModels]);
+  }, [open, preselectedFile, configuredLocale, reset, validateFile, fetchLocales]);
 
   // Update title when fileInfo changes
   useEffect(() => {
@@ -160,22 +149,6 @@ export function ImportAudioDialog({
       setTitle(fileInfo.filename);
     }
   }, [fileInfo, title, titleModifiedByUser]);
-
-  const selectedModel = useMemo((): ModelOption | undefined => {
-    if (!selectedModelKey) return undefined;
-    const colonIndex = selectedModelKey.indexOf(':');
-    if (colonIndex === -1) return undefined;
-    const provider = selectedModelKey.slice(0, colonIndex);
-    const name = selectedModelKey.slice(colonIndex + 1);
-    return availableModels.find((m) => m.provider === provider && m.name === name);
-  }, [selectedModelKey, availableModels]);
-  const isParakeetModel = selectedModel?.provider === 'parakeet';
-
-  useEffect(() => {
-    if (isParakeetModel && selectedLang !== 'auto') {
-      setSelectedLang('auto');
-    }
-  }, [isParakeetModel, selectedLang]);
 
   const handleSelectFile = async () => {
     const info = await selectFile();
@@ -187,13 +160,7 @@ export function ImportAudioDialog({
   const handleStartImport = async () => {
     if (!fileInfo) return;
 
-    await startImport(
-      fileInfo.path,
-      title || fileInfo.filename,
-      isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
-      selectedModel?.name || null,
-      selectedModel?.provider || null
-    );
+    await startImport(fileInfo.path, title || fileInfo.filename, selectedLang);
   };
 
   const handleCancel = async () => {
@@ -343,65 +310,27 @@ export function ImportAudioDialog({
                   {showAdvanced && (
                     <div className="p-3 pt-0 space-y-4 border-t">
                       {/* Language selector */}
-                      {!isParakeetModel ? (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Globe className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Language</span>
-                          </div>
-                          <Select value={selectedLang} onValueChange={setSelectedLang}>
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Select language" />
-                            </SelectTrigger>
-                            <SelectContent className="max-h-60">
-                              {LANGUAGES.map((lang) => (
-                                <SelectItem key={lang.code} value={lang.code}>
-                                  {lang.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Globe className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm font-medium">Language</span>
                         </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Globe className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Language</span>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Language selection isn't supported for Parakeet. It always uses automatic detection.
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Model selector */}
-                      {availableModels.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Cpu className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Model</span>
-                          </div>
-                          <Select
-                            value={selectedModelKey}
-                            onValueChange={setSelectedModelKey}
-                            disabled={loadingModels}
-                          >
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder={loadingModels ? 'Loading models...' : 'Select model'} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {availableModels.map((model) => (
-                                <SelectItem
-                                  key={`${model.provider}:${model.name}`}
-                                  value={`${model.provider}:${model.name}`}
-                                >
-                                  {model.displayName} ({Math.round(model.size_mb)} MB)
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
+                        <Select value={selectedLang} onValueChange={setSelectedLang} disabled={loadingLocales}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select language" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-60">
+                            {!locales.some((locale) => locale.id === selectedLang) && (
+                              <SelectItem value={selectedLang}>{selectedLang}</SelectItem>
+                            )}
+                            {locales.map((locale) => (
+                              <SelectItem key={locale.id} value={locale.id}>
+                                {locale.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                   )}
                 </div>

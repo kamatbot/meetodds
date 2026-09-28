@@ -40,17 +40,17 @@ pub struct DecodedAudio {
 }
 
 impl DecodedAudio {
-    /// Convert decoded audio to Whisper-compatible 16kHz mono f32 format.
+    /// Convert decoded audio to 16kHz mono f32 (the rate handed to Apple Speech).
     ///
     /// Performs mono conversion, normalization, and resampling. Large files
     /// (>5 min at 48kHz) use chunked sinc resampling to keep memory bounded
     /// while preserving audio quality for downstream VAD and transcription.
-    pub fn to_whisper_format(&self) -> Vec<f32> {
-        self.to_whisper_format_with_progress(None)
+    pub fn to_16k_mono(&self) -> Vec<f32> {
+        self.to_16k_mono_with_progress(None)
     }
 
-    /// Convert decoded audio to Whisper format with optional progress callback
-    pub fn to_whisper_format_with_progress(&self, progress_callback: Option<ProgressCallback>) -> Vec<f32> {
+    /// Convert decoded audio to 16kHz mono with optional progress callback
+    pub fn to_16k_mono_with_progress(&self, progress_callback: Option<ProgressCallback>) -> Vec<f32> {
         // Step 1: Convert to mono if needed
         let mono_samples = if self.channels > 1 {
             info!(
@@ -68,8 +68,8 @@ impl DecodedAudio {
         let mono_samples = normalize_audio_samples(mono_samples);
 
         // Step 2: Resample to 16kHz if needed
-        const WHISPER_SAMPLE_RATE: u32 = 16000;
-        if self.sample_rate != WHISPER_SAMPLE_RATE {
+        const TARGET_SAMPLE_RATE: u32 = 16000;
+        if self.sample_rate != TARGET_SAMPLE_RATE {
             // Large files are processed in chunks through the sinc resampler
             // to keep memory bounded while preserving audio quality.
             // Linear interpolation (fast_resample) was removed because it lacks
@@ -82,17 +82,17 @@ impl DecodedAudio {
                     "Chunked sinc resampling {} samples from {}Hz to {}Hz (large file mode)",
                     mono_samples.len(),
                     self.sample_rate,
-                    WHISPER_SAMPLE_RATE
+                    TARGET_SAMPLE_RATE
                 );
-                chunked_resample_with_progress(&mono_samples, self.sample_rate, WHISPER_SAMPLE_RATE, progress_callback)
+                chunked_resample_with_progress(&mono_samples, self.sample_rate, TARGET_SAMPLE_RATE, progress_callback)
             } else {
                 info!(
                     "Resampling {} samples from {}Hz to {}Hz",
                     mono_samples.len(),
                     self.sample_rate,
-                    WHISPER_SAMPLE_RATE
+                    TARGET_SAMPLE_RATE
                 );
-                resample_audio(&mono_samples, self.sample_rate, WHISPER_SAMPLE_RATE)
+                resample_audio(&mono_samples, self.sample_rate, TARGET_SAMPLE_RATE)
             };
 
             // Clamp after resampling: the sinc resampler can overshoot
@@ -582,7 +582,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_to_whisper_format_mono_16k() {
+    fn test_to_16k_mono_mono_16k() {
         // Already in correct format
         let audio = DecodedAudio {
             samples: vec![0.1, 0.2, 0.3],
@@ -591,12 +591,12 @@ mod tests {
             duration_seconds: 0.0001875,
         };
 
-        let result = audio.to_whisper_format();
+        let result = audio.to_16k_mono();
         assert_eq!(result.len(), 3);
     }
 
     #[test]
-    fn test_to_whisper_format_stereo_to_mono() {
+    fn test_to_16k_mono_stereo_to_mono() {
         // Stereo input
         let audio = DecodedAudio {
             samples: vec![0.2, 0.4, 0.6, 0.8], // 2 stereo frames
@@ -605,7 +605,7 @@ mod tests {
             duration_seconds: 0.000125,
         };
 
-        let result = audio.to_whisper_format();
+        let result = audio.to_16k_mono();
         assert_eq!(result.len(), 2); // Should be mono now
         // Average of (0.2, 0.4) = 0.3 and (0.6, 0.8) = 0.7
         assert!((result[0] - 0.3).abs() < 0.001);
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn test_to_whisper_format_resamples_48k_to_16k() {
+    fn test_to_16k_mono_resamples_48k_to_16k() {
         // 48kHz mono input - should be downsampled to 16kHz
         // Use a larger sample to ensure resampler works correctly
         // 48000 samples at 48kHz = 1 second → 16000 samples at 16kHz
@@ -624,7 +624,7 @@ mod tests {
             duration_seconds: 4800.0 / 48000.0,
         };
 
-        let result = audio.to_whisper_format();
+        let result = audio.to_16k_mono();
         // Output length should be approximately input_len / 3 (16000/48000 ratio)
         // 4800 / 3 = 1600
         assert!(!result.is_empty(), "Result should not be empty");
@@ -746,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn test_to_whisper_format_handles_large_file_threshold() {
+    fn test_to_16k_mono_handles_large_file_threshold() {
         // Test that large files use chunked sinc resampling path
         // LARGE_FILE_THRESHOLD is 14_400_000 samples
         // We'll test with a smaller sample to verify the path selection logic works
@@ -757,7 +757,7 @@ mod tests {
             duration_seconds: 1000.0 / 48000.0,
         };
 
-        let result = audio.to_whisper_format();
+        let result = audio.to_16k_mono();
         // Should complete without error and produce valid output
         assert!(!result.is_empty());
         assert!(result.len() < 1000); // Downsampled

@@ -163,8 +163,8 @@ pub fn judge_system(module: &LanguageModule, dial: u8, grammar: &JudgeGrammar<'_
         out.push('\n');
         out.push_str(example.response);
     }
-    // Model control suffix the legacy engine sends (disables Qwen-style
-    // thinking). Kept for behavioural parity.
+    // Model control suffix the legacy engine sends (disables thinking on
+    // models that support it). Kept for behavioural parity.
     out.push_str("\n/no_think");
     out
 }

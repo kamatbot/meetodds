@@ -61,9 +61,9 @@ export function useRecordingStart(
         const fallbackTitle = `Meeting ${pad(now.getDate())}_${pad(now.getMonth() + 1)}_${String(now.getFullYear()).slice(-2)}_${pad(now.getHours())}_${pad(now.getMinutes())}_${pad(now.getSeconds())}`;
         const requestedTitle = options?.title?.trim();
         const title = requestedTitle || fallbackTitle;
-        setStatus(RecordingStatus.STARTING, 'Checking selected model and audio sources…');
-        // The native command validates the configured engine/model, not an unrelated
-        // Parakeet installation. This also keeps all three start routes consistent.
+        setStatus(RecordingStatus.STARTING, 'Checking spoken language and audio sources…');
+        // The native command checks the Apple Speech language assets before capture opens.
+        // This also keeps all three start routes consistent.
         setMeetingTitle(title);
         clearTranscripts();
         await recordingService.startRecordingWithDevices(

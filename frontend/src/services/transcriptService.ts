@@ -21,10 +21,6 @@ export interface TranscriptionErrorPayload {
   actionable: boolean;
 }
 
-export interface ModelDownloadCompletePayload {
-  modelName: string;
-}
-
 /**
  * Transcript Service
  * Singleton service for managing transcription operations and transcript history
@@ -87,28 +83,6 @@ export class TranscriptService {
   async onTranscriptError(callback: (error: string) => void): Promise<UnlistenFn> {
     return listen<string>('transcript-error', (event) => {
       callback(event.payload);
-    });
-  }
-
-  /**
-   * Listen for Whisper model download complete event
-   * @param callback - Function to call when Whisper model download completes
-   * @returns Promise that resolves to unlisten function
-   */
-  async onModelDownloadComplete(callback: (modelName: string) => void): Promise<UnlistenFn> {
-    return listen<ModelDownloadCompletePayload>('model-download-complete', (event) => {
-      callback(event.payload.modelName);
-    });
-  }
-
-  /**
-   * Listen for Parakeet model download complete event
-   * @param callback - Function to call when Parakeet model download completes
-   * @returns Promise that resolves to unlisten function
-   */
-  async onParakeetModelDownloadComplete(callback: (modelName: string) => void): Promise<UnlistenFn> {
-    return listen<ModelDownloadCompletePayload>('parakeet-model-download-complete', (event) => {
-      callback(event.payload.modelName);
     });
   }
 }

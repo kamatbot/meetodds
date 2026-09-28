@@ -106,6 +106,8 @@ export function useLiveTranslation(
 ): LiveTranslationState {
   const [settings, setSettings] = useState<LiveTranslationSettings>(DEFAULT_LIVE_TRANSLATION_SETTINGS);
   const [translations, setTranslations] = useState<Record<string, LiveTranslationEntry>>({});
+  const translationsRef = useRef(translations);
+  translationsRef.current = translations;
   const [queuedCount, setQueuedCount] = useState(0);
   const [activeCount, setActiveCount] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -535,6 +537,7 @@ export function useLiveTranslation(
         translationEngine: settings.engine,
         speedMode: requestSpeed,
         modelOverride: settings.modelOverride || null,
+        targetLanguage: settings.targetLanguage,
       }).then(prepared => {
         setLastProvider(prepared.provider);
         setLastModel(prepared.model);
@@ -545,7 +548,7 @@ export function useLiveTranslation(
     } else {
       clearPendingWork();
     }
-  }, [settings.enabled, settings.engine, settings.speed, settings.modelOverride, clearPendingWork]);
+  }, [settings.enabled, settings.engine, settings.speed, settings.modelOverride, settings.targetLanguage, clearPendingWork]);
 
   useEffect(() => { resultCacheRef.current.clear(); clearTranslations(); }, [sessionId, clearTranslations]);
 
@@ -615,6 +618,46 @@ export function useLiveTranslation(
     settings.contextHint, cancelNativeRequest, previewRetryNonce,
   ]);
 
+  // Instant handoff: if the preview translation already produced target text for
+  // the latest utterance, seed it into the finalized segment immediately so neither
+  // the transcript panel nor the live captions suffer a multi-second delay.
+  // Re-runs on every translations change (cheap: one segment) because the queued
+  // canonical job's 'translating' placeholder overwrites the seed until it answers.
+  useEffect(() => {
+    if (!settings.enabled || transcripts.length === 0) return;
+    const transcript = transcripts[transcripts.length - 1];
+    const text = transcript.text.trim();
+    if (!text) return;
+    const previewKey = `live-preview-${transcript.speaker_source === 'system' ? 'system' : 'microphone'}`;
+    const previewEntry = translations[previewKey];
+    if (
+      !previewEntry ||
+      previewEntry.targetLanguage !== settings.targetLanguage ||
+      !previewEntry.translatedText?.trim()
+    ) return;
+    const segmentKey = liveTranslationSegmentKey(transcript);
+    setTranslations((previous) => {
+      if (previous[segmentKey]?.translatedText) return previous;
+      return {
+        ...previous,
+        [segmentKey]: {
+          segmentKey,
+          sourceText: text,
+          translatedText: previewEntry.translatedText,
+          targetLanguage: settings.targetLanguage,
+          status: previewEntry.sourceText?.trim() === text ? 'translated' : 'translating',
+          provider: previewEntry.provider,
+          model: previewEntry.model,
+          latencyMs: 0,
+          firstWordLatencyMs: 0,
+          cached: true,
+        },
+      };
+    });
+  }, [transcripts, settings.enabled, settings.targetLanguage, translations]);
+
+  // Backfill the last turns. Deliberately independent of translations: streaming
+  // deltas must not rescan up to BACKFILL_SEGMENT_LIMIT turns.
   useEffect(() => {
     if (!settings.enabled || transcripts.length === 0) return;
     const start = Math.max(0, transcripts.length - BACKFILL_SEGMENT_LIMIT);
@@ -627,37 +670,6 @@ export function useLiveTranslation(
       const isLive = index === lastIndex;
       const segmentKey = liveTranslationSegmentKey(transcript);
 
-      // Instant handoff: if the preview translation already produced target text for
-      // this utterance, seed it into the finalized segment immediately so neither
-      // the transcript panel nor the live captions suffer a multi-second delay.
-      const previewKey = `live-preview-${transcript.speaker_source === 'system' ? 'system' : 'microphone'}`;
-      const previewEntry = translations[previewKey];
-      if (
-        isLive &&
-        previewEntry &&
-        previewEntry.targetLanguage === settings.targetLanguage &&
-        previewEntry.translatedText?.trim()
-      ) {
-        setTranslations((previous) => {
-          if (previous[segmentKey]?.translatedText) return previous;
-          return {
-            ...previous,
-            [segmentKey]: {
-              segmentKey,
-              sourceText: text,
-              translatedText: previewEntry.translatedText,
-              targetLanguage: settings.targetLanguage,
-              status: previewEntry.sourceText?.trim() === text ? 'translated' : 'translating',
-              provider: previewEntry.provider,
-              model: previewEntry.model,
-              latencyMs: 0,
-              firstWordLatencyMs: 0,
-              cached: true,
-            },
-          };
-        });
-      }
-
       const contextText = contextForTurn(transcripts, index, settings.contextTurns);
       const revision = [
         generationRef.current, settings.targetLanguage, settings.engine, settings.speed,
@@ -668,6 +680,17 @@ export function useLiveTranslation(
       latestRevisionRef.current.set(segmentKey, revision);
       const activeRequestId = activeRequestIdsRef.current.get(segmentKey);
       if (activeRequestId) cancelNativeRequest(activeRequestId);
+      if (isLive && !translationsRef.current[segmentKey]?.translatedText) {
+        // The instant handoff seeds this turn from a finished preview translation of the
+        // same text; translating it again would only occupy the (single local) model.
+        const preview = translationsRef.current[`live-preview-${transcript.speaker_source === 'system' ? 'system' : 'microphone'}`];
+        if (
+          preview?.status === 'translated'
+          && preview.targetLanguage === settings.targetLanguage
+          && preview.sourceText?.trim() === text
+          && preview.translatedText?.trim()
+        ) return;
+      }
       enqueueJob({
         segmentKey,
         text,
@@ -685,7 +708,7 @@ export function useLiveTranslation(
         isLive,
       });
     });
-  }, [sessionId, transcripts, settings, translations, cancelNativeRequest, enqueueJob]);
+  }, [sessionId, transcripts, settings, cancelNativeRequest, enqueueJob]);
 
   const translatedCount = useMemo(
     () => Object.entries(translations).filter(
@@ -698,7 +721,8 @@ export function useLiveTranslation(
     ? translations[previewKey]
     : undefined;
 
-  return {
+  // Stable identity: LiveMeetingTranslationProvider passes this object as its context value.
+  return useMemo(() => ({
     settings,
     translations,
     updateSettings,
@@ -714,5 +738,9 @@ export function useLiveTranslation(
     lastFirstWordLatencyMs,
     lastFallbackReason,
     previewTranslation,
-  };
+  }), [
+    settings, translations, updateSettings, clearTranslations, retryPreviewTranslation,
+    queuedCount, activeCount, translatedCount, lastError, lastProvider, lastModel,
+    lastLatencyMs, lastFirstWordLatencyMs, lastFallbackReason, previewTranslation,
+  ]);
 }

@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { ArrowRight, Check, Cloud, LaptopMinimal, Loader2, LockKeyhole } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowRight, Check, Cloud, Loader2, LockKeyhole, Sparkles } from 'lucide-react';
 import { emit } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
@@ -9,8 +9,8 @@ import { OpenAICodexSettings } from '@/components/OpenAICodexSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import type { ModelConfig } from '@/services/configService';
-import { getSummaryModelSizeLabel } from '@/lib/onboarding-summary-model';
-import { commitSummaryDestination, firstAvailableChatGPTModel, type PersistedSummaryConfiguration, type SummaryDestination } from '@/lib/onboarding-setup';
+import { getAppleIntelligenceStatus, type AppleIntelligenceStatus } from '@/lib/apple-intelligence';
+import { commitSummaryDestination, firstAvailableChatGPTModel, readSummaryDestination, type PersistedSummaryConfiguration, type SummaryDestination } from '@/lib/onboarding-setup';
 import { OnboardingContainer } from '../OnboardingContainer';
 
 interface CodexAuthStatus {
@@ -22,7 +22,7 @@ interface CodexModel {
 }
 
 async function persistAndReadSummaryConfiguration(
-  provider: 'builtin-ai' | 'openai-codex',
+  provider: 'apple-intelligence' | 'openai-codex',
   model: string,
 ): Promise<PersistedSummaryConfiguration> {
   const previous = await invoke<ModelConfig | null>('api_get_model_config');
@@ -56,12 +56,6 @@ export function WelcomeStep() {
   const {
     summaryDestination,
     selectSummaryDestination,
-    selectedSummaryModel,
-    recommendedSummaryModel,
-    summaryModelDownloaded,
-    summaryModelProgress,
-    summaryModelProgressInfo,
-    startBackgroundDownloads,
     goNext,
   } = useOnboarding();
   const { toggleIsAutoSummary } = useConfig();
@@ -70,12 +64,33 @@ export function WelcomeStep() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [appleIntelligence, setAppleIntelligence] = useState<AppleIntelligenceStatus | null>(null);
+  const [loadingAppleIntelligence, setLoadingAppleIntelligence] = useState(true);
 
-  const localModel = recommendedSummaryModel || selectedSummaryModel;
-  const modelSize = localModel ? getSummaryModelSizeLabel(localModel) : '';
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingAppleIntelligence(true);
+    void getAppleIntelligenceStatus().then((status) => {
+      if (cancelled) return;
+      setAppleIntelligence(status);
+      setLoadingAppleIntelligence(false);
+      // Never leave a fresh user stranded on a disabled default; an explicit
+      // prior choice (saved to storage) is always left alone.
+      if (!status.available && !readSummaryDestination(window.localStorage)) {
+        selectSummaryDestination('chatgpt');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const appleIntelligenceAvailable = appleIntelligence?.available === true;
   const chatGPTModel = firstAvailableChatGPTModel(availableChatGPTModels);
 
   const chooseDestination = (destination: SummaryDestination) => {
+    if (destination === 'local' && !appleIntelligenceAvailable) return;
     setError(null);
     setSelectionError(null);
     try {
@@ -101,9 +116,13 @@ export function WelcomeStep() {
     setError(null);
 
     try {
+      if (summaryDestination === 'local' && !appleIntelligenceAvailable) {
+        throw new Error('Apple Intelligence is not available on this Mac. Choose ChatGPT instead.');
+      }
+
       let authenticated = false;
       let availableModels: string[] = [];
-      let modelToCommit = localModel;
+      let modelToCommit: string | undefined;
       if (summaryDestination === 'chatgpt') {
         const auth = await invoke<CodexAuthStatus>('openai_codex_get_auth_status');
         authenticated = auth.loggedIn;
@@ -123,7 +142,7 @@ export function WelcomeStep() {
         setAvailableChatGPTModels([modelToCommit, ...availableModels.filter((item) => item !== modelToCommit)]);
       }
 
-      const committed = await commitSummaryDestination({
+      await commitSummaryDestination({
         storage: window.localStorage,
         destination: summaryDestination,
         authenticated,
@@ -133,13 +152,6 @@ export function WelcomeStep() {
         setAutoSummary: toggleIsAutoSummary,
       });
 
-      if (summaryDestination === 'local' && !summaryModelDownloaded) {
-        await startBackgroundDownloads({
-          includeParakeet: false,
-          includeSummary: true,
-          summaryModel: committed.model,
-        });
-      }
       goNext();
     } catch (failure) {
       setError(errorMessage(failure));
@@ -155,7 +167,7 @@ export function WelcomeStep() {
       title="How would you like your summaries?"
       description="Recording and transcription stay on your Mac. Choose where each meeting summary is written."
       step={1}
-      totalSteps={2}
+      totalSteps={3}
       className="max-w-[760px]"
     >
       <div className="mx-auto w-full max-w-[620px] space-y-3">
@@ -163,36 +175,28 @@ export function WelcomeStep() {
           type="button"
           onClick={() => chooseDestination('local')}
           aria-pressed={summaryDestination === 'local'}
-          className={`flex w-full items-start gap-4 rounded-2xl border p-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${summaryDestination === 'local' ? 'border-text bg-bg' : 'border-border bg-surface hover:bg-bg'}`}
+          disabled={!appleIntelligenceAvailable}
+          className={`flex w-full items-start gap-4 rounded-2xl border p-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60 ${summaryDestination === 'local' ? 'border-text bg-bg' : 'border-border bg-surface hover:bg-bg'}`}
         >
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-bg text-text">
-            <LaptopMinimal className="h-5 w-5" strokeWidth={1.7} />
+            <Sparkles className="h-5 w-5" strokeWidth={1.7} />
           </span>
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2 text-ui font-semibold text-text">
-              Local AI
+              Apple Intelligence
               <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-2">On this Mac</span>
             </span>
             <span className="mt-1 block text-caption leading-5 text-2">
-              Your audio, transcript, meeting notes and summaries stay on this Mac. MeetOdds uses its recommended built-in model.
+              Your audio, transcript, meeting notes and summaries stay on this Mac.
             </span>
-            {summaryDestination === 'local' && (
-              <span className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-2">
-                <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
-                {localModel
-                  ? `Recommended model · ${localModel}${modelSize ? ` · ${modelSize}` : ''}`
-                  : 'Checking the recommended local model…'}
-                <span className="font-medium text-text">
-                  {summaryModelDownloaded
-                    ? 'Ready on this Mac'
-                    : summaryModelProgressInfo.error
-                    ? 'Download needs attention'
-                    : summaryModelProgress > 0
-                    ? `Downloading · ${Math.round(summaryModelProgress)}%`
-                    : 'Not downloaded yet'}
-                </span>
-              </span>
-            )}
+            <span className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-2">
+              <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
+              {loadingAppleIntelligence
+                ? 'Checking Apple Intelligence availability…'
+                : appleIntelligenceAvailable
+                ? 'Ready on this Mac'
+                : appleIntelligence?.reason ?? 'Apple Intelligence status is unavailable'}
+            </span>
           </span>
           <span className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full border ${summaryDestination === 'local' ? 'border-text bg-text text-white' : 'border-border text-transparent'}`} aria-hidden="true">
             {summaryDestination === 'local' && <Check className="h-3 w-3" strokeWidth={2.5} />}
@@ -243,11 +247,11 @@ export function WelcomeStep() {
         {error && <p role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-caption text-danger">{error}</p>}
 
         <div className="flex flex-wrap items-center justify-between gap-4 pt-3">
-          <span className="text-caption text-2">1 of 2 · You can change this later</span>
+          <span className="text-caption text-2">1 of 3 · You can change this later</span>
           <Button
             type="button"
             onClick={() => void handleContinue()}
-            disabled={isSaving || (summaryDestination === 'chatgpt' && !isChatGPTReady) || (summaryDestination === 'local' && !localModel)}
+            disabled={isSaving || (summaryDestination === 'chatgpt' && !isChatGPTReady) || (summaryDestination === 'local' && !appleIntelligenceAvailable)}
             className="h-11 min-w-[190px] rounded-xl bg-text px-5 text-ui font-semibold text-surface hover:opacity-90"
           >
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

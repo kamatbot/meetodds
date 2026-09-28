@@ -1,0 +1,626 @@
+{
+  "batch": {
+    "clip_secs": 11.0,
+    "decode_ms": {
+      "max": 1087.366292,
+      "mean": 669.2718668,
+      "median": 562.950834,
+      "min": 324.197208,
+      "n": 5,
+      "p95": 1087.366292
+    },
+    "decode_ms_all": [
+      1045.932959,
+      1087.366292,
+      562.950834,
+      325.912041,
+      324.197208
+    ],
+    "first_call_ms": 1045.932959,
+    "iterations": 5,
+    "rtf": {
+      "max": 0.09885148109090909,
+      "mean": 0.06084289698181818,
+      "median": 0.05117734854545455,
+      "min": 0.029472473454545456,
+      "n": 5,
+      "p95": 0.09885148109090909
+    },
+    "subsequent_max_ms": 1087.366292,
+    "subsequent_mean_ms": 575.10659375,
+    "text": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country.",
+    "warmup_overhead_ms": 470.82636525
+  },
+  "config": {
+    "batch_iters": 5,
+    "capture_rate_hz": 48000,
+    "chunk_samples": 1024,
+    "dsp": "full",
+    "engine": "parakeet",
+    "fixture": "../../frontend/src-tauri/tests/fixtures/jfk.wav",
+    "gap_ms": 1500,
+    "idle_secs": 20,
+    "model": "parakeet-tdt-0.6b-v3-int8",
+    "model_load_ms": 986.877208,
+    "preview": true,
+    "redemption_ms": 450,
+    "repeats": 6
+  },
+  "generated_at": "2026-09-28T03:00:08.082052+00:00",
+  "idle": {
+    "chunks_fed": 937,
+    "cpu_percent_of_one_core": 1.4423026626048097,
+    "cpu_secs": 0.28830799999999984,
+    "cpu_sys_secs": 0.047159000000000006,
+    "cpu_user_secs": 0.24114899999999984,
+    "peak_threads": 27,
+    "vad_sessions": 2,
+    "wall_secs": 19.989424375
+  },
+  "live": {
+    "audio_secs": 74.90325,
+    "cpu_percent_of_one_core": 22.026771295177824,
+    "cpu_secs": 16.508433,
+    "cpu_sys_secs": 1.661775,
+    "cpu_user_secs": 14.846658,
+    "ground_truth": {
+      "caption_update_interval_ms": {
+        "max": 8294.252709,
+        "mean": 2157.3624691481486,
+        "median": 750.3569170000119,
+        "min": 613.7739159999983,
+        "n": 27,
+        "p95": 6170.171083000001
+      },
+      "speech_offset_in_clip_secs": 10.18,
+      "speech_onset_in_clip_secs": 0.34,
+      "speech_start_to_first_partial_ms": {
+        "max": 999.5767500000002,
+        "mean": 859.3349926666673,
+        "median": 988.5982910000021,
+        "min": 651.647791,
+        "n": 6,
+        "p95": 999.5767500000002
+      },
+      "speech_start_to_first_text_ms": {
+        "max": 999.5767500000002,
+        "mean": 859.3349926666673,
+        "median": 988.5982910000021,
+        "min": 651.647791,
+        "n": 6,
+        "p95": 999.5767500000002
+      },
+      "utterance_end_to_final_ms": {
+        "max": 1600.7343330000003,
+        "mean": 1076.1074720000006,
+        "median": 861.3434580000066,
+        "min": 822.9070000000011,
+        "n": 6,
+        "p95": 1600.7343330000003
+      },
+      "utterances_without_final": 0,
+      "wer": 0.03787878787878788,
+      "words_hyp": 128,
+      "words_ref": 132
+    },
+    "other_processes": {
+      "loadavg_at_end": "{ 4.41 13.83 19.65 }",
+      "speech_services": [],
+      "speech_services_cpu_percent_of_one_core": 0.0,
+      "speech_services_cpu_secs": 0.0,
+      "top_processes": [
+        {
+          "comm": "rustc",
+          "cpu_secs": 37.65,
+          "pid": 46879
+        },
+        {
+          "comm": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+          "cpu_secs": 29.06999999999971,
+          "pid": 35187
+        },
+        {
+          "comm": "/Applications/Xcode.app/Contents/SharedFrameworks/DVTITunesSoftware.framework/Versions/A/XPCServices/com.apple.dt.Xcode.ITunesSoftwareService.xpc/Contents/MacOS/com.apple.dt.Xcode.ITunesSoftwareService",
+          "cpu_secs": 13.53,
+          "pid": 41037
+        },
+        {
+          "comm": "/System/Library/CoreServices/RemoteManagement/ScreensharingAgent.bundle/Contents/MacOS/ScreensharingAgent",
+          "cpu_secs": 9.389999999999986,
+          "pid": 37435
+        },
+        {
+          "comm": "/usr/libexec/searchpartyd",
+          "cpu_secs": 2.8400000000001455,
+          "pid": 582
+        },
+        {
+          "comm": "/usr/libexec/replayd",
+          "cpu_secs": 2.490000000000002,
+          "pid": 37453
+        },
+        {
+          "comm": "/Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/154.0.8037.57/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)",
+          "cpu_secs": 1.8699999999999974,
+          "pid": 37776
+        },
+        {
+          "comm": "/Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/154.0.8037.57/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service)",
+          "cpu_secs": 1.3399999999999999,
+          "pid": 37631
+        },
+        {
+          "comm": "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+          "cpu_secs": 1.2999999999999972,
+          "pid": 37697
+        },
+        {
+          "comm": "/System/Library/CoreServices/RemoteManagement/screensharingd.bundle/Contents/MacOS/screensharingd",
+          "cpu_secs": 1.2899999999999991,
+          "pid": 37413
+        },
+        {
+          "comm": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+          "cpu_secs": 1.2800000000000011,
+          "pid": 37659
+        },
+        {
+          "comm": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "cpu_secs": 1.0600000000000005,
+          "pid": 37459
+        }
+      ]
+    },
+    "peak_threads": 29,
+    "preview": {
+      "arrivals_ms": [
+        991.647791,
+        1618.739708,
+        2255.3708330000004,
+        4056.060916,
+        4692.638041,
+        10846.832665999998,
+        13592.766041,
+        14860.53075,
+        18884.166166,
+        19522.397041,
+        20153.816833,
+        23327.703666,
+        26307.32675,
+        26936.452083,
+        27578.413041,
+        35872.66575,
+        38787.713208,
+        39421.512875,
+        40057.112625,
+        43779.848874999996,
+        48287.66975,
+        51264.098291,
+        51880.270875,
+        52513.415666,
+        54639.3525,
+        60809.523583,
+        63510.582875,
+        64124.356791,
+        64757.948208,
+        66606.89075,
+        71523.30475,
+        72808.169291,
+        73558.52620800001
+      ],
+      "decode_ms": {
+        "max": 293.795583,
+        "mean": 65.76570286764706,
+        "median": 57.173209,
+        "min": 41.051542000000005,
+        "n": 68,
+        "p95": 110.53699999999999
+      },
+      "decodes": 68,
+      "enabled": true,
+      "skipped_while_canonical_busy": 1,
+      "texts": [
+        "And so",
+        "So my fellow",
+        "And so my fellow Americans",
+        "Yeah.",
+        "Yes, not."
+      ],
+      "window_secs": {
+        "max": 2.97,
+        "mean": 1.204411764705883,
+        "median": 1.11,
+        "min": 0.51,
+        "n": 68,
+        "p95": 2.37
+      }
+    },
+    "segments": [
+      {
+        "audio_secs": 2.3,
+        "decode_ms": 133.63525,
+        "index": 0,
+        "queue_wait_ms": 0.023917,
+        "rtf": 0.05810228260869566,
+        "speech_end_to_text_ms": 402.9061660000002,
+        "speech_start_to_text_ms": 2702.906166,
+        "text": "And so my fellow Americans",
+        "vad_close_to_text_ms": 133.65920800000004,
+        "vad_end_ms": 2360.0,
+        "vad_start_ms": 60.0
+      },
+      {
+        "audio_secs": 1.4,
+        "decode_ms": 62.59079100000001,
+        "index": 1,
+        "queue_wait_ms": 0.01525,
+        "rtf": 0.04470770785714286,
+        "speech_end_to_text_ms": 325.65920800000004,
+        "speech_start_to_text_ms": 1725.659208,
+        "text": "Ask not.",
+        "vad_close_to_text_ms": 62.60608299999967,
+        "vad_end_ms": 4520.0,
+        "vad_start_ms": 3120.0
+      },
+      {
+        "audio_secs": 2.39,
+        "decode_ms": 89.16225,
+        "index": 2,
+        "queue_wait_ms": 0.012875,
+        "rtf": 0.03730638075313807,
+        "speech_end_to_text_ms": 355.5027079999991,
+        "speech_start_to_text_ms": 2745.502707999999,
+        "text": "What your country can do for you",
+        "vad_close_to_text_ms": 89.17520799999875,
+        "vad_end_ms": 7760.0,
+        "vad_start_ms": 5370.0
+      },
+      {
+        "audio_secs": 2.63,
+        "decode_ms": 97.196542,
+        "index": 3,
+        "queue_wait_ms": 0.009166,
+        "rtf": 0.03695686007604563,
+        "speech_end_to_text_ms": 362.90700000000106,
+        "speech_start_to_text_ms": 2992.907000000001,
+        "text": "Ask what you can do for your country.",
+        "vad_close_to_text_ms": 97.20575000000099,
+        "vad_end_ms": 10640.0,
+        "vad_start_ms": 8010.0
+      },
+      {
+        "audio_secs": 2.18,
+        "decode_ms": 83.370125,
+        "index": 4,
+        "queue_wait_ms": 0.015458999999999999,
+        "rtf": 0.03824317660550459,
+        "speech_end_to_text_ms": 352.11641599999894,
+        "speech_start_to_text_ms": 2532.116415999999,
+        "text": "And so, my fellow Americans.",
+        "vad_close_to_text_ms": 83.38562499999898,
+        "vad_end_ms": 14840.0,
+        "vad_start_ms": 12660.0
+      },
+      {
+        "audio_secs": 0.77,
+        "decode_ms": 46.604542,
+        "index": 5,
+        "queue_wait_ms": 0.013040999999999999,
+        "rtf": 0.06052537922077922,
+        "speech_end_to_text_ms": 309.5777500000004,
+        "speech_start_to_text_ms": 1079.5777500000004,
+        "text": "Not.",
+        "vad_close_to_text_ms": 46.61762500000259,
+        "vad_end_ms": 17000.0,
+        "vad_start_ms": 16230.0
+      },
+      {
+        "audio_secs": 2.3,
+        "decode_ms": 89.700083,
+        "index": 6,
+        "queue_wait_ms": 0.014667,
+        "rtf": 0.03900003608695653,
+        "speech_end_to_text_ms": 356.25220799999806,
+        "speech_start_to_text_ms": 2656.252207999998,
+        "text": "What your country can do for you.",
+        "vad_close_to_text_ms": 89.71479199999885,
+        "vad_end_ms": 20240.0,
+        "vad_start_ms": 17940.0
+      },
+      {
+        "audio_secs": 2.66,
+        "decode_ms": 96.83779200000001,
+        "index": 7,
+        "queue_wait_ms": 0.012125,
+        "rtf": 0.036405184962406016,
+        "speech_end_to_text_ms": 375.218458000003,
+        "speech_start_to_text_ms": 3035.218458000003,
+        "text": "Ask what you can do for your country.",
+        "vad_close_to_text_ms": 96.84991700000319,
+        "vad_end_ms": 23150.0,
+        "vad_start_ms": 20490.0
+      },
+      {
+        "audio_secs": 1.94,
+        "decode_ms": 79.28979199999999,
+        "index": 8,
+        "queue_wait_ms": 0.010916,
+        "rtf": 0.04087102680412371,
+        "speech_end_to_text_ms": 345.02704099999755,
+        "speech_start_to_text_ms": 2285.0270409999976,
+        "text": "And so my fellow Americans",
+        "vad_close_to_text_ms": 79.30079099999784,
+        "vad_end_ms": 27320.0,
+        "vad_start_ms": 25380.0
+      },
+      {
+        "audio_secs": 0.71,
+        "decode_ms": 45.283958,
+        "index": 9,
+        "queue_wait_ms": 0.030125,
+        "rtf": 0.06378022253521128,
+        "speech_end_to_text_ms": 325.9420409999984,
+        "speech_start_to_text_ms": 1035.9420409999984,
+        "text": "Not.",
+        "vad_close_to_text_ms": 45.314125000000786,
+        "vad_end_ms": 29420.0,
+        "vad_start_ms": 28710.0
+      },
+      {
+        "audio_secs": 2.42,
+        "decode_ms": 93.568459,
+        "index": 10,
+        "queue_wait_ms": 0.024416,
+        "rtf": 0.03866465247933885,
+        "speech_end_to_text_ms": 372.153416000001,
+        "speech_start_to_text_ms": 2792.153416000001,
+        "text": "What your country can do for you",
+        "vad_close_to_text_ms": 93.59291600000142,
+        "vad_end_ms": 32750.0,
+        "vad_start_ms": 30330.0
+      },
+      {
+        "audio_secs": 3.14,
+        "decode_ms": 178.192292,
+        "index": 11,
+        "queue_wait_ms": 0.021333,
+        "rtf": 0.05674913757961783,
+        "speech_end_to_text_ms": 450.0005000000019,
+        "speech_start_to_text_ms": 3590.000500000002,
+        "text": "Ask what you can do for your country.",
+        "vad_close_to_text_ms": 178.21366700000362,
+        "vad_end_ms": 36170.0,
+        "vad_start_ms": 33030.0
+      },
+      {
+        "audio_secs": 1.91,
+        "decode_ms": 84.674833,
+        "index": 12,
+        "queue_wait_ms": 0.023,
+        "rtf": 0.044332373298429324,
+        "speech_end_to_text_ms": 361.9028330000001,
+        "speech_start_to_text_ms": 2271.902833,
+        "text": "And so my fellow Americans",
+        "vad_close_to_text_ms": 84.69787499999802,
+        "vad_end_ms": 39770.0,
+        "vad_start_ms": 37860.0
+      },
+      {
+        "audio_secs": 0.71,
+        "decode_ms": 45.553416999999996,
+        "index": 13,
+        "queue_wait_ms": 0.016249999999999997,
+        "rtf": 0.06415974225352113,
+        "speech_end_to_text_ms": 326.0446660000016,
+        "speech_start_to_text_ms": 1036.0446660000016,
+        "text": "Knock.",
+        "vad_close_to_text_ms": 45.56970800000272,
+        "vad_end_ms": 41900.0,
+        "vad_start_ms": 41190.0
+      },
+      {
+        "audio_secs": 2.39,
+        "decode_ms": 90.469834,
+        "index": 14,
+        "queue_wait_ms": 0.017,
+        "rtf": 0.0378534870292887,
+        "speech_end_to_text_ms": 369.22008300000016,
+        "speech_start_to_text_ms": 2759.220083,
+        "text": "What your country can do for you.",
+        "vad_close_to_text_ms": 90.48695800000132,
+        "vad_end_ms": 45230.0,
+        "vad_start_ms": 42840.0
+      },
+      {
+        "audio_secs": 2.66,
+        "decode_ms": 99.77829200000001,
+        "index": 15,
+        "queue_wait_ms": 0.015792,
+        "rtf": 0.03751063609022556,
+        "speech_end_to_text_ms": 375.49916599999415,
+        "speech_start_to_text_ms": 3035.499165999994,
+        "text": "Ask what you can do for your country.",
+        "vad_close_to_text_ms": 99.79412499999307,
+        "vad_end_ms": 48110.0,
+        "vad_start_ms": 45450.0
+      },
+      {
+        "audio_secs": 1.91,
+        "decode_ms": 73.674291,
+        "index": 16,
+        "queue_wait_ms": 0.0125,
+        "rtf": 0.03857292722513089,
+        "speech_end_to_text_ms": 351.10470799999894,
+        "speech_start_to_text_ms": 2261.104707999999,
+        "text": "And so my fellow Americans",
+        "vad_close_to_text_ms": 73.68687499999942,
+        "vad_end_ms": 52250.0,
+        "vad_start_ms": 50340.0
+      },
+      {
+        "audio_secs": 0.77,
+        "decode_ms": 48.080292,
+        "index": 17,
+        "queue_wait_ms": 0.017166,
+        "rtf": 0.06244193766233766,
+        "speech_end_to_text_ms": 321.1258749999979,
+        "speech_start_to_text_ms": 1091.125874999998,
+        "text": "Not.",
+        "vad_close_to_text_ms": 48.09749999999622,
+        "vad_end_ms": 54470.0,
+        "vad_start_ms": 53700.0
+      },
+      {
+        "audio_secs": 2.42,
+        "decode_ms": 94.30387499999999,
+        "index": 18,
+        "queue_wait_ms": 0.016333,
+        "rtf": 0.03896854338842975,
+        "speech_end_to_text_ms": 372.6318749999991,
+        "speech_start_to_text_ms": 2792.631874999999,
+        "text": "What your country can do for you.",
+        "vad_close_to_text_ms": 94.32024999999703,
+        "vad_end_ms": 57710.0,
+        "vad_start_ms": 55290.0
+      },
+      {
+        "audio_secs": 2.63,
+        "decode_ms": 96.116709,
+        "index": 19,
+        "queue_wait_ms": 0.017584,
+        "rtf": 0.03654627718631179,
+        "speech_end_to_text_ms": 371.0353749999995,
+        "speech_start_to_text_ms": 3001.0353749999995,
+        "text": "Ask what you can do for your country.",
+        "vad_close_to_text_ms": 96.13433399999485,
+        "vad_end_ms": 60590.0,
+        "vad_start_ms": 57960.0
+      },
+      {
+        "audio_secs": 2.15,
+        "decode_ms": 86.147625,
+        "index": 20,
+        "queue_wait_ms": 0.026875,
+        "rtf": 0.04006866279069768,
+        "speech_end_to_text_ms": 363.4464999999982,
+        "speech_start_to_text_ms": 2513.446499999998,
+        "text": "And so my fellow Americans.",
+        "vad_close_to_text_ms": 86.17454199999338,
+        "vad_end_ms": 64730.0,
+        "vad_start_ms": 62580.0
+      },
+      {
+        "audio_secs": 1.25,
+        "decode_ms": 57.126958,
+        "index": 21,
+        "queue_wait_ms": 0.023667,
+        "rtf": 0.0457015664,
+        "speech_end_to_text_ms": 320.33150000000023,
+        "speech_start_to_text_ms": 1570.3315000000002,
+        "text": "Ask not",
+        "vad_close_to_text_ms": 57.150709000008646,
+        "vad_end_ms": 66920.0,
+        "vad_start_ms": 65670.0
+      },
+      {
+        "audio_secs": 2.42,
+        "decode_ms": 94.278792,
+        "index": 22,
+        "queue_wait_ms": 0.013584,
+        "rtf": 0.0389581785123967,
+        "speech_end_to_text_ms": 372.8828749999957,
+        "speech_start_to_text_ms": 2792.8828749999957,
+        "text": "What your country can do for you",
+        "vad_close_to_text_ms": 94.29245900000387,
+        "vad_end_ms": 70190.0,
+        "vad_start_ms": 67770.0
+      },
+      {
+        "audio_secs": 3.08,
+        "decode_ms": 316.7885,
+        "index": 23,
+        "queue_wait_ms": 0.158709,
+        "rtf": 0.10285340909090908,
+        "speech_end_to_text_ms": 590.1093330000003,
+        "speech_start_to_text_ms": 3670.1093330000003,
+        "text": "Ask what you can do for your country.",
+        "vad_close_to_text_ms": 316.9472919999971,
+        "vad_end_ms": 73610.0,
+        "vad_start_ms": 70530.0
+      }
+    ],
+    "segments_decoded": 24,
+    "segments_emitted": 24,
+    "speech_secs_total": 49.14000000000001,
+    "stats": {
+      "decode_ms": {
+        "max": 316.7885,
+        "mean": 95.10105391666667,
+        "median": 89.700083,
+        "min": 45.283958,
+        "n": 24,
+        "p95": 178.192292
+      },
+      "queue_wait_ms": {
+        "max": 0.158709,
+        "mean": 0.02340625,
+        "median": 0.016333,
+        "min": 0.009166,
+        "n": 24,
+        "p95": 0.030125
+      },
+      "rtf": {
+        "max": 0.10285340909090908,
+        "mean": 0.04746999118735993,
+        "median": 0.04006866279069768,
+        "min": 0.036405184962406016,
+        "n": 24,
+        "p95": 0.06415974225352113
+      },
+      "segment_audio_secs": {
+        "max": 3.14,
+        "mean": 2.0475,
+        "median": 2.3,
+        "min": 0.71,
+        "n": 24,
+        "p95": 3.08
+      },
+      "speech_end_to_text_ms": {
+        "max": 590.1093330000003,
+        "mean": 367.8582375416661,
+        "median": 362.90700000000106,
+        "min": 309.5777500000004,
+        "n": 24,
+        "p95": 450.0005000000019
+      },
+      "speech_start_to_text_ms": {
+        "max": 3670.1093330000003,
+        "mean": 2415.358237541666,
+        "median": 2702.906166,
+        "min": 1035.9420409999984,
+        "n": 24,
+        "p95": 3590.000500000002
+      },
+      "vad_close_to_text_ms": {
+        "max": 316.9472919999971,
+        "mean": 95.12451391666634,
+        "median": 89.71479199999885,
+        "min": 45.314125000000786,
+        "n": 24,
+        "p95": 178.21366700000362
+      }
+    },
+    "wall_secs": 74.947130375
+  },
+  "machine": {
+    "build_profile": "release",
+    "cpu": "Apple M1 Max",
+    "git_commit": "2bcc2e0f1b320c2b0dbb7232398f18849cd7a46b",
+    "git_describe": "2bcc2e0 perf(bench): add --engine apple to the live transcription harness",
+    "logical_cores": "10",
+    "memory_bytes": "34359738368",
+    "os": "macOS 27.0 (26A428)",
+    "physical_cores": "10",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew)"
+  }
+}

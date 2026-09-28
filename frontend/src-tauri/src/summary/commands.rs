@@ -356,11 +356,6 @@ pub async fn api_process_transcript<R: Runtime>(
     let cancellation_token = tokio_util::sync::CancellationToken::new();
     let local_lease = if execution.local { Some(crate::summary::inference_priority::register(&m_id, cancellation_token.clone())?) } else { None };
     drop(scheduling_guard);
-    if matches!(model.as_str(), "builtin-ai" | "local-llama")
-        && crate::audio::recording_commands::is_recording().await
-    {
-        return Err("Finish recording before starting a local summary to preserve capture responsiveness".to_string());
-    }
     log_info!(
         "api_process_transcript (native) called for meeting_id: {}, model: {}",
         &m_id,

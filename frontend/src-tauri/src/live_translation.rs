@@ -1,6 +1,7 @@
+use crate::apple_translation;
 use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
-use crate::summary::llm_client::{build_chat_request, generate_summary, LLMProvider};
+use crate::summary::llm_client::{build_chat_request, LLMProvider};
 use futures_util::StreamExt;
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -26,6 +27,7 @@ const FAST_GROQ_MODEL: &str = "llama-3.1-8b-instant";
 const FAST_OPENAI_MODEL: &str = "gpt-4o-mini";
 const FAST_CLAUDE_MODEL: &str = "claude-haiku-4-5-20251001";
 const PROVIDER_COOLDOWN: Duration = Duration::from_secs(20);
+const APPLE_ENGINE: &str = "apple";
 
 static CLOUD_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(2));
 static LOCAL_TRANSLATION_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(1));
@@ -572,14 +574,23 @@ fn is_conversational_english(text: &str) -> bool {
 }
 
 fn uses_local_translation_worker(provider: &LLMProvider) -> bool {
-    matches!(provider, LLMProvider::Ollama | LLMProvider::BuiltInAI)
+    matches!(provider, LLMProvider::Ollama)
+}
+
+/// Output cap for a local translation of `text`, so a runaway generation can't hold the
+/// single local slot. Bytes / 3 over-counts local-model tokens 1.5-2x for Latin and Devanagari
+/// text; doubling it covers the most expanding pair measured, English -> Hindi/Bengali
+/// (1.96x the source tokens).
+fn local_translation_max_tokens(text: &str) -> u32 {
+    let estimated_source_tokens = u32::try_from(text.len() / 3).unwrap_or(u32::MAX);
+    estimated_source_tokens
+        .saturating_mul(2)
+        .saturating_add(16)
+        .clamp(32, LIVE_TRANSLATION_MAX_TOKENS)
 }
 
 fn uses_extended_translation_budget(provider: &LLMProvider) -> bool {
-    matches!(
-        provider,
-        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::OpenAICodex
-    )
+    matches!(provider, LLMProvider::Ollama | LLMProvider::OpenAICodex)
 }
 
 fn cache_key(
@@ -779,34 +790,6 @@ fn validate_candidate_readiness(
     app_data_dir: Option<&Path>,
 ) -> Result<(), String> {
     match &config.provider {
-        LLMProvider::BuiltInAI => {
-            if let Some(dir) = app_data_dir {
-                let dir_buf = dir.to_path_buf();
-                let path_result =
-                    crate::summary::summary_engine::models::get_model_path(&dir_buf, &config.model_name);
-                let exists = match path_result {
-                    Ok(ref p) => {
-                        p.exists()
-                            || dir.parent().map_or(false, |parent| {
-                                parent
-                                    .join("com.meetily.ai")
-                                    .join("models")
-                                    .join("summary")
-                                    .join(p.file_name().unwrap_or_default())
-                                    .exists()
-                            })
-                    }
-                    Err(_) => false,
-                };
-                if !exists {
-                    return Err(format!(
-                        "Built-in AI model '{}' is not downloaded. Download it in Settings → AI Models.",
-                        config.model_name
-                    ));
-                }
-            }
-            Ok(())
-        }
         LLMProvider::OpenAICodex => {
             if let Some(dir) = app_data_dir {
                 let auth_file = dir.join("openai-codex-auth.json");
@@ -822,6 +805,11 @@ fn validate_candidate_readiness(
             }
             Ok(())
         }
+        // The Foundation Models bridge has no streaming translation path here.
+        LLMProvider::AppleIntelligence => Err(
+            "Apple Intelligence isn't used for live translation. Choose a translation engine in Settings → Live translation."
+                .to_string(),
+        ),
         _ => Ok(()),
     }
 }
@@ -832,11 +820,7 @@ async fn resolve_provider_candidates(
     translation_engine: Option<&str>,
     model_override: Option<&str>,
 ) -> Result<Vec<TranslationProviderConfig>, String> {
-    let engine = translation_engine
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("auto")
-        .to_ascii_lowercase();
+    let engine = normalized_engine(translation_engine);
     let mut candidates = Vec::new();
     let mut last_summary_err = None;
 
@@ -875,56 +859,6 @@ async fn resolve_provider_candidates(
         }
         validate_candidate_readiness(&current, app_data_dir)?;
         push_unique_candidate(&mut candidates, current);
-    } else if engine == "builtin-ai" || engine == "local" {
-        let model = model_override
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| {
-                crate::summary::summary_engine::commands::recommend_summary_model(
-                    cfg!(target_os = "macos"),
-                    16,
-                )
-                .to_string()
-            });
-        let candidate = TranslationProviderConfig {
-            provider: LLMProvider::BuiltInAI,
-            provider_name: "builtin-ai".to_string(),
-            model_name: model,
-            api_key: String::new(),
-            ollama_endpoint: None,
-            custom_openai_endpoint: None,
-            max_tokens: None,
-            temperature: None,
-            top_p: None,
-        };
-        validate_candidate_readiness(&candidate, app_data_dir)?;
-        push_unique_candidate(&mut candidates, candidate);
-    } else if engine == "ollama" {
-        let setting = SettingsRepository::get_model_config(pool).await.ok().flatten();
-        let model = model_override
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                setting
-                    .as_ref()
-                    .map(|s| s.model.trim().to_string())
-                    .filter(|s| !s.is_empty())
-            })
-            .unwrap_or_else(|| "llama3.2".to_string());
-        let candidate = TranslationProviderConfig {
-            provider: LLMProvider::Ollama,
-            provider_name: "ollama".to_string(),
-            model_name: model,
-            api_key: String::new(),
-            ollama_endpoint: setting.and_then(|s| s.ollama_endpoint),
-            custom_openai_endpoint: None,
-            max_tokens: None,
-            temperature: None,
-            top_p: None,
-        };
-        push_unique_candidate(&mut candidates, candidate);
     } else if ["openai", "openai-codex", "chatgpt"].contains(&engine.as_str()) {
         let codex_candidate = resolve_openai_subscription_candidate(pool, model_override).await?;
         if validate_candidate_readiness(&codex_candidate, app_data_dir).is_ok() {
@@ -962,7 +896,7 @@ async fn resolve_provider_candidates(
         if let Some(err) = last_summary_err {
             return Err(format!("No live translation provider is ready: {err}"));
         }
-        return Err("No live translation provider is configured. Add Groq/OpenAI/Claude credentials, sign in with ChatGPT, or download a local model in Settings.".to_string());
+        return Err("No live translation provider is configured. Add Groq/OpenAI/Claude credentials, sign in with ChatGPT, or choose Apple Translation.".to_string());
     }
     Ok(candidates)
 }
@@ -1014,17 +948,18 @@ async fn translate_with_candidate<R: Runtime>(
         _ = cancellation_token.cancelled() => return Err("Live translation was cancelled.".to_string()),
     };
 
-    let attempt_started = Instant::now();
     let (system_prompt, user_prompt) =
         build_translation_prompts(text, source, target, context_text, glossary, context_hint);
     let app_data_dir = app.path().app_data_dir().ok();
-    let max_tokens = Some(
-        config
-            .max_tokens
-            .map_or(LIVE_TRANSLATION_MAX_TOKENS, |value| {
-                value.min(LIVE_TRANSLATION_MAX_TOKENS)
-            }),
-    );
+    let mut max_tokens = config
+        .max_tokens
+        .map_or(LIVE_TRANSLATION_MAX_TOKENS, |value| {
+            value.min(LIVE_TRANSLATION_MAX_TOKENS)
+        });
+    if uses_local_translation_worker(&config.provider) {
+        max_tokens = max_tokens.min(local_translation_max_tokens(text));
+    }
+    let max_tokens = Some(max_tokens);
     let provider_name = config.provider_name.clone();
     let model_name = config.model_name.clone();
     let emit_request_id = request_id.to_string();
@@ -1033,12 +968,17 @@ async fn translate_with_candidate<R: Runtime>(
         if last_emit.is_some_and(|at| at.elapsed() < DELTA_EMIT_INTERVAL) {
             return;
         }
+        let text = clean_translation_output(translated);
+        // A lone newline or opening fence would blank the caption until real words arrive.
+        if text.is_empty() {
+            return;
+        }
         last_emit = Some(Instant::now());
         let _ = app.emit(
             "live-translation-delta",
             serde_json::json!({
                 "requestId": emit_request_id,
-                "text": clean_translation_output(translated),
+                "text": text,
                 "provider": provider_name,
                 "model": model_name,
                 "firstWordLatencyMs": first_word_ms,
@@ -1047,33 +987,6 @@ async fn translate_with_candidate<R: Runtime>(
     };
 
     let connect_timeout = budgets.first_word.max(Duration::from_millis(3500));
-
-    if config.provider == LLMProvider::BuiltInAI {
-        let future = generate_summary(
-            &TRANSLATION_HTTP_CLIENT,
-            &config.provider,
-            &config.model_name,
-            &config.api_key,
-            &system_prompt,
-            &user_prompt,
-            None,
-            None,
-            max_tokens,
-            None,
-            None,
-            app_data_dir.as_ref(),
-            None,
-        );
-        let result = timeout(budgets.attempt, future).await.map_err(|_| {
-            format!(
-                "translation exceeded {}ms attempt limit",
-                budgets.attempt.as_millis()
-            )
-        })??;
-        let first = attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-        emit_text(&result, first);
-        return Ok((result, first));
-    }
 
     if config.provider == LLMProvider::OpenAICodex {
         let dir = app_data_dir
@@ -1188,6 +1101,174 @@ async fn cleanup_translation(request_id: &str, generation: u64) {
     }
 }
 
+fn normalized_engine(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("auto")
+        .to_ascii_lowercase()
+}
+
+/// The meeting's spoken language, which Apple Translation needs explicitly: the Apple Speech
+/// locale, otherwise the transcription language preference, then detection on the caption.
+fn meeting_source_language(
+    transcript: Option<(&str, &str)>,
+    language_preference: Option<&str>,
+    text: &str,
+) -> Option<String> {
+    let explicit = |value: &str| {
+        let value = value.trim();
+        (!value.is_empty() && !value.to_ascii_lowercase().starts_with("auto"))
+            .then(|| value.replace('_', "-"))
+    };
+    if let Some((provider, model)) = transcript {
+        if provider == crate::apple_speech::PROVIDER {
+            if let Some(locale) = explicit(model) {
+                return Some(locale);
+            }
+        }
+    }
+    if let Some(preference) = language_preference.and_then(explicit) {
+        return Some(preference);
+    }
+    // ponytail: whatlang's top guess at >= 0.5 (is_reliable() rejects clear Spanish sentences);
+    // NLLanguageRecognizer in the Swift bridge if short captions guess wrong.
+    let detected = whatlang::detect(text).filter(|info| info.confidence() >= 0.5)?;
+    whatlang_to_app_language_code(detected.lang()).map(str::to_string)
+}
+
+// ponytail: primary-subtag match, so zh-CN speech with a zh-TW target is also skipped.
+fn apple_source_is_target(source: &str, target: LanguageSpec) -> bool {
+    let primary = source.split(['-', '_']).next().unwrap_or_default();
+    is_detected_language_matching_target(primary, target.code)
+}
+
+/// The locale Apple Speech actually records with. Stored rows from older engines aren't
+/// rewritten on upgrade, so they resolve to the system default, as recording does.
+async fn effective_speech_locale(pool: &SqlitePool) -> String {
+    let stored = SettingsRepository::get_transcript_config(pool).await.ok().flatten();
+    match stored.and_then(|c| crate::apple_speech::saved_locale(&c.provider, &c.model)) {
+        Some(locale) => locale,
+        None => crate::apple_speech::default_locale().await,
+    }
+}
+
+async fn apple_source_language(pool: &SqlitePool, text: &str) -> Option<String> {
+    let locale = effective_speech_locale(pool).await;
+    let preference = crate::get_language_preference_internal();
+    meeting_source_language(
+        Some((crate::apple_speech::PROVIDER, locale.as_str())),
+        preference.as_deref(),
+        text,
+    )
+}
+
+async fn prepare_apple(
+    pool: &SqlitePool,
+    target_language: Option<&str>,
+) -> Result<LiveTranslationPreparation, String> {
+    let prepared = |warmed| LiveTranslationPreparation {
+        provider: apple_translation::PROVIDER.to_string(),
+        model: apple_translation::MODEL.to_string(),
+        warmed,
+    };
+    let Some(target) = target_language.map(resolve_language).transpose()? else {
+        return Ok(prepared(false));
+    };
+    // Without a known speech locale the source is only known per caption.
+    let Some(source) = apple_source_language(pool, "").await else {
+        return Ok(prepared(false));
+    };
+    if apple_source_is_target(&source, target) {
+        return Ok(prepared(false));
+    }
+    let (availability, warmed) = apple_translation::prepare(&source, target.code, true).await?;
+    if availability != apple_translation::Availability::Installed {
+        return Err(apple_translation::not_ready_message(availability, &source, target.code));
+    }
+    Ok(prepared(warmed))
+}
+
+/// Apple Translation returns whole sentences, so the final text goes out as one delta.
+async fn translate_with_apple<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &SqlitePool,
+    request_id: String,
+    text: &str,
+    source: Option<LanguageSpec>,
+    target: LanguageSpec,
+    fallback_reason: Option<String>,
+) -> Result<LiveTranslationResponse, String> {
+    let source = match source {
+        Some(language) => language.code.to_string(),
+        None => apple_source_language(pool, text).await.ok_or_else(|| {
+            "Apple Translation needs the spoken language. Choose it in Settings › Transcription."
+                .to_string()
+        })?,
+    };
+    let response = |translated_text: String, latency_ms: u64, cached: bool| LiveTranslationResponse {
+        request_id: request_id.clone(),
+        translated_text,
+        source_language: Some(source.clone()),
+        target_language: target.code.to_string(),
+        provider: apple_translation::PROVIDER.to_string(),
+        model: apple_translation::MODEL.to_string(),
+        latency_ms,
+        first_word_latency_ms: latency_ms,
+        fallback_reason: fallback_reason.clone(),
+        cached,
+    };
+    if apple_source_is_target(&source, target) {
+        return Ok(LiveTranslationResponse {
+            provider: "passthrough".to_string(),
+            model: "same-language".to_string(),
+            ..response(text.to_string(), 0, true)
+        });
+    }
+    let key = cache_key(apple_translation::PROVIDER, &source, None, target, text, None, None, None);
+    if let Some(translated) = TRANSLATION_CACHE.lock().await.get(&key) {
+        return Ok(response(translated, 0, true));
+    }
+
+    let (generation, cancellation_token) = register_translation(&request_id).await;
+    let _ = app.emit(
+        "live-translation-status",
+        serde_json::json!({
+            "requestId": request_id,
+            "event": "started",
+            "provider": apple_translation::PROVIDER,
+            "model": apple_translation::MODEL,
+        }),
+    );
+    let started = Instant::now();
+    let result = async {
+        let _permit = tokio::select! {
+            permit = LOCAL_TRANSLATION_SEMAPHORE.acquire() => permit.map_err(|_| "Live translation worker pool is unavailable.".to_string())?,
+            _ = cancellation_token.cancelled() => return Err("Live translation was cancelled.".to_string()),
+        };
+        apple_translation::translate(&source, target.code, text, &cancellation_token).await
+    }
+    .await;
+    cleanup_translation(&request_id, generation).await;
+    let translated = result?.trim().to_string();
+    if translated.is_empty() {
+        return Err("Apple Translation returned empty text.".to_string());
+    }
+    let latency_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let _ = app.emit(
+        "live-translation-delta",
+        serde_json::json!({
+            "requestId": request_id,
+            "text": translated,
+            "provider": apple_translation::PROVIDER,
+            "model": apple_translation::MODEL,
+            "firstWordLatencyMs": latency_ms,
+        }),
+    );
+    TRANSLATION_CACHE.lock().await.insert(key, translated.clone());
+    Ok(response(translated, latency_ms, false))
+}
+
 pub(crate) async fn resolve_provider_config(pool: &SqlitePool) -> Result<TranslationProviderConfig, String> {
     let setting = SettingsRepository::get_model_config(pool)
         .await
@@ -1203,7 +1284,7 @@ pub(crate) async fn resolve_provider_config(pool: &SqlitePool) -> Result<Transla
     let mut top_p = None;
 
     match &provider {
-        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::OpenAICodex => {}
+        LLMProvider::Ollama | LLMProvider::OpenAICodex | LLMProvider::AppleIntelligence => {}
         LLMProvider::CustomOpenAI => {
             let config = SettingsRepository::get_custom_openai_config(pool)
                 .await
@@ -1254,9 +1335,10 @@ pub async fn api_cancel_live_translation(request_id: String) -> Result<bool, Str
     Ok(false)
 }
 
-/// Pre-load the local model so the first live segment is not served cold.
+/// Pre-load the local path so the first live segment is not served cold.
 /// Ollama unloads idle models after ~5 minutes; a request with an empty prompt
-/// loads it and returns immediately. Cloud providers need nothing.
+/// loads it and returns immediately. Apple Translation checks the language pair and
+/// creates its reusable session. Cloud providers need nothing.
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1273,17 +1355,28 @@ pub async fn api_prepare_live_translation<R: Runtime>(
     translation_engine: Option<String>,
     speed_mode: Option<String>,
     model_override: Option<String>,
+    target_language: Option<String>,
 ) -> Result<LiveTranslationPreparation, String> {
     clear_provider_health().await;
     let _ = translation_budgets(speed_mode.as_deref());
+    let pool = state.db_manager.pool();
+    let engine = normalized_engine(translation_engine.as_deref());
+    if engine == APPLE_ENGINE {
+        return prepare_apple(pool, target_language.as_deref()).await;
+    }
     let app_data_dir = app.path().app_data_dir().ok();
-    let candidates = resolve_provider_candidates(
-        state.db_manager.pool(),
+    let candidates = match resolve_provider_candidates(
+        pool,
         app_data_dir.as_deref(),
-        translation_engine.as_deref(),
+        Some(&engine),
         model_override.as_deref(),
     )
-    .await?;
+    .await
+    {
+        Ok(candidates) => candidates,
+        Err(_) if engine == "auto" => return prepare_apple(pool, target_language.as_deref()).await,
+        Err(error) => return Err(error),
+    };
     let preferred = &candidates[0];
     let warmed = if preferred.provider == LLMProvider::Ollama {
         warm_ollama_candidate(preferred).await?;
@@ -1304,7 +1397,8 @@ pub async fn api_warm_live_translation<R: Runtime>(
     state: tauri::State<'_, AppState>,
 ) -> Result<bool, String> {
     let prepared =
-        api_prepare_live_translation(app, state, Some("summary".to_string()), None, None).await?;
+        api_prepare_live_translation(app, state, Some("summary".to_string()), None, None, None)
+            .await?;
     Ok(prepared.warmed)
 }
 
@@ -1353,29 +1447,9 @@ pub async fn api_translate_live_text<R: Runtime>(
     if source.is_none() {
         // If target is English and active STT engine is producing English:
         if target.code == "en" {
-            let mut is_english_stt = false;
-            let mut stt_model_name = "parakeet-english".to_string();
-
-            if let Ok(Some(transcript_setting)) =
-                SettingsRepository::get_transcript_config(state.db_manager.pool()).await
-            {
-                if transcript_setting.provider.eq_ignore_ascii_case("parakeet") {
-                    is_english_stt = true;
-                    stt_model_name = "parakeet-english".to_string();
-                } else if transcript_setting.model.to_lowercase().ends_with(".en") {
-                    is_english_stt = true;
-                    stt_model_name = format!("{}-english", transcript_setting.provider);
-                }
-            }
-
-            if !is_english_stt {
-                if let Some(pref) = crate::get_language_preference_internal() {
-                    if pref.eq_ignore_ascii_case("en") || pref.to_lowercase().starts_with("en-") {
-                        is_english_stt = true;
-                        stt_model_name = "whisper-english".to_string();
-                    }
-                }
-            }
+            let locale = effective_speech_locale(state.db_manager.pool()).await;
+            let is_english_stt = locale.to_ascii_lowercase().starts_with("en");
+            let stt_model_name = format!("{}-english", crate::apple_speech::PROVIDER);
 
             if is_english_stt {
                 return Ok(LiveTranslationResponse {
@@ -1436,15 +1510,28 @@ pub async fn api_translate_live_text<R: Runtime>(
         }
     }
 
+    let pool = state.db_manager.pool();
+    let engine = normalized_engine(translation_engine.as_deref());
+    if engine == APPLE_ENGINE {
+        return translate_with_apple(&app, pool, request_id, text, source, target, None).await;
+    }
     let app_data_dir = app.path().app_data_dir().ok();
     let budgets = translation_budgets(speed_mode.as_deref());
-    let mut candidates = resolve_provider_candidates(
-        state.db_manager.pool(),
+    let mut candidates = match resolve_provider_candidates(
+        pool,
         app_data_dir.as_deref(),
-        translation_engine.as_deref(),
+        Some(&engine),
         model_override.as_deref(),
     )
-    .await?;
+    .await
+    {
+        Ok(candidates) => candidates,
+        // Auto with nothing configured still has the on-device engine.
+        Err(_) if engine == "auto" => {
+            return translate_with_apple(&app, pool, request_id, text, source, target, None).await
+        }
+        Err(error) => return Err(error),
+    };
     if candidates.len() > 1 {
         let mut ready = Vec::new();
         let mut cooling = Vec::new();
@@ -1575,6 +1662,11 @@ pub async fn api_translate_live_text<R: Runtime>(
                 });
             }
             Err(error) => {
+                // A superseded request is not a provider failure; stop, don't fall back.
+                if cancellation_token.is_cancelled() {
+                    last_error = Some(error);
+                    break;
+                }
                 record_provider_failure(config).await;
                 last_error = Some(error.clone());
                 if let Some(next) = candidates.get(index + 1) {
@@ -1600,6 +1692,10 @@ pub async fn api_translate_live_text<R: Runtime>(
     }
 
     cleanup_translation(&request_id, generation).await;
+    // Auto ends on this Mac when every configured provider failed.
+    if engine == "auto" && !cancellation_token.is_cancelled() {
+        return translate_with_apple(&app, pool, request_id, text, source, target, last_error).await;
+    }
     Err(last_error
         .unwrap_or_else(|| "All configured live translation providers failed.".to_string()))
 }
@@ -1663,15 +1759,22 @@ mod tests {
     #[test]
     fn local_providers_are_single_flight() {
         assert!(uses_local_translation_worker(&LLMProvider::Ollama));
-        assert!(uses_local_translation_worker(&LLMProvider::BuiltInAI));
         assert!(!uses_local_translation_worker(&LLMProvider::OpenAICodex));
         assert!(!uses_local_translation_worker(&LLMProvider::OpenAI));
     }
 
     #[test]
+    fn local_output_cap_scales_with_the_source() {
+        assert_eq!(local_translation_max_tokens("Sí."), 32, "floor");
+        // 227 bytes / 49 tokens of English; its Hindi translation took 96 tokens.
+        let english = "Before we wrap up today, I want to make sure everyone knows the new release schedule: the beta ships on March 3rd, the security review happens the week after, and we need all customer feedback collected by the end of the month.";
+        assert_eq!(local_translation_max_tokens(english), 166);
+        assert_eq!(local_translation_max_tokens(&"palabra ".repeat(700)), LIVE_TRANSLATION_MAX_TOKENS);
+    }
+
+    #[test]
     fn local_and_codex_providers_receive_extended_budget() {
         assert!(uses_extended_translation_budget(&LLMProvider::OpenAICodex));
-        assert!(uses_extended_translation_budget(&LLMProvider::BuiltInAI));
         assert!(uses_extended_translation_budget(&LLMProvider::Ollama));
         assert!(!uses_extended_translation_budget(&LLMProvider::Groq));
         assert!(!uses_extended_translation_budget(&LLMProvider::Claude));
@@ -1766,6 +1869,36 @@ mod tests {
 
         clear_provider_health().await;
         assert!(!provider_is_cooling_down(&config).await);
+    }
+
+    #[test]
+    fn apple_engine_is_selected_by_its_id() {
+        assert_eq!(normalized_engine(Some(" Apple ")), APPLE_ENGINE);
+        assert_eq!(normalized_engine(None), "auto");
+        assert_eq!(normalized_engine(Some("")), "auto");
+    }
+
+    #[test]
+    fn apple_source_follows_the_meeting_transcription_language() {
+        let apple = Some((crate::apple_speech::PROVIDER, "es_MX"));
+        assert_eq!(meeting_source_language(apple, Some("en"), "").as_deref(), Some("es-MX"));
+        assert_eq!(meeting_source_language(Some((crate::apple_speech::PROVIDER, "")), Some("hi"), "").as_deref(), Some("hi"));
+        let detected = meeting_source_language(
+            Some((crate::apple_speech::PROVIDER, "")),
+            Some("auto"),
+            "Buenos días a todos, hoy vamos a revisar el presupuesto del próximo trimestre.",
+        );
+        assert_eq!(detected.as_deref(), Some("es"));
+        assert_eq!(meeting_source_language(None, Some("auto"), ""), None);
+    }
+
+    #[test]
+    fn apple_skips_when_target_is_the_spoken_language() {
+        let english = resolve_language("en").unwrap();
+        assert!(apple_source_is_target("en-US", english));
+        assert!(apple_source_is_target("en_GB", english));
+        assert!(!apple_source_is_target("es-MX", english));
+        assert!(apple_source_is_target("zh-CN", resolve_language("zh-TW").unwrap()));
     }
 
     #[test]

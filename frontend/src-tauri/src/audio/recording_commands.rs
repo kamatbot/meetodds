@@ -38,7 +38,6 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-static LIVE_PREVIEW_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
@@ -81,7 +80,6 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     let _ = super::simple_level_monitor::stop_monitoring().await;
     let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
     if crate::summary::inference_priority::cancel_for_capture() > 0 {
-        let _ = crate::summary::summary_engine::client::shutdown_sidecar_gracefully().await;
         let _ = app.emit("local-summary-yielded", serde_json::json!({"message": "Local summary work was cancelled to prioritize recording. It can be restarted after this meeting."}));
     }
 
@@ -91,23 +89,6 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
-
-    // Validate that transcription models are available before starting recording
-    info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
-        error!("Model validation failed: {}", validation_error);
-
-        // Emit error event for frontend - actionable: false to show toast instead of modal
-        // (download progress is already shown in top-right toast)
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
-        }));
-
-        return Err(validation_error);
-    }
-    info!("✅ Transcription model validation passed");
 
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
@@ -240,11 +221,13 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     });
 
     transcription::preview_control::get_live_preview_enabled(app.clone()).await?;
-    let apple = transcription::apple::PreparedApple::from_config(&app, microphone_device.is_some(), system_device.is_some()).await?;
-    if let Some(prepared) = &apple { manager.set_apple_speech_sender(prepared.sender.clone()); }
+    // Apple Speech sessions start (and check language assets) before capture opens.
+    let apple = transcription::apple::PreparedApple::from_config(&app, microphone_device.is_some(), system_device.is_some()).await?
+        .ok_or_else(|| "Apple Speech is not configured. Choose a spoken language in Settings → Transcription.".to_string())?;
+    manager.set_apple_speech_sender(apple.sender.clone());
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
-    let (transcription_receiver, live_preview_receiver) = manager
+    manager
         .start_recording(microphone_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
@@ -297,7 +280,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     }
 
     // Register persistence before any ASR task can emit its first final result.
-    start_selected_transcription(&app, apple, transcription_receiver, live_preview_receiver, has_separate_system_audio);
+    *TRANSCRIPTION_TASK.lock().unwrap() = Some(apple.spawn(app.clone(), has_separate_system_audio));
 
     // Emit success event
     app.emit(
@@ -342,7 +325,6 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let _ = super::simple_level_monitor::stop_monitoring().await;
     let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
     if crate::summary::inference_priority::cancel_for_capture() > 0 {
-        let _ = crate::summary::summary_engine::client::shutdown_sidecar_gracefully().await;
         let _ = app.emit("local-summary-yielded", serde_json::json!({"message": "Local summary work was cancelled to prioritize recording. It can be restarted after this meeting."}));
     }
 
@@ -352,23 +334,6 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
-
-    // Validate that transcription models are available before starting recording
-    info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
-        error!("Model validation failed: {}", validation_error);
-
-        // Emit error event for frontend - actionable: false to show toast instead of modal
-        // (download progress is already shown in top-right toast)
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
-        }));
-
-        return Err(validation_error);
-    }
-    info!("✅ Transcription model validation passed");
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -415,11 +380,13 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     });
 
     transcription::preview_control::get_live_preview_enabled(app.clone()).await?;
-    let apple = transcription::apple::PreparedApple::from_config(&app, mic_device.is_some(), system_device.is_some()).await?;
-    if let Some(prepared) = &apple { manager.set_apple_speech_sender(prepared.sender.clone()); }
+    // Apple Speech sessions start (and check language assets) before capture opens.
+    let apple = transcription::apple::PreparedApple::from_config(&app, mic_device.is_some(), system_device.is_some()).await?
+        .ok_or_else(|| "Apple Speech is not configured. Choose a spoken language in Settings → Transcription.".to_string())?;
+    manager.set_apple_speech_sender(apple.sender.clone());
 
     // Start recording with specified devices and auto_save setting
-    let (transcription_receiver, live_preview_receiver) = manager
+    manager
         .start_recording(mic_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
@@ -472,7 +439,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     }
 
     // Register persistence before any ASR task can emit its first final result.
-    start_selected_transcription(&app, apple, transcription_receiver, live_preview_receiver, has_separate_system_audio);
+    *TRANSCRIPTION_TASK.lock().unwrap() = Some(apple.spawn(app.clone(), has_separate_system_audio));
 
     // Emit success event
     app.emit(
@@ -494,25 +461,6 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     info!("✅ Recording started with custom devices using async-first approach");
 
     Ok(())
-}
-
-fn start_selected_transcription<R: Runtime>(
-    app: &AppHandle<R>,
-    apple: Option<transcription::apple::PreparedApple>,
-    receiver: tokio::sync::mpsc::UnboundedReceiver<super::AudioChunk>,
-    previews: tokio::sync::watch::Receiver<Option<transcription::live_preview::PreviewAudio>>,
-    separated: bool,
-) {
-    let task = if let Some(prepared) = apple {
-        drop(receiver);
-        drop(previews);
-        prepared.spawn(app.clone(), separated)
-    } else {
-        let preview = transcription::start_live_preview_task(app.clone(), previews, separated);
-        *LIVE_PREVIEW_TASK.lock().unwrap() = Some(preview);
-        transcription::start_transcription_task(app.clone(), receiver, separated)
-    };
-    *TRANSCRIPTION_TASK.lock().unwrap() = Some(task);
 }
 
 /// Stop recording with optimized graceful shutdown ensuring NO transcript chunks are lost
@@ -578,11 +526,7 @@ pub async fn stop_recording<R: Runtime>(
         *global_manager = Some(m);
     }
 
-    // Speculative subtitles are disposable; stop them before canonical shutdown so
-    // the ASR model is fully available to the final transcript queue.
-    if let Some(preview_task) = LIVE_PREVIEW_TASK.lock().unwrap().take() {
-        preview_task.abort();
-    }
+    // Provisional captions are disposable; clear them before final results drain.
     let _ = app.emit(
         "live-transcript-preview-clear",
         serde_json::json!({ "source": null }),
@@ -671,98 +615,6 @@ pub async fn stop_recording<R: Runtime>(
         global_manager.take()
     };
 
-    // Step 3: Now safely unload Whisper model after ALL chunks are processed
-    let _ = app.emit(
-        "recording-shutdown-progress",
-        serde_json::json!({
-            "stage": "unloading_model",
-            "message": "Unloading speech recognition model...",
-            "progress": 70
-        }),
-    );
-
-    info!("🧠 All transcript chunks processed. Now safely unloading transcription model...");
-
-    // Determine which provider was used and unload the appropriate model (with timeout)
-    let config = match tokio::time::timeout(
-        tokio::time::Duration::from_secs(30), // 30 seconds max for DB operation
-        crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None),
-    )
-    .await
-    {
-        Ok(Ok(Some(config))) => Some(config.provider),
-        Ok(Ok(None)) => None,
-        Ok(Err(e)) => {
-            warn!("⚠️ Failed to get transcript config: {:?}", e);
-            None
-        }
-        Err(_) => {
-            warn!("⏱️ Transcript config timeout (30s), continuing shutdown");
-            None
-        }
-    };
-
-    match config.as_deref() {
-        Some("appleSpeech") => {
-            // Continuous sessions finalized and released before the transcript listener was removed.
-            info!("Apple Speech sessions finished");
-        }
-        Some("parakeet") => {
-            info!("🦜 Unloading Parakeet model...");
-            let engine_clone = {
-                let engine_guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
-                    .lock()
-                    .unwrap();
-                engine_guard.as_ref().cloned()
-            };
-
-            if let Some(engine) = engine_clone {
-                let current_model = engine
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-                info!("Current Parakeet model before unload: '{}'", current_model);
-
-                if engine.unload_model().await {
-                    info!(
-                        "✅ Parakeet model '{}' unloaded successfully",
-                        current_model
-                    );
-                } else {
-                    warn!("⚠️ Failed to unload Parakeet model '{}'", current_model);
-                }
-            } else {
-                warn!("⚠️ No Parakeet engine found to unload model");
-            }
-        }
-        _ => {
-            // Default to Whisper
-            info!("🎤 Unloading Whisper model...");
-            let engine_clone = {
-                let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
-                    .lock()
-                    .unwrap();
-                engine_guard.as_ref().cloned()
-            };
-
-            if let Some(engine) = engine_clone {
-                let current_model = engine
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-                info!("Current Whisper model before unload: '{}'", current_model);
-
-                if engine.unload_model().await {
-                    info!("✅ Whisper model '{}' unloaded successfully", current_model);
-                } else {
-                    warn!("⚠️ Failed to unload Whisper model '{}'", current_model);
-                }
-            } else {
-                warn!("⚠️ No Whisper engine found to unload model");
-            }
-        }
-    }
-
     // Step 3.5: Track meeting ended analytics with privacy-safe metadata
     // Extract all data from manager BEFORE any async operations to avoid Send issues
     let analytics_data = if let Some(ref manager) = manager_for_cleanup {
@@ -814,7 +666,7 @@ pub async fn stop_recording<R: Runtime>(
             }
         }
 
-        // Get transcription model info (already loaded above for model unload)
+        // Get transcription engine/locale info
         let transcription_config = match crate::api::api::api_get_transcript_config(
             app.clone(),
             app.clone().state(),

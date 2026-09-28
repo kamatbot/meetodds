@@ -48,6 +48,9 @@ interface RecordingStateContextType extends RecordingState {
 
 const RecordingStateContext = createContext<RecordingStateContextType | null>(null);
 
+const sameWholeSecond = (a: number | null, b: number | null) =>
+  a === b || (a != null && b != null && Math.floor(a) === Math.floor(b));
+
 export const useRecordingState = () => {
   const context = useContext(RecordingStateContext);
   if (!context) {
@@ -88,14 +91,27 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
     try {
       const backendState = await recordingService.getRecordingState();
 
-      setState(prev => ({
-        ...prev,
-        isRecording: backendState.is_recording,
-        isPaused: backendState.is_paused,
-        isActive: backendState.is_active,
-        recordingDuration: backendState.recording_duration,
-        activeDuration: backendState.active_duration,
-      }));
+      setState(prev => {
+        // Every duration display floors to whole seconds, so skip sub-second
+        // changes: returning prev bails out of re-rendering all consumers.
+        if (
+          prev.isRecording === backendState.is_recording &&
+          prev.isPaused === backendState.is_paused &&
+          prev.isActive === backendState.is_active &&
+          sameWholeSecond(prev.recordingDuration, backendState.recording_duration) &&
+          sameWholeSecond(prev.activeDuration, backendState.active_duration)
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          isRecording: backendState.is_recording,
+          isPaused: backendState.is_paused,
+          isActive: backendState.is_active,
+          recordingDuration: backendState.recording_duration,
+          activeDuration: backendState.active_duration,
+        };
+      });
 
     } catch (error) {
       console.error('[RecordingStateContext] Failed to sync with backend:', error);

@@ -72,7 +72,7 @@ const sections: SettingsSectionDefinition[] = [
     label: 'Transcription',
     description: 'On-device transcription engine, live language, and model management.',
     icon: Speech,
-    keywords: ['whisper', 'parakeet', 'apple speech', 'apple', 'on-device', 'model', 'language', 'transcript'],
+    keywords: ['apple speech', 'apple', 'on-device', 'language', 'transcript'],
   },
   {
     id: 'summary',
