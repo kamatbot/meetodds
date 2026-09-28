@@ -480,7 +480,7 @@ mod tests {
         properties.insert("meeting_id".to_string(), "meeting-123".to_string());
         properties.insert("duration_seconds".to_string(), "125".to_string());
         properties.insert("segments_count".to_string(), "42".to_string());
-        properties.insert("model_name".to_string(), "parakeet".to_string());
+        properties.insert("model_name".to_string(), "appleSpeech".to_string());
         properties.insert("platform".to_string(), "Windows".to_string());
 
         let sanitized = sanitize_analytics_properties(properties);
@@ -506,7 +506,7 @@ mod tests {
         assert_eq!(sanitized.get("meeting_id"), Some(&"meeting-123".to_string()));
         assert_eq!(sanitized.get("duration_seconds"), Some(&"125".to_string()));
         assert_eq!(sanitized.get("segments_count"), Some(&"42".to_string()));
-        assert_eq!(sanitized.get("model_name"), Some(&"parakeet".to_string()));
+        assert_eq!(sanitized.get("model_name"), Some(&"appleSpeech".to_string()));
         assert_eq!(sanitized.get("platform"), Some(&"Windows".to_string()));
     }
 
