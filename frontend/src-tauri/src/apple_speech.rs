@@ -31,7 +31,7 @@ pub struct Capabilities {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub(crate) enum SpeechEvent {
+pub enum SpeechEvent {
     Capabilities {
         available: bool,
         reason: Option<String>,
@@ -104,7 +104,7 @@ extern "C" fn receive(id: u64, json: *const std::ffi::c_char) {
     }
 }
 
-pub(crate) struct SpeechSession {
+pub struct SpeechSession {
     id: u64,
     pub events: mpsc::Receiver<SpeechEvent>,
 }
@@ -147,7 +147,7 @@ impl SpeechSession {
         }
     }
 
-    pub(crate) async fn start(locale: &str) -> Result<Self, String> {
+    pub async fn start(locale: &str) -> Result<Self, String> {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = locale;
@@ -167,7 +167,7 @@ impl SpeechSession {
         }
     }
 
-    pub(crate) fn push(&self, samples: &[f32], rate: u32, timestamp: f64) -> Result<(), String> {
+    pub fn push(&self, samples: &[f32], rate: u32, timestamp: f64) -> Result<(), String> {
         if samples.is_empty() {
             return Ok(());
         }
@@ -193,7 +193,7 @@ impl SpeechSession {
         Err("Apple Speech could not accept audio. Stop and retry transcription from the saved recording.".into())
     }
 
-    pub(crate) fn finish(&self) {
+    pub fn finish(&self) {
         #[cfg(target_os = "macos")]
         unsafe {
             ffi::md_speech_finish(self.id);

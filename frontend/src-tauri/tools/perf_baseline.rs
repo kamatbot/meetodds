@@ -25,6 +25,9 @@ use app_lib::config::DEFAULT_PARAKEET_MODEL;
 use app_lib::parakeet_engine::parakeet_engine::ParakeetEngine;
 use app_lib::whisper_engine::whisper_engine::WhisperEngine;
 
+#[path = "perf_baseline_apple.rs"]
+mod apple;
+
 /// Capture chunk fed per tick, matching a typical cpal callback size.
 const CHUNK_SAMPLES: usize = 1024;
 const CAPTURE_RATE: u32 = 48_000;
@@ -37,7 +40,7 @@ const DEFAULT_REDEMPTION_MS: u32 = app_lib::audio::pipeline::LIVE_VAD_REDEMPTION
 #[derive(Parser, Debug)]
 #[command(about = "Baseline CPU/latency harness for the live transcription path")]
 struct Args {
-    /// ASR engine to exercise.
+    /// ASR engine to exercise: parakeet, whisper, or apple (model = locale, default en_US).
     #[arg(long, default_value = "parakeet")]
     engine: String,
 
@@ -455,6 +458,7 @@ async fn live_phase(
             let mut window_secs = Vec::new();
             let mut skipped_busy = 0usize;
             let mut texts: Vec<String> = Vec::new();
+            let mut arrivals_ms = Vec::new();
             while rx.changed().await.is_ok() {
                 let Some(samples) = rx.borrow_and_update().clone() else { continue };
                 if busy.load(Ordering::Acquire) {
@@ -470,12 +474,15 @@ async fn live_phase(
                 let elapsed = d0.elapsed();
                 decode_ms.push(elapsed.as_secs_f64() * 1000.0);
                 window_secs.push(secs);
+                if !text.trim().is_empty() {
+                    arrivals_ms.push(t0.elapsed().as_secs_f64() * 1000.0);
+                }
                 if texts.len() < 5 {
                     texts.push(text);
                 }
                 tokio::time::sleep(elapsed * 2).await;
             }
-            (decode_ms, window_secs, skipped_busy, texts)
+            (decode_ms, window_secs, skipped_busy, texts, arrivals_ms)
         })
     };
 
@@ -529,7 +536,7 @@ async fn live_phase(
     }
 
     let emitted = feeder.await.map_err(|e| anyhow!("feeder join: {}", e))??;
-    let (p_decode, p_window, p_skipped, p_texts) = preview_task
+    let (p_decode, p_window, p_skipped, p_texts, p_arrivals) = preview_task
         .await
         .map_err(|e| anyhow!("preview join: {}", e))?;
     let wall = t0.elapsed().as_secs_f64();
@@ -565,6 +572,7 @@ async fn live_phase(
             "decode_ms": summarize(&p_decode),
             "window_secs": summarize(&p_window),
             "texts": p_texts,
+            "arrivals_ms": p_arrivals,
         },
     }))
 }
@@ -615,6 +623,7 @@ async fn main() -> Result<()> {
     let clip_16k = if clip_rate == VAD_RATE { clip.clone() } else { resample_audio(&clip, clip_rate, VAD_RATE) };
     let clip_48k = resample_audio(&clip, clip_rate, CAPTURE_RATE);
     let gap = vec![0f32; (CAPTURE_RATE as u64 * args.gap_ms as u64 / 1000) as usize];
+    let period_secs = (clip_48k.len() + gap.len()) as f64 / CAPTURE_RATE as f64;
     let mut meeting = Vec::new();
     for _ in 0..args.repeats {
         meeting.extend_from_slice(&clip_48k);
@@ -630,6 +639,10 @@ async fn main() -> Result<()> {
         CAPTURE_RATE
     );
 
+    if args.engine == "apple" {
+        return apple::run(&args, machine, meeting, &clip_16k, period_secs, &wav_path).await;
+    }
+
     let load_t = Instant::now();
     let (engine, model_name) = load_engine(&args.engine, args.model.clone()).await?;
     let model_load_ms = load_t.elapsed().as_secs_f64() * 1000.0;
@@ -640,7 +653,15 @@ async fn main() -> Result<()> {
 
     println!("[2/3] live simulation ({:.0}s of audio, real-time paced)...", meeting.len() as f64 / CAPTURE_RATE as f64);
     let engine = Arc::new(engine);
-    let live = live_phase(engine.clone(), meeting, args.redemption_ms, args.dsp.clone(), args.preview).await?;
+    let ps0 = apple::ps_cpu();
+    let mut live = live_phase(engine.clone(), meeting, args.redemption_ms, args.dsp.clone(), args.preview).await?;
+    live["other_processes"] = apple::cpu_deltas(&ps0, live["wall_secs"].as_f64().unwrap_or(f64::NAN));
+    let finals: Vec<apple::Final> = live["segments"].as_array().into_iter().flatten().map(|s| {
+        let f = |k: &str| s[k].as_f64().unwrap_or(f64::NAN);
+        (f("vad_start_ms"), f("vad_end_ms"), f("vad_end_ms") + f("speech_end_to_text_ms"), s["text"].as_str().unwrap_or("").to_string(), false)
+    }).collect();
+    let partials: Vec<(f64, f64)> = live["preview"]["arrivals_ms"].as_array().into_iter().flatten().filter_map(|a| a.as_f64()).map(|a| (a, f64::NAN)).collect();
+    live["ground_truth"] = apple::gt_metrics(&finals, &partials, args.repeats, period_secs, apple::clip_speech_bounds(&clip_16k));
 
     println!("[3/3] batch decode x{}...\n", args.batch_iters);
     let batch = batch_phase(&engine, &clip_16k, args.batch_iters).await?;
@@ -689,6 +710,12 @@ async fn main() -> Result<()> {
               "vad_close_to_text_ms", "speech_end_to_text_ms", "speech_start_to_text_ms"] {
         println!("{}", row(k, &live["stats"][k], if k == "rtf" { 4 } else { 1 }));
     }
+    let gt = &live["ground_truth"];
+    for k in ["utterance_end_to_final_ms", "speech_start_to_first_partial_ms", "speech_start_to_first_text_ms", "caption_update_interval_ms"] {
+        println!("{}", row(k, &gt[k], 1));
+    }
+    println!("  words {}/{}   WER {:.3}   load avg at end {}", gt["words_hyp"], gt["words_ref"], gt["wer"].as_f64().unwrap_or(f64::NAN),
+        live["other_processes"]["loadavg_at_end"]);
 
     if live["preview"]["enabled"].as_bool().unwrap_or(false) {
         println!(
