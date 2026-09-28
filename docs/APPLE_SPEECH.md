@@ -22,8 +22,16 @@ the microphone; it never substitutes English.
 
 The existing microphone/system capture and mixed-audio recording writer remain in place.
 When Apple is selected, source-separated PCM goes to persistent SpeechAnalyzer sessions
-through bounded queues. The Silero VAD processors and repeated preview/final model passes
-are not used in this path. Whisper and Parakeet retain their existing VAD and preview behavior.
+through queues bounded to ~10 s of audio per source. The Silero VAD processors and repeated
+preview/final model passes are not used in this path. Whisper and Parakeet retain their
+existing VAD and preview behavior.
+
+- An energy gate (`SpeechGate`) feeds the recognizer only around sustained sound (300 ms
+  pre-roll, 1.5 s hangover); silence and keystrokes alone are not recognized. Skipped
+  audio is spliced out of the session timeline and result times are mapped back to
+  recording time. See [live fixes](perf/apple-speech-live-fixes.md).
+- With captions off, sessions request finals only; toggling captions restarts the
+  session at the sample clock without losing or duplicating finals.
 
 - `live-transcript-preview` carries provisional text for the existing caption and translation UI.
 - Only finalized results emit `transcript-update` and enter the existing recording journal.
@@ -32,8 +40,11 @@ are not used in this path. Whisper and Parakeet retain their existing VAD and pr
 - Capture discards paused audio; the ASR clock advances by accepted samples, not paused time.
 - Stop closes the input queue, drains accepted audio, finalizes the analyzers, and waits
   for final results before the transcript persistence listener is removed.
-- Overflow/recognition errors are surfaced, while the separate audio recording remains
-  available for recovery. No silent model fallback or fabricated transcript is used.
+- Queue overflow skips audio for transcription only (the Rust queue) or restarts that
+  source's session at the sample clock (the Swift queue) and shows a non-blocking warning;
+  live transcription continues. Recognition errors are surfaced, while the separate audio
+  recording remains available for recovery. No silent model fallback or fabricated
+  transcript is used.
 
 ## Native integration
 

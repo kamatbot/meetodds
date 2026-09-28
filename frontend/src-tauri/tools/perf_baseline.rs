@@ -88,6 +88,15 @@ struct Args {
     /// Also run the display-only caption preview lane, as the app does while recording.
     #[arg(long, default_value_t = false)]
     preview: bool,
+
+    /// Apple only: overlay synthetic keyboard typing on the mic track (over speech and
+    /// in the gaps) plus typing-only stretches before and after. See `apple::synth_typing`.
+    #[arg(long, default_value_t = false)]
+    typing: bool,
+
+    /// Apple only: captions off, so sessions request finals only (no volatile results).
+    #[arg(long, default_value_t = false)]
+    captions_off: bool,
 }
 
 // ---------------------------------------------------------------------------
