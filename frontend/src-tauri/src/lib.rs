@@ -47,6 +47,7 @@ pub mod console_utils;
 pub mod database;
 pub mod groq;
 pub mod languages;
+pub mod legacy_models;
 pub mod live_translation;
 pub mod manual_notes_window;
 pub mod notifications;
@@ -786,6 +787,9 @@ pub fn run() {
             // Database path commands
             database::commands::get_database_directory,
             database::commands::open_database_folder,
+            // Cleanup of model files downloaded by older versions (explicit action only)
+            legacy_models::api_legacy_models_usage,
+            legacy_models::api_delete_legacy_models,
             // Onboarding commands
             onboarding::get_onboarding_status,
             onboarding::save_onboarding_status_cmd,
