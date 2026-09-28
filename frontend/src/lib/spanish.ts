@@ -128,8 +128,8 @@ export interface PracticeResult {
 }
 
 export interface Readiness {
-  whisperModel: string | null;
-  whisperReady: boolean;
+  speechModel: string | null;
+  speechReady: boolean;
   llmProvider: string | null;
   llmModel: string | null;
   llmReady: boolean;

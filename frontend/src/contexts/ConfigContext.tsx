@@ -7,7 +7,6 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
-import { DEFAULT_WHISPER_MODEL } from '@/constants/modelDefaults';
 
 export interface OllamaModel {
   name: string;
@@ -18,7 +17,6 @@ export interface OllamaModel {
 
 export interface StorageLocations {
   database: string;
-  models: string;
   recordings: string;
 }
 
@@ -108,8 +106,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'localWhisper',
-    model: DEFAULT_WHISPER_MODEL,
+    provider: 'appleSpeech',
+    model: 'en_US',
     apiKey: null
   });
 
@@ -199,10 +197,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const config = await configService.getTranscriptConfig();
         if (config) {
           console.log('[ConfigContext] Loaded saved transcript config:', config);
+          // Rust serves configs saved by removed engines as Apple Speech.
           setTranscriptModelConfig({
-            provider: config.provider || 'localWhisper',
-            model: config.model || DEFAULT_WHISPER_MODEL,
-            apiKey: config.apiKey || null
+            provider: 'appleSpeech',
+            model: config.model || 'en_US',
+            apiKey: null
           });
         }
       } catch (error) {
@@ -439,15 +438,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       }
 
       // Load storage locations
-      const [dbDir, modelsDir, recordingsDir] = await Promise.all([
+      const [dbDir, recordingsDir] = await Promise.all([
         invoke<string>('get_database_directory'),
-        invoke<string>('whisper_get_models_directory'),
         invoke<string>('get_default_recordings_folder_path')
       ]);
 
       setStorageLocations({
         database: dbDir,
-        models: modelsDir,
         recordings: recordingsDir
       });
 

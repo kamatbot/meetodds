@@ -1,13 +1,10 @@
-//! Spanish practice: profiles/sessions persistence, mic-only live listening (VAD + STT),
+//! Spanish practice: profiles/sessions persistence, mic-only live listening (Apple Speech),
 //! macOS `say` playback, and the LLM tutor turn (delegates to the `spanish` tutoring
 //! engine — see spanish/tutor.rs, policy.rs, scenes.rs, text.rs, persistence.rs).
 use crate::audio::devices::{default_input_device, parse_audio_device};
 use crate::audio::recording_state::{AudioChunk, DeviceType, RecordingState};
 use crate::audio::stream::AudioStream;
-use crate::audio::transcription::{
-    get_or_init_transcription_engine, validate_transcription_model_ready, TranscriptionEngine,
-};
-use crate::audio::vad::ContinuousVadProcessor;
+use crate::apple_speech::{SpeechEvent, SpeechSession};
 use crate::spanish as core;
 use crate::state::AppState;
 use once_cell::sync::Lazy;
@@ -109,8 +106,8 @@ pub struct SessionRecap {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Readiness {
-    pub whisper_model: Option<String>,
-    pub whisper_ready: bool,
+    pub speech_model: Option<String>,
+    pub speech_ready: bool,
     pub llm_provider: Option<String>,
     pub llm_model: Option<String>,
     pub llm_ready: bool,
@@ -592,35 +589,17 @@ pub async fn spanish_help_suggestion<R: Runtime>(
 // Readiness
 // ============================================================================
 
-/// Not multilingual when it's an English-only Whisper model (".en") or a Parakeet v2
-/// model (Parakeet v2 is English-only; v3 is multilingual).
-fn is_multilingual_model(model: &str) -> bool {
-    let lower = model.to_lowercase();
-    if lower.contains(".en") {
-        return false;
-    }
-    if lower.contains("v2") && !lower.contains("v3") {
-        return false;
-    }
-    true
-}
-
 #[tauri::command]
 pub async fn spanish_check_readiness<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<Readiness, String> {
-    let config = crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None)
-        .await
-        .ok()
-        .flatten();
-    let (provider, model) = match config {
-        Some(cfg) if !cfg.model.trim().is_empty() => (cfg.provider, cfg.model),
-        _ => ("localWhisper".to_string(), crate::config::DEFAULT_WHISPER_MODEL.to_string()),
+    // Practice languages are prepared per language when listening starts.
+    let (speech_ready, speech_message) = match crate::apple_speech::apple_speech_capabilities().await {
+        Ok(caps) => (caps.available, caps.reason),
+        Err(e) => (false, Some(e)),
     };
-    let prefix = if provider == "parakeet" { "parakeet" } else { "whisper" };
-    let whisper_model = Some(format!("{prefix}:{model}"));
-    let whisper_ready = is_multilingual_model(&model);
+    let speech_model = Some(crate::apple_speech::PROVIDER.to_string());
 
     let (llm_provider, llm_model, llm_ready, llm_message) = match app.path().app_data_dir() {
         Ok(dir) => match resolve_local_llm(state.db_manager.pool(), &dir).await {
@@ -630,10 +609,8 @@ pub async fn spanish_check_readiness<R: Runtime>(
         Err(_) => (None, None, false, Some("App storage unavailable.".to_string())),
     };
 
-    let message = if !whisper_ready {
-        let base = format!(
-            "The configured transcription model ({model}) is English-only. Pick a multilingual Whisper or Parakeet v3 model in Settings."
-        );
+    let message = if !speech_ready {
+        let base = speech_message.unwrap_or_else(|| "Apple Speech is unavailable on this Mac.".to_string());
         Some(match llm_message {
             Some(m) => format!("{base} {m}"),
             None => base,
@@ -643,8 +620,8 @@ pub async fn spanish_check_readiness<R: Runtime>(
     };
 
     Ok(Readiness {
-        whisper_model,
-        whisper_ready,
+        speech_model,
+        speech_ready,
         llm_provider,
         llm_model,
         llm_ready,
@@ -653,7 +630,7 @@ pub async fn spanish_check_readiness<R: Runtime>(
 }
 
 // ============================================================================
-// Live listening: mic-only capture + VAD + STT, mirrors capture_preflight's probe_source
+// Live listening: mic-only capture + Apple Speech, mirrors capture_preflight's probe_source
 // ============================================================================
 
 static LISTEN_TOKEN: Lazy<Mutex<Option<CancellationToken>>> = Lazy::new(|| Mutex::new(None));
@@ -676,34 +653,6 @@ fn is_noise_transcript(text: &str) -> bool {
         return true;
     }
     !trimmed.chars().any(|c| c.is_alphanumeric())
-}
-
-fn asr_language_code(language: &str) -> &'static str {
-    // Whisper calls Norwegian `no`, while the learning-profile storage key is `nb`.
-    match resolve_language(language) {
-        "nb" => "no",
-        id => id,
-    }
-}
-
-async fn transcribe_segment(
-    engine: &TranscriptionEngine,
-    samples: Vec<f32>,
-    language: &str,
-) -> Result<String, String> {
-    let language = asr_language_code(language).to_string();
-    match engine {
-        TranscriptionEngine::Whisper(e) => e
-            .transcribe_audio(samples, Some(language.clone()))
-            .await
-            .map_err(|e| e.to_string()),
-        TranscriptionEngine::Parakeet(e) => e.transcribe_audio(samples).await.map_err(|e| e.to_string()),
-        TranscriptionEngine::Provider(p) => p
-            .transcribe(samples, Some(language))
-            .await
-            .map(|r| r.text)
-            .map_err(|e| e.to_string()),
-    }
 }
 
 /// Guards `LISTEN_TOKEN`: clears it on Drop unless disarmed, so any early `?` return during
@@ -740,21 +689,10 @@ pub async fn spanish_start_listening<R: Runtime>(
     }
     let mut listen_guard = ListenGuard(true);
 
-    validate_transcription_model_ready(&app).await?;
-    let engine = get_or_init_transcription_engine(&app).await?;
-    if engine.provider_name() == "Apple Speech" {
-        // Fail before opening the microphone if this practice language needs assets.
-        // Preparation is explicit in Settings; listening never downloads a model.
-        crate::apple_speech::prepare(asr_language_code(language), false).await?;
-    }
-    if let Some(model) = engine.get_current_model().await {
-        if !is_multilingual_model(&model) {
-            return Err(
-                "The selected transcription model is English-only. Pick a multilingual Whisper or Parakeet v3 model in Settings."
-                    .to_string(),
-            );
-        }
-    }
+    // Fail before opening the microphone if this practice language needs assets.
+    // Preparation is explicit in Settings; listening never downloads a model.
+    let locale = crate::apple_speech::prepare(language, false).await?;
+    let mut session = SpeechSession::start(&locale).await?;
 
     let device = match device_name.filter(|name| !name.trim().is_empty()) {
         Some(name) => parse_audio_device(&name).map_err(|e| e.to_string())?,
@@ -782,7 +720,9 @@ pub async fn spanish_start_listening<R: Runtime>(
     let cancel = token;
     tauri::async_runtime::spawn(async move {
         let _stream = stream; // keep the mic stream alive for the task's lifetime
-        let mut vad: Option<ContinuousVadProcessor> = None;
+        // Seconds of audio handed to Apple Speech; dropped TTS audio is not counted.
+        let mut pushed = 0.0f64;
+        // ponytail: stopping cancels the session, so an unfinished last phrase is dropped.
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
@@ -792,39 +732,28 @@ pub async fn spanish_start_listening<R: Runtime>(
                         // ponytail: hard-drop our own TTS audio rather than echo-cancel it.
                         continue;
                     }
-                    if vad.is_none() {
-                        match ContinuousVadProcessor::new(chunk.sample_rate, 700) {
-                            Ok(processor) => vad = Some(processor),
-                            Err(_) => continue,
-                        }
+                    if session.push(&chunk.data, chunk.sample_rate, pushed).is_err() {
+                        break;
                     }
-                    let Some(processor) = vad.as_mut() else { continue };
-                    let segments = match processor.process_audio(&chunk.data) {
-                        Ok(segments) => segments,
-                        Err(_) => continue,
-                    };
-                    // ponytail: transcribing inline blocks chunk intake briefly; VAD segments
-                    // are short (<=9s) so this is fine. Move to a worker queue if that changes.
-                    for seg in segments {
-                        if seg.samples.len() < 8000 {
-                            continue;
-                        }
-                        let text = match transcribe_segment(&engine, seg.samples, language).await {
-                            Ok(text) => text,
-                            Err(_) => continue,
-                        };
+                    pushed += chunk.data.len() as f64 / chunk.sample_rate.max(1) as f64;
+                }
+                event = session.events.recv() => match event {
+                    Some(SpeechEvent::Result { text, end, is_final: true, .. }) => {
                         let text = text.trim().to_string();
                         if is_noise_transcript(&text) {
                             continue;
                         }
                         let _ = app_task.emit(
                             "spanish-partial",
-                            serde_json::json!({ "text": text, "tSec": seg.end_timestamp_ms / 1000.0 }),
+                            serde_json::json!({ "text": text, "tSec": end }),
                         );
                     }
-                }
+                    Some(SpeechEvent::Error { .. }) | Some(SpeechEvent::Finished) | None => break,
+                    _ => {}
+                },
             }
         }
+        drop(session);
         state.stop_recording();
         state.cleanup();
         if let Ok(mut guard) = LISTEN_TOKEN.lock() {

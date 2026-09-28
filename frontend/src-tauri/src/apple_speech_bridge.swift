@@ -257,7 +257,8 @@ public func md_speech_capabilities(_ id: UInt64, _ callback: SpeechCallback?) {
         let locales: [[String: Any]] = await SpeechTranscriber.supportedLocales.map { locale in
             ["id": locale.identifier, "name": Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier, "installed": installed.contains(locale.identifier)]
         }
-        emit(callback, id, ["kind": "capabilities", "available": true, "reason": NSNull(), "locales": locales])
+        let system = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current)?.identifier
+        emit(callback, id, ["kind": "capabilities", "available": true, "reason": NSNull(), "locales": locales, "systemLocale": system ?? NSNull()])
     }
 }
 
@@ -292,3 +293,69 @@ public func md_speech_push(_ id: UInt64, _ samples: UnsafePointer<Float>?, _ cou
 
 @_cdecl("md_speech_finish") public func md_speech_finish(_ id: UInt64) { SpeechSessions.shared.session(id)?.finish() }
 @_cdecl("md_speech_cancel") public func md_speech_cancel(_ id: UInt64) { SpeechSessions.shared.session(id)?.cancel() }
+
+// MARK: - File transcription (imports and meeting re-transcription)
+// Independent of live sessions: reads a local audio file with the offline preset and
+// reports final results only. `md_speech_file_cancel` stops the job; no downloads here.
+
+private final class FileJobs: @unchecked Sendable {
+    static let shared = FileJobs()
+    private let lock = NSLock()
+    private var tasks: [UInt64: Task<Void, Never>] = [:]
+    func insert(_ id: UInt64, _ task: Task<Void, Never>) { lock.lock(); tasks[id] = task; lock.unlock() }
+    func remove(_ id: UInt64) -> Task<Void, Never>? { lock.lock(); defer { lock.unlock() }; return tasks.removeValue(forKey: id) }
+}
+
+@available(macOS 26.0, *)
+private func transcribeFile(id: UInt64, path: String, localeID: String, callback: SpeechCallback?) async throws {
+    guard isSupportedRuntime() else { throw BridgeError.unsupported }
+    guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: localeID)),
+          await SpeechTranscriber.installedLocales.contains(where: { $0.identifier == locale.identifier }) else {
+        throw BridgeError.localeUnavailable
+    }
+    let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
+    let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+    let analyzer = SpeechAnalyzer(modules: [transcriber])
+    let reader = Task {
+        for try await result in transcriber.results {
+            let start = result.range.start.seconds, end = result.range.end.seconds
+            guard start.isFinite, end.isFinite, start >= 0, end >= start else { continue }
+            emit(callback, id, ["kind": "result", "text": String(result.text.characters), "start": start, "end": end, "isFinal": true])
+        }
+    }
+    defer { reader.cancel() }
+    try await withTaskCancellationHandler(operation: {
+        if let last = try await analyzer.analyzeSequence(from: file) {
+            try await analyzer.finalizeAndFinish(through: last)
+        } else {
+            await analyzer.cancelAndFinishNow()
+        }
+        try await reader.value
+    }, onCancel: {
+        Task { await analyzer.cancelAndFinishNow() }
+    })
+}
+
+@_cdecl("md_speech_transcribe_file")
+public func md_speech_transcribe_file(_ id: UInt64, _ pathCString: UnsafePointer<CChar>?, _ localeCString: UnsafePointer<CChar>?, _ callback: SpeechCallback?) {
+    let path = pathCString.map(String.init(cString:)) ?? ""
+    let localeID = localeCString.map(String.init(cString:)) ?? ""
+    let task = Task {
+        do {
+            guard #available(macOS 26.0, *) else { throw BridgeError.unsupported }
+            try await transcribeFile(id: id, path: path, localeID: localeID, callback: callback)
+            if !Task.isCancelled { emit(callback, id, ["kind": "finished"]) }
+        } catch is CancellationError {
+            // Cancelled by Rust; it no longer listens.
+        } catch {
+            if !Task.isCancelled {
+                emitError(callback, id, (error as? BridgeError)?.message ?? "Apple local speech could not transcribe this audio: \(error.localizedDescription)")
+                emit(callback, id, ["kind": "finished"])
+            }
+        }
+        _ = FileJobs.shared.remove(id)
+    }
+    FileJobs.shared.insert(id, task)
+}
+
+@_cdecl("md_speech_file_cancel") public func md_speech_file_cancel(_ id: UInt64) { FileJobs.shared.remove(id)?.cancel() }

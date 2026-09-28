@@ -1,6 +1,6 @@
 use crate::api::TranscriptSegment;
 use anyhow::Result;
-use log::{debug, info};
+use log::info;
 use once_cell::sync::Lazy;
 use std::path::Path;
 use std::sync::Arc;
@@ -14,36 +14,72 @@ pub(crate) async fn acquire_engine_lifecycle_lock() -> OwnedMutexGuard<()> {
     ENGINE_LIFECYCLE_LOCK.clone().lock_owned().await
 }
 
-/// Unload the transcription engine after a batch job (import or retranscription).
-/// Skips unloading if a live recording is currently in progress, since recording
-/// uses the same global engine instances.
-pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
-    let _engine_lifecycle_guard = acquire_engine_lifecycle_lock().await;
+/// Transcribe 16 kHz mono samples with Apple Speech (offline preset).
+/// The samples go through a private temporary WAV that is removed when this returns.
+/// `progress` receives the fraction of audio covered so far (0.0-1.0).
+pub(crate) async fn transcribe_16k_with_apple(
+    samples: Vec<f32>,
+    locale: &str,
+    mut progress: impl FnMut(f64),
+    cancelled: impl Fn() -> bool,
+) -> Result<Vec<(String, f64, f64)>> {
+    let duration = samples.len() as f64 / 16_000.0;
+    let wav = tokio::task::spawn_blocking(move || -> Result<tempfile::NamedTempFile> {
+        let file = tempfile::Builder::new().prefix("meetodds-asr-").suffix(".wav").tempfile()?;
+        write_wav_16k_mono(file.path(), &samples)?;
+        Ok(file)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Audio preparation task failed: {}", e))??;
+    let segments = crate::apple_speech::transcribe_file(
+        wav.path(),
+        locale,
+        |reached| progress(if duration > 0.0 { (reached / duration).clamp(0.0, 1.0) } else { 1.0 }),
+        cancelled,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!(e))?;
+    Ok(segments)
+}
 
-    if crate::audio::recording_commands::is_recording().await {
-        log::info!("Skipping model unload after batch: recording in progress");
-        return;
+/// Spoken-language locale for file transcription: the explicit choice, else the configured one.
+pub(crate) async fn resolve_transcription_locale<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    requested: Option<String>,
+) -> Result<String> {
+    use tauri::Manager;
+    if let Some(locale) = requested.filter(|l| !l.trim().is_empty() && l != "auto") {
+        return Ok(locale);
     }
+    let config = crate::api::api::api_get_transcript_config(app.clone(), app.state(), None)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    Ok(config.map(|c| c.model).unwrap_or_else(|| "en_US".to_string()))
+}
 
-    if use_parakeet {
-        use crate::parakeet_engine::commands::PARAKEET_ENGINE;
-        let engine = {
-            let guard = PARAKEET_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
-            guard.as_ref().cloned()
-        };
-        if let Some(e) = engine {
-            e.unload_model().await;
-        }
-    } else {
-        use crate::whisper_engine::commands::WHISPER_ENGINE;
-        let engine = {
-            let guard = WHISPER_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
-            guard.as_ref().cloned()
-        };
-        if let Some(e) = engine {
-            e.unload_model().await;
-        }
+/// Minimal 16-bit PCM mono WAV writer (16 kHz) for handing audio to Apple Speech.
+pub(crate) fn write_wav_16k_mono(path: &Path, samples: &[f32]) -> Result<()> {
+    use std::io::Write;
+    let data_len = (samples.len() * 2) as u32;
+    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+    out.write_all(b"RIFF")?;
+    out.write_all(&(36 + data_len).to_le_bytes())?;
+    out.write_all(b"WAVEfmt ")?;
+    out.write_all(&16u32.to_le_bytes())?; // fmt chunk size
+    out.write_all(&1u16.to_le_bytes())?; // PCM
+    out.write_all(&1u16.to_le_bytes())?; // mono
+    out.write_all(&16_000u32.to_le_bytes())?;
+    out.write_all(&32_000u32.to_le_bytes())?; // byte rate
+    out.write_all(&2u16.to_le_bytes())?; // block align
+    out.write_all(&16u16.to_le_bytes())?; // bits per sample
+    out.write_all(b"data")?;
+    out.write_all(&data_len.to_le_bytes())?;
+    for sample in samples {
+        let value = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+        out.write_all(&value.to_le_bytes())?;
     }
+    out.flush()?;
+    Ok(())
 }
 
 /// Create transcript segments from transcription results.
@@ -112,115 +148,6 @@ pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegmen
     Ok(())
 }
 
-/// Split a long speech segment at the lowest-energy (silence) point near the target size.
-///
-/// Scans for 100ms windows with minimal RMS energy within +/-3 seconds of each target
-/// split point. If no clear silence is found, falls back to a 1-second overlap split
-/// to avoid cutting words at boundaries.
-pub(crate) fn split_segment_at_silence(
-    segment: &crate::audio::vad::SpeechSegment,
-    max_samples: usize,
-) -> Vec<crate::audio::vad::SpeechSegment> {
-    const SAMPLE_RATE: usize = 16000;
-    // 100ms window for energy measurement (1600 samples at 16kHz)
-    const ENERGY_WINDOW: usize = SAMPLE_RATE / 10;
-    // Search +/-3 seconds around the target split point
-    const SEARCH_RADIUS: usize = SAMPLE_RATE * 3;
-    // RMS threshold below which we consider a window "silent"
-    const SILENCE_RMS_THRESHOLD: f32 = 0.02;
-    // Overlap to use when no silence boundary is found (1 second)
-    const FALLBACK_OVERLAP: usize = SAMPLE_RATE;
-
-    let total = segment.samples.len();
-    if total <= max_samples {
-        return vec![segment.clone()];
-    }
-
-    let ms_per_sample =
-        (segment.end_timestamp_ms - segment.start_timestamp_ms) / segment.samples.len() as f64;
-    let mut result = Vec::new();
-    let mut pos = 0usize;
-
-    while pos < total {
-        let remaining = total - pos;
-        if remaining <= max_samples {
-            // Last chunk - take everything remaining
-            let chunk_samples = segment.samples[pos..].to_vec();
-            let chunk_start_ms = segment.start_timestamp_ms + (pos as f64 * ms_per_sample);
-            let chunk_end_ms = segment.end_timestamp_ms;
-            result.push(crate::audio::vad::SpeechSegment {
-                samples: chunk_samples,
-                start_timestamp_ms: chunk_start_ms,
-                end_timestamp_ms: chunk_end_ms,
-                confidence: segment.confidence,
-            });
-            break;
-        }
-
-        // Target split point
-        let target = pos + max_samples;
-
-        // Search window: [target - SEARCH_RADIUS, target + SEARCH_RADIUS]
-        let search_start = target.saturating_sub(SEARCH_RADIUS).max(pos + SAMPLE_RATE);
-        let search_end = (target + SEARCH_RADIUS).min(total.saturating_sub(ENERGY_WINDOW));
-
-        // Find the lowest-energy 100ms window in the search range
-        let mut best_split = target.min(total); // fallback: exact target
-        let mut best_rms = f32::MAX;
-
-        if search_start + ENERGY_WINDOW <= search_end {
-            let mut idx = search_start;
-            while idx + ENERGY_WINDOW <= search_end {
-                let window = &segment.samples[idx..idx + ENERGY_WINDOW];
-                let rms = (window.iter().map(|s| s * s).sum::<f32>() / ENERGY_WINDOW as f32).sqrt();
-                if rms < best_rms {
-                    best_rms = rms;
-                    best_split = idx + ENERGY_WINDOW / 2; // split at center of quiet window
-                }
-                // Step by 10ms (160 samples) for efficiency
-                idx += SAMPLE_RATE / 100;
-            }
-        }
-
-        let split_at = best_split;
-        if best_rms <= SILENCE_RMS_THRESHOLD {
-            debug!(
-                "Splitting at silence boundary: sample {} (RMS={:.4})",
-                split_at, best_rms
-            );
-        } else {
-            debug!(
-                "No silence found near target (best RMS={:.4}), splitting with overlap at sample {}",
-                best_rms, split_at
-            );
-        }
-
-        // Determine the actual end of this chunk (with overlap if no silence)
-        let chunk_end = if best_rms > SILENCE_RMS_THRESHOLD {
-            (split_at + FALLBACK_OVERLAP).min(total)
-        } else {
-            split_at
-        };
-
-        let chunk_samples = segment.samples[pos..chunk_end].to_vec();
-        let chunk_start_ms = segment.start_timestamp_ms + (pos as f64 * ms_per_sample);
-        let chunk_end_ms = segment.start_timestamp_ms + (chunk_end as f64 * ms_per_sample);
-
-        result.push(crate::audio::vad::SpeechSegment {
-            samples: chunk_samples,
-            start_timestamp_ms: chunk_start_ms,
-            end_timestamp_ms: chunk_end_ms,
-            confidence: segment.confidence,
-        });
-
-        // Advance position to where the current chunk actually ends
-        // to avoid transcribing the overlap region twice
-        pos = chunk_end;
-    }
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +169,18 @@ mod tests {
 
         acquired_rx.await.unwrap();
         waiter.await.unwrap();
+    }
+
+    #[test]
+    fn wav_writer_round_trips_through_decoder() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        let samples: Vec<f32> = (0..16_000).map(|i| ((i as f32) / 50.0).sin() * 0.5).collect();
+        write_wav_16k_mono(&path, &samples).unwrap();
+        let decoded = crate::audio::decoder::decode_audio_file(&path).unwrap();
+        assert_eq!(decoded.sample_rate, 16_000);
+        assert_eq!(decoded.channels, 1);
+        assert_eq!(decoded.samples.len(), samples.len());
+        assert!((decoded.samples[100] - samples[100]).abs() < 1e-3);
     }
 }

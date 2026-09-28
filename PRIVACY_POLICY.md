@@ -9,7 +9,7 @@ Meetily is built on the principle that your meeting data should remain private a
 ## Data Processing Philosophy
 
 ### Local-First Processing
-- **Meeting transcription**: Processed entirely on your device using local Whisper models
+- **Meeting transcription**: Processed entirely on your device by Apple Speech (on-device SpeechAnalyzer; no cloud fallback)
 - **Audio recordings**: Never transmitted to external servers
 - **Meeting content**: Remains on your infrastructure
 - **AI summaries**: Generated locally or through your chosen LLM provider

@@ -1,48 +1,31 @@
 # Streaming live transcripts
 
-MeetOdds now has two deliberately separate speech-to-text paths during recording.
+During recording, Apple Speech runs one continuous SpeechAnalyzer session per audio source
+(microphone, system audio). Each session produces two kinds of results.
 
-## 1. Canonical transcript
+## 1. Final transcript
 
-The existing VAD boundary, speaker attribution, sentence structure, persistence, copy/export,
-summaries, and recording history are unchanged. A canonical sentence is decoded only after
-VAD closes the utterance. This remains the source of truth.
+Finalized results emit `transcript-update`. They carry speaker labels, audio-relative
+timestamps and a sequence id, and are the only results written to the recording journal,
+`transcripts.json`, SQLite, summaries and exports. This remains the source of truth.
 
-## 2. Speculative subtitle preview
+## 2. Provisional captions
 
-The native preview preference now gates this entire lane, not only its window.
-Captions off means no new snapshots or speculative decoding; canonical transcription
-and recording continue. See [the performance correction](perf/captions-off-2026-09.md)
-for lifecycle, measurement, and release-acceptance details. Apple Speech instead uses
-one continuous native recognizer per source and suppresses only provisional events.
+Volatile (partial) results emit `live-transcript-preview` for the subtitle-style overlay and
+live translation. Nothing in this lane is persisted. When a final result arrives for a source,
+the caption for that source is cleared and the transcript row appears.
 
-While VAD is still inside an utterance, the audio pipeline takes a non-destructive rolling
-snapshot of the active speech buffer roughly every 450 ms after at least 700 ms of speech.
-Only the newest snapshot is retained. A separate preview task decodes a capped ~2.8 second
-rolling window and emits `live-transcript-preview` events.
-
-The frontend renders those events in a subtitle-style overlay even when translation is off.
-Nothing in this lane is written to IndexedDB, SQLite, `transcripts.json`, summaries, exports,
-or the recording saver. When the canonical sentence finishes, the preview is cleared and the
-normal transcript row appears.
-
-### Priority and resource protection
-
-- The canonical worker marks final ASR as busy; speculative decoding does not start while it is busy.
-- Preview snapshots use a `watch` channel, so stale audio is dropped rather than queued.
-- Whisper preview uses greedy search, one segment, a short output cap, and at most two decoder threads.
-- Long-running preview results more than two snapshot revisions behind are discarded.
-- The preview task is aborted before stop-recording waits for final transcript work.
+The native captions preference gates provisional events only; final transcripts and the
+recording continue either way. See [the performance correction](perf/captions-off-2026-09.md)
+for history and [Apple Speech](APPLE_SPEECH.md) for the session lifecycle.
 
 ### Translation
 
-Live Translation V2 receives the same preview text when enabled. It intentionally does not cancel
-an in-flight translation on every ASR revision; it finishes the current short request and then jumps
-directly to the newest preview. This prevents the 450 ms subtitle cadence from starving a translation
-provider whose first token takes longer than one preview interval.
+Live Translation V2 receives the same caption text when enabled. It intentionally does not cancel
+an in-flight translation on every caption revision; it finishes the current short request and then
+jumps directly to the newest caption.
 
 ## Expected experience
 
 The overlay is meant to feel like live TV captions: words may revise as more speech arrives. The saved
-transcript remains cleaner and sentence-oriented. This separation is intentional—the preview optimizes
-perceived latency, while the canonical transcript optimizes correctness and durable meeting notes.
+transcript remains cleaner and sentence-oriented.

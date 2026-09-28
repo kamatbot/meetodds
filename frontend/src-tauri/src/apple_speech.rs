@@ -12,8 +12,10 @@ use std::{
 use tokio::sync::mpsc;
 
 pub const PROVIDER: &str = "appleSpeech";
+/// Spoken language used when neither a saved choice nor a supported system language exists.
+pub const DEFAULT_LOCALE: &str = "en_US";
 #[cfg(not(target_os = "macos"))]
-const UNAVAILABLE: &str = "Apple Speech requires macOS 26 or later and supported hardware. Choose Whisper or Parakeet on this Mac.";
+const UNAVAILABLE: &str = "Apple Speech requires macOS 26 or later and supported hardware.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeechLocale {
@@ -27,6 +29,9 @@ pub struct Capabilities {
     pub available: bool,
     pub reason: Option<String>,
     pub locales: Vec<SpeechLocale>,
+    /// Supported locale closest to the macOS system language, if any.
+    #[serde(default)]
+    pub system_locale: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +41,8 @@ pub enum SpeechEvent {
         available: bool,
         reason: Option<String>,
         locales: Vec<SpeechLocale>,
+        #[serde(rename = "systemLocale", default)]
+        system_locale: Option<String>,
     },
     Ready {
         locale: String,
@@ -141,7 +148,7 @@ impl SpeechSession {
                     .into(),
             ),
             Err(_) => Err(
-                "Apple Speech did not respond in time. Try again or choose Whisper or Parakeet."
+                "Apple Speech did not respond in time. Try again."
                     .into(),
             ),
         }
@@ -217,6 +224,7 @@ pub async fn apple_speech_capabilities() -> Result<Capabilities, String> {
             available: false,
             reason: Some(UNAVAILABLE.into()),
             locales: vec![],
+            system_locale: None,
         });
     }
     #[cfg(target_os = "macos")]
@@ -230,14 +238,34 @@ pub async fn apple_speech_capabilities() -> Result<Capabilities, String> {
                 available,
                 reason,
                 locales,
+                system_locale,
             } => Ok(Capabilities {
                 available,
                 reason,
                 locales,
+                system_locale,
             }),
             _ => Err("Could not read Apple Speech availability.".into()),
         }
     }
+}
+
+/// Default spoken language: the closest supported system language, else en_US.
+/// Used for fresh installs and for configs saved by older engines.
+pub async fn default_locale() -> String {
+    pick_default_locale(apple_speech_capabilities().await.ok().and_then(|c| c.system_locale))
+}
+
+/// Locale saved for Apple Speech, if any. Configs from older engines (localWhisper,
+/// parakeet, cloud providers) carry no Apple locale and use `default_locale()`.
+pub fn saved_locale(provider: &str, model: &str) -> Option<String> {
+    (provider == PROVIDER && !model.trim().is_empty()).then(|| model.to_string())
+}
+
+fn pick_default_locale(system_locale: Option<String>) -> String {
+    system_locale
+        .filter(|locale| !locale.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_LOCALE.to_string())
 }
 
 pub async fn prepare(locale: &str, download: bool) -> Result<String, String> {
@@ -274,60 +302,104 @@ pub async fn apple_speech_prepare(locale: String) -> Result<String, String> {
     prepare(&locale, true).await
 }
 
-/// Short utterances used by language practice share the existing provider trait.
-/// Meeting capture never uses this batch adapter: it keeps continuous sessions open.
-pub(crate) struct AppleSpeechProvider {
-    pub locale: String,
+// ---------------------------------------------------------------------------
+// File transcription (imports and meeting re-transcription)
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn md_speech_transcribe_file(
+        id: u64,
+        path: *const std::ffi::c_char,
+        locale: *const std::ffi::c_char,
+        callback: ffi::Callback,
+    );
+    fn md_speech_file_cancel(id: u64);
 }
 
-#[async_trait::async_trait]
-impl crate::audio::transcription::provider::TranscriptionProvider for AppleSpeechProvider {
-    async fn transcribe(
-        &self,
-        audio: Vec<f32>,
-        language: Option<String>,
-    ) -> Result<
-        crate::audio::transcription::provider::TranscriptResult,
-        crate::audio::transcription::provider::TranscriptionError,
-    > {
-        use crate::audio::transcription::provider::{TranscriptResult, TranscriptionError};
-        let locale = language
-            .as_deref()
-            .filter(|l| !l.is_empty() && *l != "auto")
-            .unwrap_or(&self.locale);
-        let result = async {
-            let mut session = SpeechSession::start(locale).await?;
-            session.push(&audio, 16_000, 0.0)?;
-            session.finish();
-            let mut text = Vec::new();
-            loop {
-                match session.next(Duration::from_secs(30)).await? {
-                    SpeechEvent::Result {
-                        text: part,
-                        is_final: true,
-                        ..
-                    } => text.push(part),
-                    SpeechEvent::Finished => return Ok::<_, String>(text.join(" ")),
-                    _ => {}
+/// One offline file job. Dropping it cancels recognition and unregisters the callback.
+struct FileJob {
+    id: u64,
+    events: mpsc::Receiver<SpeechEvent>,
+}
+
+impl Drop for FileJob {
+    fn drop(&mut self) {
+        if let Ok(mut callbacks) = CALLBACKS.lock() {
+            callbacks.remove(&self.id);
+        }
+        #[cfg(target_os = "macos")]
+        unsafe {
+            md_speech_file_cancel(self.id);
+        }
+    }
+}
+
+/// Transcribes a local audio file on-device with the offline preset.
+/// Returns final segments as (text, start_ms, end_ms). `progress` receives the audio
+/// time (seconds) reached so far; `cancelled` is polled while waiting.
+pub async fn transcribe_file(
+    path: &std::path::Path,
+    locale: &str,
+    mut progress: impl FnMut(f64),
+    cancelled: impl Fn() -> bool,
+) -> Result<Vec<(String, f64, f64)>, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (path, locale, &mut progress, &cancelled);
+        return Err(UNAVAILABLE.into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let locale = locale_string(locale)?;
+        let path = std::ffi::CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|_| "Invalid audio file path.".to_string())?;
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        // Offline results arrive faster than real time; give them a deeper queue.
+        let (sender, events) = mpsc::channel(4096);
+        CALLBACKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, sender);
+        let mut job = FileJob { id, events };
+        unsafe {
+            md_speech_transcribe_file(id, path.as_ptr(), locale.as_ptr(), receive);
+        }
+        let mut segments = Vec::new();
+        let mut idle = Duration::ZERO;
+        let tick = Duration::from_millis(250);
+        loop {
+            if cancelled() {
+                return Err("Transcription cancelled".into());
+            }
+            match tokio::time::timeout(tick, job.events.recv()).await {
+                Err(_) => {
+                    idle += tick;
+                    // ponytail: fixed inactivity limit; long silent stretches still emit no results.
+                    if idle > Duration::from_secs(600) {
+                        return Err("Apple Speech stopped responding while transcribing this audio.".into());
+                    }
+                }
+                Ok(None) => {
+                    return Err("Apple Speech stopped responding or fell behind.".into());
+                }
+                Ok(Some(event)) => {
+                    idle = Duration::ZERO;
+                    match event {
+                        SpeechEvent::Result { text, start, end, .. } => {
+                            progress(end);
+                            let text = text.trim();
+                            if !text.is_empty() {
+                                segments.push((text.to_string(), start * 1000.0, end * 1000.0));
+                            }
+                        }
+                        SpeechEvent::Error { message } => return Err(message),
+                        SpeechEvent::Finished => return Ok(segments),
+                        _ => {}
+                    }
                 }
             }
         }
-        .await
-        .map_err(TranscriptionError::EngineFailed)?;
-        Ok(TranscriptResult {
-            text: result,
-            confidence: None,
-            is_partial: false,
-        })
-    }
-    async fn is_model_loaded(&self) -> bool {
-        true
-    }
-    async fn get_current_model(&self) -> Option<String> {
-        Some(self.locale.clone())
-    }
-    fn provider_name(&self) -> &'static str {
-        "Apple Speech"
     }
 }
 
@@ -347,6 +419,27 @@ mod tests {
                 ..
             }
         ));
+    }
+    #[test]
+    fn default_locale_prefers_supported_system_language() {
+        assert_eq!(pick_default_locale(Some("fr_FR".into())), "fr_FR");
+        assert_eq!(pick_default_locale(Some(" ".into())), DEFAULT_LOCALE);
+        assert_eq!(pick_default_locale(None), DEFAULT_LOCALE);
+    }
+    #[test]
+    fn legacy_transcript_configs_map_to_apple_default() {
+        assert_eq!(saved_locale(PROVIDER, "de_DE").as_deref(), Some("de_DE"));
+        for (provider, model) in [("localWhisper", "small-q5_1"), ("parakeet", "parakeet-tdt-0.6b-v3-int8"), ("deepgram", "nova"), (PROVIDER, "")] {
+            assert_eq!(saved_locale(provider, model), None, "{provider}");
+        }
+    }
+    #[test]
+    fn capabilities_without_system_locale_still_parse() {
+        let event: SpeechEvent = serde_json::from_str(
+            r#"{"kind":"capabilities","available":false,"reason":"x","locales":[]}"#,
+        )
+        .unwrap();
+        assert!(matches!(event, SpeechEvent::Capabilities { system_locale: None, .. }));
     }
     #[test]
     fn registration_is_removed_on_drop() {

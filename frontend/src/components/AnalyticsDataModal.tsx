@@ -50,7 +50,7 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
             <div className="border border-gray-200 rounded-lg p-4">
               <h4 className="font-semibold text-gray-900 mb-2">1. Model Preferences</h4>
               <ul className="text-sm text-gray-700 space-y-1 ml-4">
-                <li>• Transcription model (e.g., "Whisper large-v3", "Parakeet")</li>
+                <li>• Transcription engine and language (e.g., "Apple Speech", "en_US")</li>
                 <li>• Summary model (e.g., "Llama 3.2", "Claude Sonnet")</li>
                 <li>• Model provider (e.g., "Local", "Ollama", "OpenRouter")</li>
               </ul>
@@ -124,8 +124,8 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
               {`{
   "event": "meeting_ended",
   "app_version": "0.4.0",
-  "transcription_provider": "parakeet",
-  "transcription_model": "parakeet-tdt-0.6b-v3-int8",
+  "transcription_provider": "appleSpeech",
+  "transcription_model": "en_US",
   "summary_provider": "ollama",
   "summary_model": "llama3.2:latest",
   "total_duration_seconds": "125.5",

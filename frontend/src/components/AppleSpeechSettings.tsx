@@ -66,7 +66,7 @@ export function AppleSpeechSettings({
     <>
       <SettingRow
         label="Apple Speech language"
-        description="Choose the language for live recordings. Apple Speech does not use the global Whisper language preference."
+        description="Choose the spoken language. It is used for live recordings, imports and re-transcription."
         control={(
           <select
             value={selectedLocale?.id ?? locale}
@@ -110,7 +110,7 @@ export function AppleSpeechSettings({
         {loadingCapabilities && <p className="text-caption text-3">Checking Apple Speech availability…</p>}
         {prepareError && <p role="alert" className="text-caption leading-5 text-danger">{prepareError}</p>}
         {!unavailableReason && !loadingCapabilities && (
-          <p className="text-caption leading-5 text-3">Downloads occur only when you choose Download language. Apple Speech is currently used for live recordings; imported audio and re-transcription continue to use Whisper or Parakeet.</p>
+          <p className="text-caption leading-5 text-3">Downloads occur only when you choose Download language.</p>
         )}
       </SettingRow>
     </>

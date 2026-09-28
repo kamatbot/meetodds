@@ -1,5 +1,7 @@
 # Mac app build handoff — 2026-09-22
 
+> Historical handoff. Later builds removed Whisper and Parakeet; Apple Speech is the only transcription engine and the app requires macOS 26.
+
 Build from a fresh checkout of GitHub `main`, not a feature branch. The next
 prepared app version is **0.4.25**. No 0.4.24 app was successfully packaged.
 Increment all four version entries before any subsequent app build attempt:
