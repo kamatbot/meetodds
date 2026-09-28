@@ -2,15 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Check, Loader2, Mic, RotateCw, Volume2 } from 'lucide-react';
+import { ArrowLeft, Check, Loader2, RotateCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { DEFAULT_PARAKEET_MODEL } from '@/constants/modelDefaults';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { loadApprovedCapture, saveApprovedCapture } from '@/lib/capture-start';
 import {
   resolveApprovedCaptureChoice,
-  onboardingModelsReady,
   sameCaptureSelection,
   type CapturePreflightResult,
   type CaptureSelection,
@@ -77,72 +75,8 @@ function SourceResult({ title, source }: { title: string; source: SourceCheck })
   );
 }
 
-function ModelReadiness({
-  title,
-  model,
-  ready,
-  progress,
-  error,
-  onRetry,
-}: {
-  title: string;
-  model: string;
-  ready: boolean;
-  progress: number;
-  error?: string;
-  onRetry: () => void;
-}) {
-  const message = ready
-    ? 'Ready on this Mac'
-    : error
-    ? 'Download needs attention'
-    : progress >= 100
-    ? 'Checking model availability…'
-    : progress > 0
-    ? `Downloading · ${Math.round(progress)}%`
-    : 'Preparing in the background';
-
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-bg text-text">
-        {title === 'Transcription' ? <Mic className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-caption font-semibold text-text">{title}</span>
-        <span className="block truncate text-[11px] text-2">{model || 'Recommended model is loading'}</span>
-      </span>
-      <span className="text-right text-[11px] text-2">{message}</span>
-      {error && (
-        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-          <RotateCw className="mr-1.5 h-3.5 w-3.5" /> Retry
-        </Button>
-      )}
-      {!ready && progress > 0 && progress < 100 && (
-        <div className="h-1.5 basis-full overflow-hidden rounded-full bg-bg" aria-label={`${title} download progress`}>
-          <div className="h-full rounded-full bg-text transition-[width]" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function PermissionsStep({ onComplete }: PermissionsStepProps) {
-  const {
-    summaryDestination,
-    selectedSummaryModel,
-    recommendedSummaryModel,
-    summaryModelDownloaded,
-    summaryModelProgress,
-    summaryModelProgressInfo,
-    parakeetDownloaded,
-    parakeetProgress,
-    parakeetProgressInfo,
-    startBackgroundDownloads,
-    retryParakeetDownload,
-    retrySummaryModelDownload,
-    goPrevious,
-    completeOnboarding,
-  } = useOnboarding();
+  const { selectedLanguage, goPrevious, completeOnboarding } = useOnboarding();
   const { selectedDevices, setTranscriptModelConfig } = useConfig();
   const [includeSystem, setIncludeSystem] = useState<boolean | null>(null);
   const [preflight, setPreflight] = useState<CapturePreflight | null>(null);
@@ -168,18 +102,6 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
   const approvedCapture = preflight && checkedSelectionMatches && includeSystem !== null
     ? resolveApprovedCaptureChoice(preflight, includeSystem, acknowledgeSilence, participantsInformed)
     : null;
-  const localModel = recommendedSummaryModel || selectedSummaryModel;
-  const modelsReady = onboardingModelsReady(summaryDestination, parakeetDownloaded, summaryModelDownloaded);
-
-  useEffect(() => {
-    void startBackgroundDownloads({
-      includeParakeet: true,
-      includeSummary: summaryDestination === 'local',
-      summaryModel: summaryDestination === 'local' ? localModel : undefined,
-    }).catch((failure) => {
-      setError(failure instanceof Error ? failure.message : 'Model preparation could not start.');
-    });
-  }, [summaryDestination, localModel, startBackgroundDownloads]);
 
   useEffect(() => {
     setPreflight(null);
@@ -231,12 +153,6 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
 
   const finishSetup = async () => {
     if (!approvedCapture || !preflight || !testedSelection || busy) return;
-    if (!modelsReady) {
-      setError(summaryDestination === 'local' && !summaryModelDownloaded
-        ? `Wait until the selected summary model (${localModel || 'recommended model'}) is ready, or retry its download.`
-        : 'Wait until the selected transcription model is ready, or retry its download.');
-      return;
-    }
     setBusy('finish');
     setError(null);
     try {
@@ -256,7 +172,7 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
       }
 
       await completeOnboarding(() => {
-        setTranscriptModelConfig({ provider: 'parakeet', model: DEFAULT_PARAKEET_MODEL, apiKey: null });
+        setTranscriptModelConfig({ provider: 'appleSpeech', model: selectedLanguage, apiKey: null });
       });
       onComplete();
     } catch (failure) {
@@ -276,8 +192,8 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
     <OnboardingContainer
       title="Let MeetOdds listen."
       description="Choose what to capture, then check the real audio sources and recording folder before finishing setup."
-      step={2}
-      totalSteps={2}
+      step={3}
+      totalSteps={3}
       className="max-w-[760px]"
     >
       <div className="mx-auto w-full max-w-[620px] space-y-5">
@@ -315,29 +231,6 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
             Microphone: {currentSelection.microphone || 'Default microphone'}
             {includeSystem && <> · System audio: {currentSelection.systemAudio || 'Default output'}</>}
           </p>
-        </section>
-
-        <section aria-labelledby="model-setup-title" className="space-y-3">
-          <h2 id="model-setup-title" className="text-ui font-semibold text-text">Local models</h2>
-          <ModelReadiness
-            title="Transcription"
-            model="Parakeet · local speech recognition"
-            ready={parakeetDownloaded}
-            progress={parakeetProgress}
-            error={parakeetProgressInfo.error}
-            onRetry={() => void retryParakeetDownload().catch(() => setError('The transcription download could not be retried.'))}
-          />
-          {summaryDestination === 'local' && (
-            <ModelReadiness
-              title="Summary"
-              model={localModel}
-              ready={summaryModelDownloaded}
-              progress={summaryModelProgress}
-              error={summaryModelProgressInfo.error}
-              onRetry={() => void retrySummaryModelDownload().catch(() => setError('The summary model download could not be retried.'))}
-            />
-          )}
-          <p className="text-caption leading-5 text-2">Transcription stays on this Mac with either summary choice. Finish setup becomes available when the exact required models are ready.</p>
         </section>
 
         <section aria-labelledby="audio-check-title" className="space-y-3 border-t border-border pt-5">
@@ -408,11 +301,11 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
           <Button type="button" variant="ghost" onClick={goPrevious} disabled={busy !== null} className="text-2">
             <ArrowLeft className="mr-2 h-4 w-4" /> Back
           </Button>
-          <span className="text-right text-caption text-2">2 of 2 · Your checked choices are saved for the first meeting</span>
+          <span className="text-right text-caption text-2">3 of 3 · Your checked choices are saved for the first meeting</span>
           <Button
             type="button"
             onClick={() => void finishSetup()}
-            disabled={!approvedCapture || !modelsReady || busy !== null}
+            disabled={!approvedCapture || busy !== null}
             className="h-11 min-w-[170px] rounded-xl bg-text px-5 text-ui font-semibold text-surface hover:opacity-90"
           >
             {busy === 'finish' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

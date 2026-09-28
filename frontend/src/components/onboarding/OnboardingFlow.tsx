@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
-import { WelcomeStep, PermissionsStep } from './steps';
+import { WelcomeStep, LanguageStep, PermissionsStep } from './steps';
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -14,7 +14,8 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   return (
     <div className="onboarding-flow">
       {currentStep === 1 && <WelcomeStep />}
-      {currentStep === 2 && <PermissionsStep onComplete={onComplete} />}
+      {currentStep === 2 && <LanguageStep />}
+      {currentStep === 3 && <PermissionsStep onComplete={onComplete} />}
     </div>
   );
 }
