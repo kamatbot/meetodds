@@ -537,6 +537,7 @@ export function useLiveTranslation(
         translationEngine: settings.engine,
         speedMode: requestSpeed,
         modelOverride: settings.modelOverride || null,
+        targetLanguage: settings.targetLanguage,
       }).then(prepared => {
         setLastProvider(prepared.provider);
         setLastModel(prepared.model);
@@ -547,7 +548,7 @@ export function useLiveTranslation(
     } else {
       clearPendingWork();
     }
-  }, [settings.enabled, settings.engine, settings.speed, settings.modelOverride, clearPendingWork]);
+  }, [settings.enabled, settings.engine, settings.speed, settings.modelOverride, settings.targetLanguage, clearPendingWork]);
 
   useEffect(() => { resultCacheRef.current.clear(); clearTranslations(); }, [sessionId, clearTranslations]);
 
