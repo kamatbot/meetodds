@@ -6,130 +6,103 @@ export interface SpeakerMetadata {
   source?: string | null;
 }
 
+export type SpeakerAttribution = 'confirmed' | 'estimated' | 'channel' | 'unknown';
+
 export interface SpeakerPresentation {
   id: string;
   label: string;
   source: string;
+  /** A clustering score, when present; never a calibrated identity probability. */
   confidence: number | null;
+  attribution: SpeakerAttribution;
+  statusLabel: string;
   badgeClassName: string;
   accentClassName: string;
   isEstimate: boolean;
 }
 
-const REMOTE_STYLES = [
-  {
-    badgeClassName: 'border-violet-200 bg-violet-50 text-violet-700',
-    accentClassName: 'border-l-violet-300',
-  },
-  {
-    badgeClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    accentClassName: 'border-l-emerald-300',
-  },
-  {
-    badgeClassName: 'border-amber-200 bg-amber-50 text-amber-800',
-    accentClassName: 'border-l-amber-300',
-  },
-  {
-    badgeClassName: 'border-rose-200 bg-rose-50 text-rose-700',
-    accentClassName: 'border-l-rose-300',
-  },
-  {
-    badgeClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700',
-    accentClassName: 'border-l-cyan-300',
-  },
-  {
-    badgeClassName: 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700',
-    accentClassName: 'border-l-fuchsia-300',
-  },
-] as const;
-
 function normalized(value?: string | null): string {
   return value?.trim().toLowerCase() ?? '';
 }
 
-function stableStyleIndex(value: string): number {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash) % REMOTE_STYLES.length;
-}
-
-export function getSpeakerPresentation(
-  metadata: SpeakerMetadata,
-): SpeakerPresentation | null {
+export function getSpeakerPresentation(metadata: SpeakerMetadata): SpeakerPresentation {
   const speakerId = normalized(metadata.speaker);
-  const source = normalized(metadata.speaker_source || metadata.source);
+  const explicitSource = normalized(metadata.speaker_source) || normalized(metadata.source);
+  // Older recordings may only contain a channel id. A channel is not an identity.
+  const source = explicitSource || (speakerId === 'me' || speakerId === 'mic'
+    ? 'microphone-channel' : speakerId === 'system' ? 'system-channel' : 'unknown');
   const explicitLabel = metadata.speaker_label?.trim();
+  const unresolved = speakerId === 'unknown' || source === 'unknown'
+    || source === 'manual-unknown' || source === 'unresolved-channel';
+  const acoustic = source.includes('acoustic');
+  const microphone = source === 'microphone' || source === 'microphone-channel';
+  const system = source === 'system' || source === 'system-channel';
+  const attribution: SpeakerAttribution = unresolved ? 'unknown'
+    : source === 'manual' && Boolean(speakerId) ? 'confirmed'
+    : acoustic && Boolean(speakerId) ? 'estimated'
+    : microphone || system ? 'channel' : 'unknown';
+  const label = attribution === 'unknown' ? 'Unknown'
+    : attribution === 'channel' ? (system ? 'Other party' : 'Microphone')
+    : explicitLabel || 'Speaker';
 
-  // Backward compatibility with the dormant `mic` / `system` values from the
-  // original migration, plus the new stable session-local ids.
-  const isMe = speakerId === 'me'
-    || speakerId === 'mic'
-    || source === 'microphone'
-    || source === 'microphone-channel';
-
-  if (isMe) {
-    return {
-      id: speakerId || 'me',
-      label: explicitLabel || 'Me',
-      source: source || 'microphone-channel',
-      confidence: metadata.speaker_confidence ?? 1,
-      badgeClassName: 'border-blue-200 bg-blue-50 text-blue-700',
-      accentClassName: 'border-l-blue-300',
-      isEstimate: false,
-    };
-  }
-
-  const isRemote = speakerId === 'system'
-    || speakerId.startsWith('remote-')
-    || speakerId.startsWith('room-')
-    || source.startsWith('system')
-    || source.startsWith('microphone-acoustic');
-
-  if (!isRemote && !explicitLabel) {
-    return null;
-  }
-
-  const id = speakerId || source || explicitLabel || 'speaker';
-  const style = REMOTE_STYLES[stableStyleIndex(id)];
-  const confidence = metadata.speaker_confidence ?? null;
   return {
-    id,
-    label: explicitLabel
-      || (speakerId === 'system' ? 'Other party' : 'Speaker'),
-    source: source || 'acoustic',
-    confidence,
-    badgeClassName: style.badgeClassName,
-    accentClassName: style.accentClassName,
-    isEstimate: source.includes('acoustic')
-      && (confidence === null || confidence < 0.8),
+    id: speakerId || source,
+    label,
+    source,
+    confidence: metadata.speaker_confidence ?? null,
+    attribution,
+    statusLabel: {
+      confirmed: 'Confirmed',
+      estimated: 'Estimated',
+      channel: 'Channel only',
+      unknown: 'Needs review',
+    }[attribution],
+    badgeClassName: attribution === 'confirmed'
+      ? 'border-accent/30 bg-accent-soft text-accent'
+      : 'border-border bg-panel-2 text-text',
+    accentClassName: attribution === 'confirmed' ? 'border-l-accent' : 'border-l-border',
+    isEstimate: attribution === 'estimated',
   };
 }
 
-export function withSpeakerPrefix<T extends SpeakerMetadata>(
-  transcript: T,
-  text: string,
-): string {
-  const speaker = getSpeakerPresentation(transcript);
-  return speaker ? `${speaker.label}: ${text}` : text;
+/** Keep the caveat when a label is used outside the transcript, such as in notes. */
+export function getSpeakerAttributionLabel(metadata: SpeakerMetadata): string {
+  const speaker = getSpeakerPresentation(metadata);
+  const qualifier = speaker.attribution === 'confirmed' ? 'confirmed speaker'
+    : speaker.attribution === 'estimated' ? 'estimated speaker'
+    : speaker.attribution === 'channel' ? (speaker.source.startsWith('system')
+      ? 'system audio; may include multiple speakers' : 'microphone audio; identity unconfirmed')
+    : 'unresolved speaker';
+  return `${speaker.label} [${qualifier}]`;
+}
+
+/** The caveat travels with the label into copying, accessibility and model input. */
+export function withSpeakerPrefix<T extends SpeakerMetadata>(transcript: T, text: string): string {
+  return `${getSpeakerAttributionLabel(transcript)}: ${text}`;
 }
 
 export function describeSpeakerSource(source: string): string {
-  if (source === 'microphone-channel') {
-    return 'Identified from the microphone channel';
+  if (source === 'manual') return 'This segment’s speaker was confirmed by a person.';
+  if (source === 'post-meeting-acoustic') {
+    return 'Estimated from similar voices after the meeting. Names are labels until each segment is confirmed.';
   }
-  if (source === 'system-acoustic') {
-    return 'Best-effort speaker cluster within system audio';
+  if (source.includes('acoustic')) {
+    return 'Estimated from similar voices. Speaker identity has not been confirmed.';
   }
-  if (source === 'microphone-acoustic') {
-    return 'Best-effort speaker cluster within room audio';
+  if (source === 'microphone-channel' || source === 'microphone') {
+    return 'Captured on the microphone channel. This does not identify who spoke; a room microphone can include several people.';
   }
-  if (source.startsWith('system')) {
-    return 'Identified from system audio';
+  if (source === 'system-channel' || source === 'system') {
+    return 'Captured from system audio. Other party includes all remote participants, not an identified individual.';
   }
-  if (source.startsWith('microphone')) {
-    return 'Identified from microphone audio';
-  }
-  return 'Speaker attribution';
+  return 'Speaker unknown. Review the recording before attributing this segment to a person.';
 }
+
+export const SPEAKER_ATTRIBUTION_INSTRUCTIONS = `
+SPEAKER ATTRIBUTION
+Speaker labels marked estimated are uncertain voice groups, even when named. Renaming a group does not confirm its segments.
+Only "confirmed speaker" marks a human-confirmed segment. "Other party" is collective system audio; "Microphone" identifies a channel, not a person. Unknown speakers remain unknown.
+Preserve these distinctions in summaries. Never infer an action owner or commitment from a guessed speaker label or channel.
+An owner requires explicit evidence: a named assignment or a confirmed speaker explicitly accepting it. Otherwise use Unknown (omit Owner metadata).
+Mark a commitment agreed only when acceptance is explicit; a request is proposed. Reviewing an action does not establish agreement.
+`;

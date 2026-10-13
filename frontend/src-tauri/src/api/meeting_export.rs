@@ -28,6 +28,16 @@ struct ExportTranscript {
     duration: Option<f64>,
     speaker: Option<String>,
     speaker_label: Option<String>,
+    speaker_source: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonExportTranscript<'a> {
+    #[serde(flatten)]
+    transcript: &'a ExportTranscript,
+    /// Render from the current metadata so renaming cannot leave a stale qualifier.
+    speaker_attribution: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,7 +87,7 @@ struct JsonMeetingExport<'a> {
     created_at: &'a str,
     summary: Option<&'a Value>,
     notes_markdown: Option<&'a str>,
-    transcript: Option<&'a [ExportTranscript]>,
+    transcript: Option<Vec<JsonExportTranscript<'a>>>,
 }
 
 async fn load_bundle(pool: &SqlitePool, meeting_id: &str) -> Result<MeetingExportBundle, String> {
@@ -109,10 +119,11 @@ async fn load_bundle(pool: &SqlitePool, meeting_id: &str) -> Result<MeetingExpor
             Option<f64>,
             Option<String>,
             Option<String>,
+            Option<String>,
         ),
     >(
         r#"
-        SELECT transcript, timestamp, audio_start_time, audio_end_time, duration, speaker, speaker_label
+        SELECT transcript, timestamp, audio_start_time, audio_end_time, duration, speaker, speaker_label, speaker_source
         FROM transcripts
         WHERE meeting_id = ?
         ORDER BY
@@ -130,7 +141,7 @@ async fn load_bundle(pool: &SqlitePool, meeting_id: &str) -> Result<MeetingExpor
     let transcripts = transcript_rows
         .into_iter()
         .map(
-            |(text, timestamp, audio_start_time, audio_end_time, duration, speaker, speaker_label)| {
+            |(text, timestamp, audio_start_time, audio_end_time, duration, speaker, speaker_label, speaker_source)| {
                 ExportTranscript {
                     text,
                     timestamp,
@@ -139,6 +150,7 @@ async fn load_bundle(pool: &SqlitePool, meeting_id: &str) -> Result<MeetingExpor
                     duration,
                     speaker,
                     speaker_label,
+                    speaker_source,
                 }
             },
         )
@@ -374,17 +386,40 @@ fn summary_to_markdown(summary: &Value) -> Option<String> {
     }
 }
 
-fn speaker_label(transcript: &ExportTranscript) -> Option<&str> {
-    transcript
-        .speaker_label
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            transcript
-                .speaker
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-        })
+/// Keep in sync with frontend/src/lib/speaker-labels.ts. Names never establish certainty.
+fn speaker_attribution_label(transcript: &ExportTranscript) -> String {
+    speaker_display_label(transcript.speaker.as_deref(), transcript.speaker_label.as_deref(), transcript.speaker_source.as_deref())
+}
+
+/// A name is never sufficient evidence of identity, including in saved evidence and recall.
+pub(crate) fn speaker_display_label(speaker: Option<&str>, label: Option<&str>, source: Option<&str>) -> String {
+    let id = speaker.unwrap_or_default().trim().to_lowercase();
+    let raw_source = source.unwrap_or_default().trim().to_lowercase();
+    let source = if raw_source.is_empty() {
+        match id.as_str() {
+            "me" | "mic" => "microphone-channel",
+            "system" => "system-channel",
+            _ => "unknown",
+        }
+    } else {
+        raw_source.as_str()
+    };
+    let label = label.map(str::trim)
+        .filter(|label| !label.is_empty()).unwrap_or("Speaker");
+    if id == "unknown" || matches!(source, "unknown" | "manual-unknown" | "unresolved-channel") {
+        return "Unknown [unresolved speaker]".to_string();
+    }
+    if source == "manual" && !id.is_empty() {
+        return format!("{label} [confirmed speaker]");
+    }
+    if source.contains("acoustic") && !id.is_empty() {
+        return format!("{label} [estimated speaker]");
+    }
+    match source {
+        "system" | "system-channel" => "Other party [system audio; may include multiple speakers]".to_string(),
+        "microphone" | "microphone-channel" => "Microphone [microphone audio; identity unconfirmed]".to_string(),
+        _ => "Unknown [unresolved speaker]".to_string(),
+    }
 }
 
 fn transcript_time_label(transcript: &ExportTranscript) -> &str {
@@ -396,12 +431,11 @@ fn transcript_to_markdown(transcripts: &[ExportTranscript]) -> String {
         .iter()
         .map(|segment| {
             let timestamp = transcript_time_label(segment);
-            let speaker = speaker_label(segment);
-            match (timestamp.is_empty(), speaker) {
-                (false, Some(speaker)) => format!("[{timestamp}] **{speaker}:** {}", segment.text.trim()),
-                (false, None) => format!("[{timestamp}] {}", segment.text.trim()),
-                (true, Some(speaker)) => format!("**{speaker}:** {}", segment.text.trim()),
-                (true, None) => segment.text.trim().to_string(),
+            let speaker = speaker_attribution_label(segment);
+            if timestamp.is_empty() {
+                format!("**{speaker}:** {}", segment.text.trim())
+            } else {
+                format!("[{timestamp}] **{speaker}:** {}", segment.text.trim())
             }
         })
         .filter(|line| !line.is_empty())
@@ -497,10 +531,7 @@ fn selected_srt(
             .audio_end_time
             .or_else(|| segment.duration.map(|duration| start + duration))
             .unwrap_or(start);
-        let text = match speaker_label(segment) {
-            Some(speaker) => format!("{speaker}: {}", segment.text.trim()),
-            None => segment.text.trim().to_string(),
-        };
+        let text = format!("{}: {}", speaker_attribution_label(segment), segment.text.trim());
         cues.push(format!(
             "{}\n{} --> {}\n{}",
             index + 1,
@@ -526,7 +557,10 @@ fn selected_json(
         .then_some(bundle.notes_markdown.as_deref())
         .flatten();
     let transcript = if selection.include_transcript && !bundle.transcripts.is_empty() {
-        Some(bundle.transcripts.as_slice())
+        Some(bundle.transcripts.iter().map(|segment| JsonExportTranscript {
+            transcript: segment,
+            speaker_attribution: speaker_attribution_label(segment),
+        }).collect())
     } else {
         None
     };
@@ -916,6 +950,7 @@ mod tests {
                     duration: Some(1.25),
                     speaker: Some("speaker_0".to_string()),
                     speaker_label: Some("Mayur".to_string()),
+                    speaker_source: Some("manual".to_string()),
                 },
                 ExportTranscript {
                     text: "สวัสดี".to_string(),
@@ -925,6 +960,7 @@ mod tests {
                     duration: Some(1.0),
                     speaker: Some("speaker_1".to_string()),
                     speaker_label: Some("Guest".to_string()),
+                    speaker_source: Some("post-meeting-acoustic".to_string()),
                 },
             ],
             audio_path: None,
@@ -944,11 +980,11 @@ mod tests {
         assert_eq!(markdown, selected_markdown(&bundle, &selection).unwrap());
         assert!(markdown.contains("製品レビュー"));
         assert!(markdown.contains("ลูกค้า"));
-        assert!(markdown.contains("**Mayur:** Hello 世界"));
+        assert!(markdown.contains("**Mayur [confirmed speaker]:** Hello 世界"));
 
         let text = selected_text(&bundle, &selection).unwrap();
         assert_eq!(text, selected_text(&bundle, &selection).unwrap());
-        assert!(text.contains("Mayur: Hello 世界"));
+        assert!(text.contains("Mayur [confirmed speaker]: Hello 世界"));
     }
 
     #[test]
@@ -980,8 +1016,8 @@ mod tests {
         let srt = selected_srt(&bundle, &selection).unwrap();
         assert_eq!(srt, selected_srt(&bundle, &selection).unwrap());
         assert!(srt.contains("00:00:01,000 --> 00:00:02,250"));
-        assert!(srt.contains("Mayur: Hello 世界"));
-        assert!(srt.contains("Guest: สวัสดี"));
+        assert!(srt.contains("Mayur [confirmed speaker]: Hello 世界"));
+        assert!(srt.contains("Guest [estimated speaker]: สวัสดี"));
     }
 
     #[test]
@@ -998,10 +1034,44 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["meetingId"], "meeting-unicode");
         assert_eq!(parsed["transcript"][1]["speakerLabel"], "Guest");
+        assert_eq!(parsed["transcript"][1]["speakerSource"], "post-meeting-acoustic");
+        assert_eq!(parsed["transcript"][1]["speakerAttribution"], "Guest [estimated speaker]");
         assert_eq!(
             default_filename(&bundle, "md"),
             "2026-09-03 — 製品レビュー Q4 😀.md"
         );
+    }
+    #[test]
+    fn export_keeps_uncertainty_after_renaming_and_for_missing_speakers() {
+        let mut bundle = fixture();
+        let selection = MeetingExportSelection {
+            include_summary: false,
+            include_notes: false,
+            include_transcript: true,
+        };
+        bundle.transcripts[1].speaker_label = Some("Alice".to_string());
+        for content in [selected_markdown(&bundle, &selection).unwrap(),
+            selected_text(&bundle, &selection).unwrap(), selected_srt(&bundle, &selection).unwrap()] {
+            assert!(content.contains("Alice [estimated speaker]"));
+        }
+        let json: serde_json::Value = serde_json::from_str(&selected_json(&bundle, &selection).unwrap()).unwrap();
+        assert_eq!(json["transcript"][1]["speakerAttribution"], "Alice [estimated speaker]");
+        for source in [None, Some("unresolved-channel"), Some("manual-unknown")] {
+            bundle.transcripts[0].speaker = None;
+            bundle.transcripts[0].speaker_source = source.map(str::to_string);
+            // A leftover name must not make missing/unknown attribution look certain.
+            assert_eq!(super::speaker_attribution_label(&bundle.transcripts[0]), "Unknown [unresolved speaker]");
+        }
+    }
+
+    #[test]
+    fn export_channels_do_not_claim_individual_identities() {
+        let mut segment = fixture().transcripts.remove(0);
+        segment.speaker = Some("system".to_string());
+        segment.speaker_source = None;
+        assert_eq!(super::speaker_attribution_label(&segment), "Other party [system audio; may include multiple speakers]");
+        segment.speaker = Some("me".to_string());
+        assert_eq!(super::speaker_attribution_label(&segment), "Microphone [microphone audio; identity unconfirmed]");
     }
     #[test]
     fn playback_uses_the_committed_recovery_filename_and_rejects_path_escape() {

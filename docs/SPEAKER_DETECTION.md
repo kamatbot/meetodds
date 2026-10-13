@@ -1,37 +1,57 @@
-# Speaker detection
+# Speaker attribution
 
-Notes attaches a speaker label to each live transcript turn without uploading or retaining biometric voiceprints.
+Apple Speech retains microphone and system-audio provenance during live capture.
+The system channel includes **all remote participants**. Neither channel identifies
+a named person; a shared microphone can also contain several people. Saved audio
+remains mixed. Speaker analysis does not upload audio or download models.
 
-## Reliable channel attribution
+## Post-meeting review
 
-When both microphone and system audio are active, the transcription pipeline keeps the streams separate:
+Open a saved meeting, choose **Transcript → Review speakers**, then **Analyze
+recording**. The local pass compares recurring acoustic patterns in timed turns
+and suggests meeting-local groups such as Speaker 1. It is an experimental
+heuristic, not a trained diarization or identity-recognition model. Its accuracy
+has not been measured on representative meetings.
 
-- microphone turns are labelled **Me**;
-- system-audio turns are labelled **Speaker 1**, **Speaker 2**, and so on;
-- only the saved audio recording is mixed.
+Every automatic group remains **Estimated**, including after a group is renamed.
+Listen to a turn, select or add a participant, and confirm its assignment. Use
+**Unknown** when a turn cannot be attributed. Names and assignments save in
+SQLite; review covers the full saved transcript independently of display
+pagination. Original audio, transcript text, and timing are preserved.
 
-The previous pipeline mixed both streams before VAD and then labelled every generated chunk as microphone audio. Source separation now happens before VAD, so the minimum `Me` versus remote distinction is based on the capture channel rather than a voice guess.
+The acoustic pass uses spectral-envelope and pitch descriptors with repeated-turn
+support. It excludes microphone-channel turns, visible overlaps, invalid or
+out-of-range timestamps, turns shorter than 1.2 seconds or longer than 18 seconds,
+silence, insufficient voiced evidence, and inconsistent or ambiguous matches.
+Analysis compares at most 2,000 turns and suggests at most six groups. All other
+turns remain available for manual review. Overlap within one ASR turn, similar
+voices, and microphone changes can still cause mistakes. Mixed or long turns
+cannot be split automatically; keep them Unknown when necessary.
 
-## Multiple speakers
+Microphone-only meetings currently require manual speaker assignment. Imports
+with timed turns and retained audio can receive tentative groups, but original
+capture-channel identity cannot be recovered from a mixed file.
 
-Remote or room turns are clustered locally using a compact acoustic signature built from MFCC-like spectral features, pitch, spectral shape, and zero-crossing behavior. Clusters are scoped to one recording and capped at six speakers. Labels are intentionally generic because this is diarization, not identity recognition.
+## Names, summaries, and commitments
 
-Acoustic labels carry a confidence score and low-confidence labels appear as **best estimate**. New clusters require a sufficiently long and strongly dissimilar turn, which favors avoiding false speaker proliferation over detecting every very short interruption.
+- Naming a group changes its display label, not its attribution certainty.
+- A manual assignment is meeting-local; it does not create a reusable voiceprint.
+- Reanalysis preserves reviewed turns. Changed transcript/audio snapshots use new
+  group identities so an old name cannot silently transfer to a different voice.
+- Copy, export, linked evidence, and summary input carry uncertainty with names.
+- Speaker changes mark existing summary content for review. A fresh generation
+  binds the revision captured before input review; a change during preparation
+  requires a new request.
+- Existing action owners are never rewritten by a speaker edit. Review ownership
+  and commitment explicitly. Marking an action reviewed does not mark it agreed.
 
-## Important boundaries
+Raw transcript metadata uses `speaker`, `speaker_label`, `speaker_source`, and
+`speaker_confidence`. Meeting-local profiles, review state, capture provenance,
+and revisions live in `meeting_speakers`, `transcript_speaker_reviews`, and
+`meeting_speaker_state`. Acoustic scores are not calibrated probabilities and
+are not presented as percentages.
 
-- With system audio enabled, **Me** is deterministic from the microphone channel. Headphones reduce duplicate remote speech leaking into the microphone.
-- In a microphone-only room recording, the app cannot know which voice belongs to the device owner. It uses `Speaker 1`, `Speaker 2`, and so on instead of falsely labelling every person as **Me**.
-- Imported or retranscribed mixed recordings do not contain the original channel identity, so existing turns remain unlabelled unless a later model-backed offline diarization pass is run.
-- Simultaneous speakers on different capture channels can produce overlapping timestamped turns. Separating overlapping people within one mono channel requires a dedicated segmentation and speaker-embedding model.
-
-## Data model
-
-Each transcript may contain:
-
-- `speaker`: stable session-local id such as `me` or `remote-2`;
-- `speaker_label`: display label;
-- `speaker_source`: `microphone-channel`, `system-acoustic`, or `microphone-acoustic`;
-- `speaker_confidence`: value from 0 to 1.
-
-Speaker labels flow through live rendering, crash recovery, SQLite persistence, transcript copy, pagination, and summary generation. This lets meeting templates attribute decisions, commitments, and dissent to the correct turn.
+See [implementation and local acceptance](implementation/POST_MEETING_SPEAKERS.md)
+and the [UX review](implementation/POST_MEETING_SPEAKERS_UX_REVIEW.md). Tests and
+builds were not run. Native and real-recording validation remain required before
+integration or any accuracy claim.
