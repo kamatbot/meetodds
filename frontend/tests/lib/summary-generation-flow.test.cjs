@@ -36,6 +36,7 @@ function harness(options = {}) {
         case 'api_get_summary': return current;
         case 'api_get_model_config': return { ...config };
         case 'is_recording': return options.recording || false;
+        case 'api_get_meeting_speakers': return { revision: options.speakerRevision ?? 0 };
         case 'api_get_meeting_transcripts': return options.incomplete ? { transcripts: [turns[0]], total_count: 2, has_more: true } : { transcripts: args.limit === 1 ? [turns[0]] : turns, total_count: 2, has_more: args.limit === 1 };
         case 'api_get_meeting_notes': return { notesMarkdown: 'PRIVATE OBSERVATION' };
         case 'api_get_manual_notes': if (options.notesError) throw Error('notes unavailable'); return { content: 'MEETING NOTE' };
@@ -95,6 +96,14 @@ test('manual generation uses one reviewed AI request and no actions before compl
   await h.finish({ status: 'processing' }); assert.equal(h.projections.length, 0);
   await h.finish({ status: 'completed', data: { markdown: '## Actions\n- Send the report.' } });
   assert.equal(h.projections.length, 1); assert.equal(h.value.summaryStatus, 'completed');
+});
+test('generation binds speaker provenance before reading transcript and reviewing input', async () => {
+  const h = harness({ speakerRevision: 7 }); await h.flush(); await h.start();
+  assert.equal(h.jobs.length, 1);
+  assert.equal(h.jobs[0].args.expectedSpeakerRevision, 7);
+  const provenance = h.calls.findIndex(c => c.command === 'api_get_meeting_speakers');
+  const transcript = h.calls.findIndex(c => c.command === 'api_get_meeting_transcripts');
+  assert.ok(provenance >= 0 && provenance < transcript);
 });
 test('automatic consent bypasses review but never includes private notes', async () => {
   const h = harness(); h.approveAuto(false); await h.flush(); await h.start(true);

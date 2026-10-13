@@ -8,6 +8,7 @@ import { VirtualizedTranscriptView, type VirtualizedTranscriptViewProps } from '
 import { getManualNotes, saveManualNotes } from '@/services/manualNotesService';
 import { LIVE_NOTE_REQUEST_EVENT } from '@/components/Meeting/LiveMeetingNotes';
 import { formatTimestampLabel } from '@/types/moment-notes';
+import { getSpeakerAttributionLabel } from '@/lib/speaker-labels';
 import type { Transcript, TranscriptSegmentData } from '@/types';
 
 interface Props extends VirtualizedTranscriptViewProps {
@@ -17,7 +18,7 @@ interface Props extends VirtualizedTranscriptViewProps {
 }
 const realTime = (value: number | undefined) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 const speakerName = (transcript?: Transcript, segment?: TranscriptSegmentData) =>
-  transcript?.speaker_label || transcript?.speaker || segment?.speaker_label || segment?.speaker || 'Speaker';
+  getSpeakerAttributionLabel(transcript ?? segment ?? {});
 
 export default function NotedTranscriptView({ meetingId, noteTranscripts, liveNotes = false, ...view }: Props) {
   const router = useRouter();

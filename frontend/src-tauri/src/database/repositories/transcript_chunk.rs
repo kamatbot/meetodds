@@ -2,13 +2,13 @@
 
 use chrono::Utc;
 use log::info as log_info;
-use sqlx::SqlitePool;
+use sqlx::SqliteConnection;
 pub struct TranscriptChunksRepository;
 
 impl TranscriptChunksRepository {
     /// Saves the full transcript text and processing parameters.
     pub async fn save_transcript_data(
-        pool: &SqlitePool,
+        connection: &mut SqliteConnection,
         meeting_id: &str,
         text: &str,
         model: &str,
@@ -41,7 +41,7 @@ impl TranscriptChunksRepository {
         .bind(chunk_size)
         .bind(overlap)
         .bind(now)
-        .execute(pool)
+        .execute(connection)
         .await?;
 
         Ok(())

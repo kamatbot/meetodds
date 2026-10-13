@@ -69,10 +69,18 @@ function MeetingContent() {
   if (!summaryLoaded || loadingTranscripts || !meeting) return <div role="status" aria-label="Loading saved meeting" className="flex h-full items-center justify-center bg-bg text-3"><LoaderIcon className="h-5 w-5 animate-spin motion-reduce:animate-none" /></div>;
   return <div className="flex h-full min-h-0 flex-col bg-bg">
     <MeetingHeader key={meeting.id} meetingId={meeting.id} title={meeting.title} createdAt={meeting.created_at} onTitleSaved={title => setTitleOverride({ id: meeting.id, title })} onDeleted={() => router.replace('/meetings')} />
+    <nav aria-label="Meeting views" className="flex shrink-0 gap-2 border-b border-border px-4 py-2 xl:hidden">
+      {(['summary', 'transcript'] as const).map(tab => <button key={tab} type="button"
+        aria-pressed={tab === 'summary' ? activeTab !== 'transcript' : activeTab === 'transcript'}
+        onClick={() => setActiveTab(tab)}
+        className={`min-h-9 rounded-control px-3 text-sm font-medium ${(tab === 'summary' ? activeTab !== 'transcript' : activeTab === 'transcript') ? 'bg-accent-soft text-accent' : 'text-2 hover:bg-panel-2'}`}>
+        {tab === 'summary' ? 'Summary & actions' : 'Transcript'}
+      </button>)}
+    </nav>
     <div className="min-h-0 flex-1 overflow-hidden"><PageContent key={meeting.id} meeting={meeting} summaryData={savedSummary.summary} activeTab={activeTab}
       shouldAutoGenerate={shouldAutoGenerate} onAutoGenerateComplete={() => setAutoHandled(meeting.id)} onMeetingUpdated={refetchMeetings}
       onRefetchTranscripts={refetch} segments={segments} hasMore={hasMore} isLoadingMore={isLoadingMore} totalCount={totalCount} loadedCount={loadedCount} onLoadMore={loadMore} focusSegmentId={evidenceSegmentId} /></div>
-    {activeTab === 'transcript' && <AudioPlayer key={meeting.id} meetingId={meeting.id} initialSeek={evidenceTime} />}
+    <AudioPlayer key={meeting.id} meetingId={meeting.id} initialSeek={evidenceTime} />
   </div>;
 }
 export default function MeetingPage() { return <Suspense fallback={<div className="flex h-full items-center justify-center bg-bg text-3"><LoaderIcon className="h-5 w-5 animate-spin motion-reduce:animate-none" /></div>}><MeetingContent /></Suspense>; }

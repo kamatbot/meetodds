@@ -83,7 +83,7 @@ impl SummaryProcessesRepository {
     }
 
     pub async fn create_or_reset_process(
-        pool: &SqlitePool,
+        connection: &mut sqlx::SqliteConnection,
         meeting_id: &str,
     ) -> Result<(), sqlx::Error> {
         log_info!(
@@ -109,7 +109,7 @@ impl SummaryProcessesRepository {
         .bind(now)
         .bind(now)
         .bind(now)
-        .execute(pool)
+        .execute(connection)
         .await?;
         log_info!(
             "Backed up existing summary before regeneration for meeting_id: {}",

@@ -398,6 +398,24 @@ pub fn decode_audio_file_with_progress(
     path: &Path,
     progress_callback: Option<ProgressCallback>,
 ) -> Result<DecodedAudio> {
+    decode_audio_file_internal(path, progress_callback, None)
+}
+
+/// Bounded local-only decoding for optional post-meeting analysis. Unlike the
+/// import/retranscription path, this never installs or invokes an FFmpeg fallback.
+/// Limits are checked against headers and every decoded packet before appending.
+pub(crate) fn decode_audio_file_bounded(path: &Path, max_seconds: f64, max_samples: usize) -> Result<DecodedAudio> {
+    decode_audio_file_internal(path, None, Some((max_seconds, max_samples)))
+}
+
+fn decode_audio_file_internal(
+    path: &Path,
+    progress_callback: Option<ProgressCallback>,
+    limits: Option<(f64, usize)>,
+) -> Result<DecodedAudio> {
+    if limits.is_some() && needs_ffmpeg_conversion(path) {
+        return Err(anyhow!("This audio format is not supported by local speaker analysis"));
+    }
     info!("Decoding audio file: {}", path.display());
 
     // FFmpeg pre-conversion for unsupported formats (MKV, WebM, WMA).
@@ -485,6 +503,16 @@ pub fn decode_audio_file_with_progress(
     let expected_samples = expected_duration
         .map(|dur| (dur * sample_rate as f64 * channels as f64) as usize);
 
+    if let Some((max_seconds, max_samples)) = limits {
+        if sample_rate == 0 || channels == 0 || sample_rate > 192_000 || channels > 8 {
+            return Err(anyhow!("The recording's audio format exceeds speaker analysis limits"));
+        }
+        if expected_duration.map(|duration| duration > max_seconds).unwrap_or(false)
+            || expected_samples.map(|samples| samples > max_samples).unwrap_or(false) {
+            return Err(anyhow!("This recording exceeds the speaker analysis limit (2 hours or 128 million decoded samples)"));
+        }
+    }
+
     let mut last_progress = 0u32;
 
     loop {
@@ -498,6 +526,9 @@ pub fn decode_audio_file_with_progress(
                 break;
             }
             Err(e) => {
+                if limits.is_some() {
+                    return Err(anyhow!("Audio could not be read without gaps; speaker analysis was stopped"));
+                }
                 warn!("Error reading packet: {}", e);
                 break;
             }
@@ -511,6 +542,18 @@ pub fn decode_audio_file_with_progress(
         // Decode the packet
         match decoder.decode(&packet) {
             Ok(decoded) => {
+                if let Some((max_seconds, max_samples)) = limits {
+                    let actual_channels = decoded.spec().channels.count();
+                    if decoded.spec().rate != sample_rate || actual_channels != channels as usize {
+                        return Err(anyhow!("Audio format changed while decoding; speaker analysis was stopped"));
+                    }
+                    let packet_samples = decoded.capacity().saturating_mul(actual_channels);
+                    let prospective = all_samples.len().saturating_add(packet_samples);
+                    let seconds = prospective as f64 / sample_rate as f64 / actual_channels.max(1) as f64;
+                    if prospective > max_samples || seconds > max_seconds || actual_channels == 0 || actual_channels > 8 {
+                        return Err(anyhow!("This recording exceeds the speaker analysis limit (2 hours or 128 million decoded samples)"));
+                    }
+                }
                 // Initialize sample buffer if needed
                 if sample_buf.is_none() {
                     let spec = *decoded.spec();
@@ -543,6 +586,9 @@ pub fn decode_audio_file_with_progress(
                 }
             }
             Err(e) => {
+                if limits.is_some() {
+                    return Err(anyhow!("Audio could not be decoded without gaps; speaker analysis was stopped"));
+                }
                 warn!("Error decoding packet: {}", e);
                 continue;
             }
@@ -580,6 +626,25 @@ pub fn decode_audio_file_with_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_analysis_decode_rejects_header_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bounded.wav");
+        crate::audio::common::write_wav_16k_mono(&path, &vec![0.1; 16_000]).unwrap();
+        assert!(decode_audio_file_bounded(&path, 10.0, 1_000).is_err());
+        assert!(decode_audio_file_bounded(&path, 0.5, 32_000).is_err());
+        let decoded = decode_audio_file_bounded(&path, 2.0, 32_000).unwrap();
+        assert_eq!(decoded.samples.len(), 16_000);
+    }
+
+    #[test]
+    fn bounded_analysis_never_uses_ffmpeg_fallback() {
+        // Rejection occurs before opening the file or looking up/installing a
+        // sidecar, even on machines with no installed FFmpeg.
+        let error = decode_audio_file_bounded(Path::new("missing.webm"), 10.0, 16_000).unwrap_err();
+        assert!(error.to_string().contains("not supported by local speaker analysis"));
+    }
 
     #[test]
     fn test_to_16k_mono_mono_16k() {

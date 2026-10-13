@@ -64,6 +64,9 @@ One concise, complete statement of what the meeting achieved or left unresolved.
 - Write each real follow-up as a clear, self-contained task, NOT a transcript fragment.
   Append explicit metadata only using: | Owner: name | Due: stated date or phrase | Commitment: agreed or proposed
   Omit Owner and Due when unknown; never guess names or deadlines. Use proposed for an unaccepted request.
+  Named voice groups marked estimated and audio channel labels are not verified people. Never assign ownership from those labels.
+  Owner requires a named assignment or explicit acceptance by a confirmed speaker. Otherwise the owner is Unknown: omit Owner metadata.
+  Use agreed only for explicit acceptance, never merely because an action was detected or reviewed.
   Each action must be supported by the transcript, not solely by a personal observation in the notes.
 
 <!-- meetodds:questions -->

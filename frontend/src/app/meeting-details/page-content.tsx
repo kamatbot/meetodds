@@ -35,6 +35,7 @@ export default function PageContent({ meeting, summaryData, activeTab, shouldAut
 }) {
   const [notesOpen, setNotesOpen] = useState(activeTab === 'notes');
   const [customPrompt, setCustomPrompt] = useState('');
+  const [speakerSummaryNeedsReview, setSpeakerSummaryNeedsReview] = useState(false);
   const openModelSettingsRef = useRef<(() => void) | null>(null);
   const autoStartedFor = useRef<string | null>(null);
   const { modelConfig, setModelConfig } = useConfig();
@@ -70,6 +71,25 @@ export default function PageContent({ meeting, summaryData, activeTab, shouldAut
   });
   const generationRef = useRef(summaryGeneration); generationRef.current = summaryGeneration;
   const onAutoCompleteRef = useRef(onAutoGenerateComplete); onAutoCompleteRef.current = onAutoGenerateComplete;
+
+  useEffect(() => {
+    let disposed = false;
+    let changedSinceLoad = false;
+    const onSpeakersChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ meetingId: string; summaryNeedsReview: boolean }>).detail;
+      if (detail?.meetingId !== meeting.id) return;
+      changedSinceLoad = true;
+      setSpeakerSummaryNeedsReview(detail.summaryNeedsReview);
+    };
+    window.addEventListener('meetodds:speakers-changed', onSpeakersChanged);
+    void invoke<{ summaryNeedsReview: boolean }>('api_get_meeting_speakers', { meetingId: meeting.id })
+      .then(result => { if (!disposed && !changedSinceLoad) setSpeakerSummaryNeedsReview(result.summaryNeedsReview); })
+      .catch(() => { /* Speaker review presents native read errors with retry. */ });
+    return () => {
+      disposed = true;
+      window.removeEventListener('meetodds:speakers-changed', onSpeakersChanged);
+    };
+  }, [meeting.id, summaryGeneration.summaryStatus]);
 
   const copyOperations = useCopyOperations({ meeting, transcripts: meetingData.transcripts, meetingTitle: meetingData.meetingTitle, aiSummary: meetingData.aiSummary, blockNoteSummaryRef: meetingData.blockNoteSummaryRef });
   const meetingOperations = useMeetingOperations({ meeting });
@@ -107,9 +127,12 @@ export default function PageContent({ meeting, summaryData, activeTab, shouldAut
     meetingFolderPath={meeting.folder_path} onRefetchTranscripts={onRefetchTranscripts} focusSegmentId={focusSegmentId}
   />;
 
-  return <div className="grid h-full min-h-0 min-w-0 grid-cols-2 bg-bg">
-    <div className="min-h-0 min-w-0 border-r border-border">{transcriptPanel}</div>
-    <div className="flex min-h-0 min-w-0 flex-col">
+  return <div className="grid h-full min-h-0 min-w-0 grid-cols-1 bg-bg xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+    <div className={`${activeTab === 'transcript' ? 'block' : 'hidden'} min-h-0 min-w-0 border-r border-border xl:block`}>{transcriptPanel}</div>
+    <div className={`${activeTab === 'transcript' ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-col xl:flex`}>
+      {speakerSummaryNeedsReview && <p role="status" className="shrink-0 border-b border-border bg-accent-soft px-5 py-3 text-xs leading-relaxed text-2">
+        <strong className="font-semibold text-text">Speaker labels changed.</strong> Review the saved summary and action owners, or regenerate the summary with the corrected labels. Existing action owners are kept for your review.
+      </p>}
       {notesOpen && <section aria-label="Meeting notes" className="flex h-[38%] min-h-0 max-h-[320px] shrink-0 flex-col overflow-hidden border-b border-border bg-bg px-5 py-3">
         <div className="mb-1 flex shrink-0 justify-end"><button type="button" onClick={() => setNotesOpen(false)} aria-label="Close notes" className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-3 hover:bg-panel-2 hover:text-text"><X size={13} />Close</button></div>
         <details className="mb-2 shrink-0">

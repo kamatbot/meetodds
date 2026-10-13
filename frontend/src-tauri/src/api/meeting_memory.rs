@@ -23,22 +23,22 @@ async fn build_source_documents(pool: &SqlitePool, meeting_id: &str) -> Result<(
     }
     let context_text = [context.project.as_ref().map(|v|format!("Project: {v}.")),context.client.as_ref().map(|v|format!("Client: {v}.")),(!context.participants.is_empty()).then(||format!("Participants: {}.",context.participants.join(", "))),context.agenda.as_ref().map(|v|format!("Agenda: {v}"))].into_iter().flatten().collect::<Vec<_>>().join(" ");
     if !context_text.is_empty() { documents.push(SourceDocument { kind:"context".to_string(), source_id:"meeting-context".to_string(), content:context_text, transcript_id:None, audio_start_time:None, audio_end_time:None, speaker_label:None }); }
-    let facts = sqlx::query("SELECT f.id, f.kind, f.text, e.transcript_id, e.audio_start_time, e.audio_end_time, e.speaker_label FROM meeting_facts f LEFT JOIN meeting_evidence e ON e.id = (SELECT e1.id FROM meeting_evidence e1 WHERE e1.fact_id = f.id ORDER BY e1.created_at ASC LIMIT 1) WHERE f.meeting_id = ? AND f.state <> 'dismissed' AND f.confirmed = 1")
+    let facts = sqlx::query("SELECT f.id, f.kind, f.text, e.transcript_id, e.audio_start_time, e.audio_end_time, t.speaker, t.speaker_label, t.speaker_source FROM meeting_facts f LEFT JOIN meeting_evidence e ON e.id = (SELECT e1.id FROM meeting_evidence e1 WHERE e1.fact_id = f.id ORDER BY e1.created_at ASC LIMIT 1) LEFT JOIN transcripts t ON t.id = e.transcript_id AND t.meeting_id = f.meeting_id WHERE f.meeting_id = ? AND f.state <> 'dismissed' AND f.confirmed = 1")
         .bind(meeting_id).fetch_all(pool).await.map_err(db_error)?;
-    for row in facts { documents.push(SourceDocument { kind:row.get("kind"),source_id:row.get("id"),content:row.get("text"),transcript_id:row.try_get("transcript_id").unwrap_or(None),audio_start_time:row.try_get("audio_start_time").unwrap_or(None),audio_end_time:row.try_get("audio_end_time").unwrap_or(None),speaker_label:row.try_get("speaker_label").unwrap_or(None) }); }
-    let actions = sqlx::query("SELECT a.id, a.text, a.owner, a.due_at, a.due_text, e.transcript_id, e.audio_start_time, e.audio_end_time, e.speaker_label FROM meeting_actions a LEFT JOIN meeting_evidence e ON e.id = (SELECT e1.id FROM meeting_evidence e1 WHERE e1.action_id = a.id ORDER BY e1.created_at ASC LIMIT 1) WHERE a.meeting_id = ? AND a.status <> 'dismissed' AND a.confirmed = 1")
+    for row in facts { documents.push(SourceDocument { kind:row.get("kind"),source_id:row.get("id"),content:row.get("text"),transcript_id:row.try_get("transcript_id").unwrap_or(None),audio_start_time:row.try_get("audio_start_time").unwrap_or(None),audio_end_time:row.try_get("audio_end_time").unwrap_or(None),speaker_label:row.try_get::<Option<String>,_>("transcript_id").ok().flatten().map(|_| source_speaker_label(&row)) }); }
+    let actions = sqlx::query("SELECT a.id, a.text, a.owner, a.due_at, a.due_text, e.transcript_id, e.audio_start_time, e.audio_end_time, t.speaker, t.speaker_label, t.speaker_source FROM meeting_actions a LEFT JOIN meeting_evidence e ON e.id = (SELECT e1.id FROM meeting_evidence e1 WHERE e1.action_id = a.id ORDER BY e1.created_at ASC LIMIT 1) LEFT JOIN transcripts t ON t.id = e.transcript_id AND t.meeting_id = a.meeting_id WHERE a.meeting_id = ? AND a.status <> 'dismissed' AND a.confirmed = 1")
         .bind(meeting_id).fetch_all(pool).await.map_err(db_error)?;
     for row in actions {
         let mut content:String = row.get("text");
         if let Some(owner) = row.try_get::<Option<String>,_>("owner").unwrap_or(None) { content.push_str(&format!(" Owner: {owner}.")); }
         if let Some(due) = row.try_get::<Option<String>,_>("due_at").unwrap_or(None).or(row.try_get::<Option<String>,_>("due_text").unwrap_or(None)) { content.push_str(&format!(" Due: {due}.")); }
-        documents.push(SourceDocument { kind:"action".to_string(),source_id:row.get("id"),content,transcript_id:row.try_get("transcript_id").unwrap_or(None),audio_start_time:row.try_get("audio_start_time").unwrap_or(None),audio_end_time:row.try_get("audio_end_time").unwrap_or(None),speaker_label:row.try_get("speaker_label").unwrap_or(None) });
+        documents.push(SourceDocument { kind:"action".to_string(),source_id:row.get("id"),content,transcript_id:row.try_get("transcript_id").unwrap_or(None),audio_start_time:row.try_get("audio_start_time").unwrap_or(None),audio_end_time:row.try_get("audio_end_time").unwrap_or(None),speaker_label:row.try_get::<Option<String>,_>("transcript_id").ok().flatten().map(|_| source_speaker_label(&row)) });
     }
     Ok((documents,context))
 }
 async fn index_meeting_memory(pool: &SqlitePool,meeting_id:&str)->Result<(),String> {
     let (documents,context)=build_source_documents(pool,meeting_id).await?; if documents.is_empty(){return Ok(());}
-    let source=documents.iter().map(|d|format!("{}:{}:{}",d.kind,d.source_id,d.content)).collect::<Vec<_>>().join("\u{1f}");
+    let source=documents.iter().map(|d|format!("{}:{}:{}:{}",d.kind,d.source_id,d.content,d.speaker_label.as_deref().unwrap_or_default())).collect::<Vec<_>>().join("\u{1f}");
     let hash=stable_hash(&format!("vector-v{MEMORY_VECTOR_VERSION}:{source}"));
     let previous:Option<String>=sqlx::query_scalar("SELECT source_hash FROM meeting_memory_state WHERE meeting_id = ?").bind(meeting_id).fetch_optional(pool).await.map_err(db_error)?;
     if previous.as_deref()==Some(hash.as_str()){return Ok(());}

@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import type { Transcript, Summary } from '@/types';
 import type { ModelConfig } from '@/components/ModelSettingsModal';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
-import { withSpeakerPrefix } from '@/lib/speaker-labels';
+import { SPEAKER_ATTRIBUTION_INSTRUCTIONS, withSpeakerPrefix } from '@/lib/speaker-labels';
 import { flushOpenNotes, getMomentNotesSummary } from '@/services/momentNotesService';
 import { approveSummaryInput, parseSummaryData, sameSummaryTarget, summaryFailureMessage, summaryTarget, type SummaryReviewInput } from '@/lib/summary-input';
 import { claimAutomaticSummary, POST_MEETING_INSTRUCTIONS, readAutoSummaryApproval } from '@/lib/post-meeting-flow';
@@ -179,6 +179,9 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       const approval = readAutoSummaryApproval(localStorage, target);
       if (automatic && !approval) throw new Error('SUMMARY_APPROVAL_REQUIRED');
       if (target.local && await invoke<boolean>('is_recording')) throw new Error('Finish recording before starting a local summary.');
+      // Capture provenance before reading the transcript. Native dispatch checks
+      // it again after the input review, which may remain open while names change.
+      const speakerSnapshot = await invoke<{ revision: number }>('api_get_meeting_speakers', { meetingId: id });
       const turns = await allTranscripts(id);
       if (!turns.length) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
       if (automatic && !automaticEnabled()) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
@@ -193,7 +196,7 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       } catch { throw new Error('NOTES_NOT_SAVED: Meeting notes could not be read. Reopen the notebook and retry. Nothing was sent.'); }
       const input: SummaryReviewInput = {
         target, transcript: transcriptText(turns), notes, notesUnavailable, manualNotes,
-        prompt: [customPrompt.trim(), POST_MEETING_INSTRUCTIONS].filter(Boolean).join('\n\n'), template: current.selectedTemplate,
+        prompt: [customPrompt.trim(), SPEAKER_ATTRIBUTION_INSTRUCTIONS, POST_MEETING_INSTRUCTIONS].filter(Boolean).join('\n\n'), template: current.selectedTemplate,
       };
       if (automatic && !automaticEnabled()) { if (visible()) setSummaryStatus(previousStatus); release(); return; }
       const approved = approval
@@ -223,6 +226,7 @@ export function useSummaryGeneration(props: UseSummaryGenerationProps) {
       const result = await invoke<{ process_id: string }>('api_process_transcript', {
         text: approved.text, model: target.provider, modelName: target.model, meetingId: id,
         approvedTarget: { provider: target.provider, model: target.model, destination: target.destination },
+        expectedSpeakerRevision: speakerSnapshot.revision,
         chunkSize: 40000, overlap: 1000, customPrompt: approved.customPrompt, templateId: current.selectedTemplate, summaryLanguage: language,
       });
       if (request.current?.token === token) request.current.accepted = true;

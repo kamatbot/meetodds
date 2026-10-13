@@ -12,7 +12,7 @@ async fn setup() -> SqlitePool {
     execute_statements(&pool, "
         PRAGMA foreign_keys = ON;
         CREATE TABLE meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, notes_markdown TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, deleted_at TEXT);
-        CREATE TABLE transcripts (id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT NOT NULL, timestamp TEXT DEFAULT CURRENT_TIMESTAMP, audio_start_time REAL, audio_end_time REAL, speaker_label TEXT);
+        CREATE TABLE transcripts (id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT NOT NULL, timestamp TEXT DEFAULT CURRENT_TIMESTAMP, audio_start_time REAL, audio_end_time REAL, speaker TEXT, speaker_label TEXT, speaker_source TEXT);
         CREATE TABLE summary_processes (meeting_id TEXT PRIMARY KEY, status TEXT NOT NULL, result TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE meeting_manual_notes (meeting_id TEXT PRIMARY KEY, content TEXT NOT NULL);
     ").await;
@@ -27,6 +27,37 @@ async fn summary(pool: &SqlitePool, status: &str, markdown: &str) {
         .bind(status).bind(serde_json::json!({"markdown":markdown}).to_string()).execute(pool).await.unwrap();
 }
 const RESULT: &str = "<!-- meetodds:outcome -->\n## Meeting outcome\nThe team agreed to prepare a revised report.\n<!-- meetodds:actions -->\n## Action items\n- Prepare and send the revised report. | Owner: Alex | Due: Friday | Commitment: agreed\n<!-- meetodds:questions -->\n## Open questions\n- None\n<!-- meetodds:end -->";
+
+#[tokio::test]
+async fn evidence_and_memory_keep_speaker_uncertainty_through_rename_and_confirmation() {
+    let pool = setup().await;
+    sqlx::query("UPDATE transcripts SET transcript = 'Send the revised report.', speaker = 'voice-1', speaker_label = 'Alex', speaker_source = 'post-meeting-acoustic' WHERE id = 't'")
+        .execute(&pool).await.unwrap();
+    summary(&pool, "completed", "## Action items\n- Send the revised report.").await;
+    let data = load_intelligence(&pool, "m", true).await.unwrap();
+    assert_eq!(data.actions[0].evidence[0].speaker_label.as_deref(), Some("Alex [estimated speaker]"));
+    assert!(data.actions[0].owner.is_none(), "an evidence speaker label is not an action owner");
+    sqlx::query("UPDATE meeting_actions SET confirmed = 1 WHERE meeting_id = 'm'").execute(&pool).await.unwrap();
+    // Simulate older cached evidence carrying a bare identity.
+    sqlx::query("UPDATE meeting_evidence SET speaker_label = 'Alex'").execute(&pool).await.unwrap();
+    for (name, source, expected) in [
+        (Some("Alex"), "post-meeting-acoustic", "Alex [estimated speaker]"),
+        (Some("Sam"), "post-meeting-acoustic", "Sam [estimated speaker]"),
+        (Some("Sam"), "manual", "Sam [confirmed speaker]"),
+        (None, "manual-unknown", "Unknown [unresolved speaker]"),
+    ] {
+        sqlx::query("UPDATE transcripts SET speaker_label = ?, speaker_source = ? WHERE id = 't'")
+            .bind(name).bind(source).execute(&pool).await.unwrap();
+        let evidence = load_evidence_for(&pool, None, Some(&data.actions[0].id)).await.unwrap();
+        assert_eq!(evidence[0].speaker_label.as_deref(), Some(expected));
+        // No explicit cache deletion: label/source changes must affect the index hash.
+        index_meeting_memory(&pool, "m").await.unwrap();
+        let labels: Vec<String> = sqlx::query_scalar("SELECT speaker_label FROM meeting_memory_documents WHERE transcript_id = 't'")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(labels.len(), 2, "both transcript and reviewed action keep their evidence label");
+        assert!(labels.iter().all(|label| label == expected));
+    }
+}
 
 #[tokio::test]
 async fn transcript_only_creates_no_actions_from_get_refresh_or_inbox_backfill() {

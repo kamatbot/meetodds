@@ -15,6 +15,8 @@ static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
 
+const SPEAKER_ATTRIBUTION_INSTRUCTION: &str = "Preserve speaker uncertainty. Estimated speaker names are unverified labels, even after renaming. Only 'confirmed speaker' identifies a human-confirmed segment. Other party is collective system audio; Microphone is a channel, not an identity. Never infer owners from estimated labels, channels or unknown speakers. An owner needs a named assignment or explicit acceptance by a confirmed speaker; otherwise use Unknown and omit Owner metadata. Use agreed only for explicit acceptance, proposed for a request; review alone is not agreement.";
+
 fn resolve_cached_english<'a>(
     cached: Option<&'a str>,
     summary_language: Option<&str>,
@@ -136,13 +138,13 @@ fn translation_system_prompt(target_language: &str) -> String {
 
 fn build_chunk_summary_user_prompt(chunk: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\n{SPEAKER_ATTRIBUTION_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
     )
 }
 
 fn build_combine_summary_user_prompt(combined_text: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nThe following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically.\n\n<summaries>\n{combined_text}\n</summaries>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\n{SPEAKER_ATTRIBUTION_INSTRUCTION}\n\nThe following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically.\n\n<summaries>\n{combined_text}\n</summaries>"
     )
 }
 
@@ -161,6 +163,7 @@ fn build_final_report_system_prompt(
 5. If a section has no relevant info, write "None noted in this section."
 6. Output **only** the completed Markdown report.
 7. If unsure about something, omit it.
+8. {SPEAKER_ATTRIBUTION_INSTRUCTION}
 
 **SECTION-SPECIFIC INSTRUCTIONS:**
 {section_instructions}
@@ -768,7 +771,7 @@ pub async fn generate_meeting_summary(
         let mut english_markdown = clean_llm_markdown_output(&raw_markdown);
         if apple_outcome {
             let outcome = crate::apple_intelligence::generate_meeting_outcome(
-                OUTCOME_SYSTEM_PROMPT,
+                &format!("{OUTCOME_SYSTEM_PROMPT}\n{SPEAKER_ATTRIBUTION_INSTRUCTION}"),
                 &format!("<meeting_notes>\n{content_to_summarize}\n</meeting_notes>"),
                 Some(APPLE_OUTCOME_OUTPUT_TOKENS),
                 cancellation_token,
@@ -990,6 +993,16 @@ mod tests {
 
         assert!(prompt.contains(ENGLISH_BASE_SUMMARY_INSTRUCTION));
         assert!(prompt.contains("SECTION-SPECIFIC INSTRUCTIONS"));
+    }
+
+    #[test]
+    fn all_summary_passes_preserve_uncertain_attribution() {
+        for prompt in [build_chunk_summary_user_prompt("Alice [estimated speaker]: I can help"),
+            build_combine_summary_user_prompt("An unconfirmed speaker offered help"),
+            build_final_report_system_prompt("Include actions", "# Actions")] {
+            assert!(prompt.contains(SPEAKER_ATTRIBUTION_INSTRUCTION));
+            assert!(prompt.contains("review alone is not agreement"));
+        }
     }
 
     #[test]

@@ -41,16 +41,38 @@ export function LanguageStep() {
     void loadCapabilities();
   }, [loadCapabilities]);
 
+  const footer = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <Button type="button" variant="ghost" onClick={goPrevious} disabled={preparing} className="h-9 px-2 text-2">
+        <ArrowLeft className="mr-1.5 h-4 w-4" /> Back
+      </Button>
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <span className="text-caption text-2">{selectedLanguage ? 'You can change this later in Settings.' : 'Choose a spoken language to continue.'}</span>
+        <Button
+          type="button"
+          onClick={goNext}
+          disabled={!selectedLanguage || preparing}
+          className="h-10 min-w-[142px] rounded-xl bg-text px-4 text-ui font-semibold text-surface hover:opacity-90"
+        >
+          {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+          {preparing ? 'Preparing…' : 'Continue'}
+          {!preparing && <ArrowRight className="ml-2 h-4 w-4" strokeWidth={1.8} />}
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <OnboardingContainer
-      title="What language do you speak?"
-      description="Live transcription runs on this Mac with Apple Speech. Choose the language you'll speak in meetings."
+      title="Choose your spoken language"
+      description="Live transcription uses Apple Speech on this Mac."
       step={2}
       totalSteps={3}
       className="max-w-[760px]"
+      footer={footer}
     >
-      <div className="mx-auto w-full max-w-[620px] space-y-5">
-        <div className="rounded-2xl border border-border bg-surface p-4">
+      <div className="mx-auto w-full max-w-[620px]">
+        <div className="rounded-xl border border-border bg-surface p-3">
           <AppleSpeechSettings
             locale={selectedLanguage || 'en-US'}
             capabilities={capabilities}
@@ -65,22 +87,6 @@ export function LanguageStep() {
           />
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <Button type="button" variant="ghost" onClick={goPrevious} disabled={preparing} className="text-2">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back
-          </Button>
-          <span className="text-caption text-2">2 of 3 · You can change this later in Settings</span>
-          <Button
-            type="button"
-            onClick={goNext}
-            disabled={!selectedLanguage || preparing}
-            className="h-11 min-w-[170px] rounded-xl bg-text px-5 text-ui font-semibold text-surface hover:opacity-90"
-          >
-            {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Continue
-            {!preparing && <ArrowRight className="ml-2 h-4 w-4" strokeWidth={1.8} />}
-          </Button>
-        </div>
       </div>
     </OnboardingContainer>
   );

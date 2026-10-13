@@ -332,6 +332,7 @@ pub async fn api_process_transcript<R: Runtime>(
     model_name: String,
     meeting_id: Option<String>,
     approved_target: Option<execution_config::DestinationApproval>,
+    expected_speaker_revision: Option<i64>,
     _chunk_size: Option<i32>,
     _overlap: Option<i32>,
     custom_prompt: Option<String>,
@@ -344,6 +345,9 @@ pub async fn api_process_transcript<R: Runtime>(
     let m_id = meeting_id.unwrap_or_else(|| format!("meeting-{}", Uuid::new_v4()));
     if text.trim().is_empty() || model_name.trim().is_empty() {
         return Err("A saved transcript and selected model are required".to_string());
+    }
+    if crate::api::meeting_speakers::analysis_in_progress() {
+        return Err("Wait for speaker analysis to finish before generating a summary.".to_string());
     }
     let execution = execution_config::resolve(state.db_manager.pool(), &model, &model_name, approved_target.as_ref()).await?;
     let scheduling_guard = if execution.local { Some(crate::audio::common::acquire_engine_lifecycle_lock().await) } else { None };
@@ -363,6 +367,18 @@ pub async fn api_process_transcript<R: Runtime>(
     );
 
     let pool = state.db_manager.pool().clone();
+    // Serialize initialization with speaker edits, and roll everything back if
+    // provenance/chunk persistence fails before a background task exists.
+    let mut setup = pool.begin().await.map_err(|e| e.to_string())?;
+    let meeting = sqlx::query("UPDATE meetings SET updated_at = updated_at WHERE id = ? AND deleted_at IS NULL")
+        .bind(&m_id).execute(&mut *setup).await.map_err(|e| e.to_string())?;
+    if meeting.rows_affected() != 1 { return Err("This meeting no longer exists.".to_string()); }
+    let speaker_revision: i64 = sqlx::query_scalar("SELECT revision FROM meeting_speaker_state WHERE meeting_id = ?")
+        .bind(&m_id).fetch_optional(&mut *setup).await.map_err(|e| e.to_string())?.unwrap_or(0);
+    let input_speaker_revision = expected_speaker_revision.unwrap_or(0);
+    if input_speaker_revision != speaker_revision {
+        return Err("Speaker labels changed while the summary input was being prepared. Review the updated input and try again.".to_string());
+    }
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 
@@ -373,9 +389,15 @@ pub async fn api_process_transcript<R: Runtime>(
     });
 
     // Create or reset the process entry in the database
-    SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
+    SummaryProcessesRepository::create_or_reset_process(&mut setup, &m_id)
         .await
         .map_err(|e| format!("Failed to initialize process: {}", e))?;
+
+    // Persist the revision of the exact approved input, not whatever revision
+    // happens to exist after dispatch. A later correction keeps the result stale.
+    sqlx::query("INSERT INTO meeting_speaker_state(meeting_id, revision, summary_input_revision) VALUES (?, 0, ?) ON CONFLICT(meeting_id) DO UPDATE SET summary_input_revision = excluded.summary_input_revision")
+        .bind(&m_id).bind(input_speaker_revision).execute(&mut *setup).await
+        .map_err(|e| format!("Could not record summary speaker provenance: {}", e))?;
 
     log_info!("✓ Summary process initialized for meeting_id: {}", &m_id);
 
@@ -384,7 +406,7 @@ pub async fn api_process_transcript<R: Runtime>(
     let overlap = _overlap.unwrap_or(1000);
 
     TranscriptChunksRepository::save_transcript_data(
-        &pool,
+        &mut setup,
         &m_id,
         &text,
         &model,
@@ -394,6 +416,7 @@ pub async fn api_process_transcript<R: Runtime>(
     )
     .await
     .map_err(|e| format!("Failed to save transcript data: {}", e))?;
+    setup.commit().await.map_err(|e| format!("Could not start summary processing: {}", e))?;
 
     log_info!("✓ Transcript chunks saved for meeting_id: {}", &m_id);
 

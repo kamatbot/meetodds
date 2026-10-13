@@ -64,9 +64,13 @@ export function usePaginatedTranscripts({
     const isLoadingRef = useRef(false);
     const lastLoadTimeRef = useRef(0); // Debounce protection
     const loadedEvidenceKeyRef = useRef<string | null>(null);
+    const refreshRevisionRef = useRef(0);
+    const currentMeetingIdRef = useRef(meetingId);
+    currentMeetingIdRef.current = meetingId;
 
     // Reset state when meeting changes
     const reset = useCallback(() => {
+        refreshRevisionRef.current += 1;
         setMetadata(null);
         setTranscripts([]);
         setTotalCount(0);
@@ -75,6 +79,7 @@ export function usePaginatedTranscripts({
         setHasMore(false);
         setError(null);
         offsetRef.current = 0;
+        isLoadingRef.current = false;
     }, []);
 
     // Load meeting metadata
@@ -85,9 +90,11 @@ export function usePaginatedTranscripts({
             const data = await invoke<MeetingMetadata>('api_get_meeting_metadata', {
                 meetingId,
             });
+            if (currentMeetingIdRef.current !== meetingId) return null;
             setMetadata(data);
             return data;
         } catch (err) {
+            if (currentMeetingIdRef.current !== meetingId) return null;
             console.error('Failed to load meeting metadata:', err);
             setError('Failed to load meeting details');
             return null;
@@ -100,6 +107,7 @@ export function usePaginatedTranscripts({
         append: boolean = true
     ): Promise<Transcript[]> => {
         if (!meetingId) return [];
+        const revision = refreshRevisionRef.current;
 
         try {
             const response = await invoke<PaginatedTranscriptsResponse>(
@@ -112,6 +120,7 @@ export function usePaginatedTranscripts({
             );
 
             const newTranscripts = response.transcripts;
+            if (currentMeetingIdRef.current !== meetingId || revision !== refreshRevisionRef.current) return [];
 
             if (append) {
                 setTranscripts(prev => {
@@ -133,6 +142,7 @@ export function usePaginatedTranscripts({
 
             return newTranscripts;
         } catch (err) {
+            if (currentMeetingIdRef.current !== meetingId || revision !== refreshRevisionRef.current) return [];
             console.error('Failed to load transcripts:', err);
             setError('Failed to load transcripts');
             return [];
@@ -144,6 +154,7 @@ export function usePaginatedTranscripts({
         timestamp?: number,
     ) => {
         if (!meetingId) return;
+        const revision = refreshRevisionRef.current;
         const collected: Transcript[] = [];
         let offset = 0;
         let lastHasMore = false;
@@ -154,6 +165,7 @@ export function usePaginatedTranscripts({
                 'api_get_meeting_transcripts',
                 { meetingId, limit: DEFAULT_PAGE_SIZE, offset },
             );
+            if (currentMeetingIdRef.current !== meetingId || revision !== refreshRevisionRef.current) return;
             total = response.total_count;
             lastHasMore = response.has_more;
             collected.push(...response.transcripts);
@@ -196,29 +208,54 @@ export function usePaginatedTranscripts({
         if (isLoadingRef.current || !hasMore || !meetingId || isLoading) return;
 
         lastLoadTimeRef.current = now;
+        const revision = refreshRevisionRef.current;
         isLoadingRef.current = true;
         setIsLoadingMore(true);
         try {
             await loadTranscriptsAtOffset(offsetRef.current, true);
         } finally {
-            setIsLoadingMore(false);
-            isLoadingRef.current = false;
+            if (currentMeetingIdRef.current === meetingId && revision === refreshRevisionRef.current) {
+                setIsLoadingMore(false);
+                isLoadingRef.current = false;
+            }
         }
     }, [hasMore, meetingId, loadTranscriptsAtOffset, isLoading]);
 
-    // Force refetch of data (e.g., after retranscription)
+    // Refresh in place: speaker edits must not unmount the meeting, discard an
+    // unsaved summary, close review, or reset the user's loaded transcript range.
     const refetch = useCallback(async () => {
         if (!meetingId) return;
-
-        reset();
-        setIsLoading(true);
+        const revision = ++refreshRevisionRef.current;
+        const targetCount = Math.max(DEFAULT_PAGE_SIZE, offsetRef.current);
+        isLoadingRef.current = true;
+        setIsLoadingMore(true);
         try {
-            await loadMetadata();
-            await loadTranscriptsAtOffset(0, false);
+            const nextMetadata = await invoke<MeetingMetadata>('api_get_meeting_metadata', { meetingId });
+            const nextTranscripts: Transcript[] = [];
+            let response: PaginatedTranscriptsResponse;
+            do {
+                response = await invoke<PaginatedTranscriptsResponse>('api_get_meeting_transcripts', {
+                    meetingId, limit: DEFAULT_PAGE_SIZE, offset: nextTranscripts.length,
+                });
+                if (currentMeetingIdRef.current !== meetingId || revision !== refreshRevisionRef.current) return;
+                if (response.has_more && response.transcripts.length === 0) {
+                    throw new Error('Transcript refresh was incomplete. Please retry.');
+                }
+                nextTranscripts.push(...response.transcripts);
+            } while (response.has_more && nextTranscripts.length < targetCount);
+            setMetadata(nextMetadata);
+            setTranscripts(nextTranscripts);
+            setTotalCount(response.total_count);
+            setHasMore(response.has_more);
+            offsetRef.current = nextTranscripts.length;
+            setError(null);
         } finally {
-            setIsLoading(false);
+            if (currentMeetingIdRef.current === meetingId && revision === refreshRevisionRef.current) {
+                isLoadingRef.current = false;
+                setIsLoadingMore(false);
+            }
         }
-    }, [meetingId, reset, loadMetadata, loadTranscriptsAtOffset]);
+    }, [meetingId]);
 
     // Initial load
     useEffect(() => {
@@ -234,21 +271,25 @@ export function usePaginatedTranscripts({
         const evidenceKey = initialTranscriptId || (initialTimestamp != null ? `time:${initialTimestamp}` : null);
         loadedEvidenceKeyRef.current = evidenceKey;
         reset();
+        const revision = refreshRevisionRef.current;
+        const ownsLoad = () => currentMeetingIdRef.current === meetingId && revision === refreshRevisionRef.current;
 
         const loadInitial = async () => {
             setIsLoading(true);
             try {
                 await loadMetadata();
+                if (!ownsLoad()) return;
                 if (evidenceKey) {
                     await loadThroughEvidence(initialTranscriptId, initialTimestamp);
                 } else {
                     await loadTranscriptsAtOffset(0, false);
                 }
             } catch (initialError) {
+                if (!ownsLoad()) return;
                 console.error('Failed to load initial transcript evidence:', initialError);
                 setError('Failed to load transcripts');
             } finally {
-                setIsLoading(false);
+                if (ownsLoad()) setIsLoading(false);
             }
         };
 
@@ -261,16 +302,23 @@ export function usePaginatedTranscripts({
         const evidenceKey = initialTranscriptId || (initialTimestamp != null ? `time:${initialTimestamp}` : null);
         if (!evidenceKey || loadedMeetingIdRef.current !== meetingId || loadedEvidenceKeyRef.current === evidenceKey) return;
         loadedEvidenceKeyRef.current = evidenceKey;
+        const revision = ++refreshRevisionRef.current;
         let cancelled = false;
+        const ownsLoad = () => !cancelled && currentMeetingIdRef.current === meetingId && revision === refreshRevisionRef.current;
         const loadEvidence = async () => {
+            isLoadingRef.current = true;
             setIsLoadingMore(true);
             try {
                 await loadThroughEvidence(initialTranscriptId, initialTimestamp);
             } catch (evidenceError) {
-                if (!cancelled) setError('Could not load the cited transcript segment');
+                if (ownsLoad()) setError('Could not load the cited transcript segment');
                 console.error('Failed to load transcript evidence:', evidenceError);
             } finally {
-                if (!cancelled) setIsLoadingMore(false);
+                if (ownsLoad()) {
+                    isLoadingRef.current = false;
+                    setIsLoadingMore(false);
+                    setIsLoading(false);
+                }
             }
         };
         void loadEvidence();

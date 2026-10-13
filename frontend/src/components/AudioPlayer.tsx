@@ -70,6 +70,23 @@ export default function AudioPlayer({ meetingId, initialSeek = null }: AudioPlay
     appliedEvidenceSeekRef.current = null;
   }, [initialSeek, meetingId]);
 
+  useEffect(() => {
+    const handleEvidencePlayback = (event: Event) => {
+      const detail = (event as CustomEvent<{ meetingId: string; seconds?: number; pause?: boolean }>).detail;
+      if (detail?.meetingId !== meetingId) return;
+      if (detail.pause) { pause(); return; }
+      if (typeof detail.seconds !== 'number' || !Number.isFinite(detail.seconds) || detail.seconds < 0) return;
+      if (isLoading || duration == null || !info?.hasAudio) {
+        toast.error('Audio is not ready', { description: 'Wait for the saved recording to load, then try again.' });
+        return;
+      }
+      seek(Math.max(0, detail.seconds - 1));
+      void play();
+    };
+    window.addEventListener('meetodds:seek-audio', handleEvidencePlayback);
+    return () => window.removeEventListener('meetodds:seek-audio', handleEvidencePlayback);
+  }, [duration, info?.hasAudio, isLoading, meetingId, pause, play, seek]);
+
   const loadInfo = useCallback(async () => {
     setInfoLoading(true);
     setInfoError(null);
@@ -177,7 +194,7 @@ export default function AudioPlayer({ meetingId, initialSeek = null }: AudioPlay
         type="button"
         onClick={() => isPlaying ? pause() : void play()}
         disabled={controlsDisabled}
-        className="inline-grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+        className="inline-grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
         aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
       >
         {isLoading ? (

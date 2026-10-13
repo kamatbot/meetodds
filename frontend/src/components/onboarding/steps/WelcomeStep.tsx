@@ -161,22 +161,52 @@ export function WelcomeStep() {
   };
 
   const isChatGPTReady = isCodexConnected && Boolean(chatGPTModel);
+  const continueHint = summaryDestination === 'chatgpt' && !isChatGPTReady
+    ? 'Sign in and confirm an available ChatGPT model to continue.'
+    : summaryDestination === 'local' && !appleIntelligenceAvailable
+    ? 'Apple Intelligence is unavailable on this Mac. Choose ChatGPT to continue.'
+    : summaryDestination === 'chatgpt'
+    ? 'Continuing confirms that ChatGPT may receive transcripts and meeting notes for summaries.'
+    : 'Summaries stay on this Mac.';
+  const footer = (
+    <div className="space-y-2">
+      {(selectionError || error) && <p role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-3 py-2 text-caption text-danger">{selectionError || error}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-md text-caption text-2">{continueHint}</p>
+        <Button
+          type="button"
+          onClick={() => void handleContinue()}
+          disabled={isSaving || (summaryDestination === 'chatgpt' && !isChatGPTReady) || (summaryDestination === 'local' && !appleIntelligenceAvailable)}
+          className="h-10 min-w-[168px] rounded-xl bg-text px-4 text-ui font-semibold text-surface hover:opacity-90"
+        >
+          {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+          {isSaving
+            ? 'Saving…'
+            : summaryDestination === 'chatgpt'
+            ? 'Continue with ChatGPT'
+            : 'Continue'}
+          {!isSaving && <ArrowRight className="ml-2 h-4 w-4" strokeWidth={1.8} />}
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <OnboardingContainer
-      title="How would you like your summaries?"
-      description="Recording and transcription stay on your Mac. Choose where each meeting summary is written."
+      title="Choose where summaries run"
+      description="Recordings and transcription stay on your Mac. Pick where meeting summaries are created."
       step={1}
       totalSteps={3}
       className="max-w-[760px]"
+      footer={footer}
     >
-      <div className="mx-auto w-full max-w-[620px] space-y-3">
+      <div className="mx-auto w-full max-w-[620px] space-y-2">
         <button
           type="button"
           onClick={() => chooseDestination('local')}
           aria-pressed={summaryDestination === 'local'}
           disabled={!appleIntelligenceAvailable}
-          className={`flex w-full items-start gap-4 rounded-2xl border p-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60 ${summaryDestination === 'local' ? 'border-text bg-bg' : 'border-border bg-surface hover:bg-bg'}`}
+          className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60 ${summaryDestination === 'local' ? 'border-text bg-bg' : 'border-border bg-surface hover:bg-bg'}`}
         >
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-bg text-text">
             <Sparkles className="h-5 w-5" strokeWidth={1.7} />
@@ -189,7 +219,7 @@ export function WelcomeStep() {
             <span className="mt-1 block text-caption leading-5 text-2">
               Your audio, transcript, meeting notes and summaries stay on this Mac.
             </span>
-            <span className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-2">
+            <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-2">
               <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
               {loadingAppleIntelligence
                 ? 'Checking Apple Intelligence availability…'
@@ -207,7 +237,7 @@ export function WelcomeStep() {
           type="button"
           onClick={() => chooseDestination('chatgpt')}
           aria-pressed={summaryDestination === 'chatgpt'}
-          className={`flex w-full items-start gap-4 rounded-2xl border p-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${summaryDestination === 'chatgpt' ? 'border-text bg-bg' : 'border-border bg-surface hover:bg-bg'}`}
+          className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${summaryDestination === 'chatgpt' ? 'border-text bg-bg' : 'border-border bg-surface hover:bg-bg'}`}
         >
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-bg text-text">
             <Cloud className="h-5 w-5" strokeWidth={1.7} />
@@ -218,7 +248,7 @@ export function WelcomeStep() {
               After each meeting, MeetOdds sends the transcript and your meeting notes to ChatGPT for a summary. Audio stays on your Mac.
             </span>
             {summaryDestination === 'chatgpt' && chatGPTModel && (
-              <span className="mt-3 block text-caption text-2">Available model · <span className="font-medium text-text">{chatGPTModel}</span></span>
+              <span className="mt-2 block text-caption text-2">Available model · <span className="font-medium text-text">{chatGPTModel}</span></span>
             )}
           </span>
           <span className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full border ${summaryDestination === 'chatgpt' ? 'border-text bg-text text-white' : 'border-border text-transparent'}`} aria-hidden="true">
@@ -227,7 +257,7 @@ export function WelcomeStep() {
         </button>
 
         {summaryDestination === 'chatgpt' && (
-          <div className="space-y-3 rounded-2xl border border-border bg-surface p-4">
+          <div className="space-y-3 rounded-xl border border-border bg-surface p-3">
             <OpenAICodexSettings
               onConnectionChange={setIsCodexConnected}
               onModelsChange={setAvailableChatGPTModels}
@@ -243,31 +273,6 @@ export function WelcomeStep() {
           </div>
         )}
 
-        {selectionError && <p role="alert" className="text-caption text-danger">{selectionError}</p>}
-        {error && <p role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-caption text-danger">{error}</p>}
-
-        <div className="flex flex-wrap items-center justify-between gap-4 pt-3">
-          <span className="text-caption text-2">1 of 3 · You can change this later</span>
-          <Button
-            type="button"
-            onClick={() => void handleContinue()}
-            disabled={isSaving || (summaryDestination === 'chatgpt' && !isChatGPTReady) || (summaryDestination === 'local' && !appleIntelligenceAvailable)}
-            className="h-11 min-w-[190px] rounded-xl bg-text px-5 text-ui font-semibold text-surface hover:opacity-90"
-          >
-            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {isSaving
-              ? 'Saving setup…'
-              : summaryDestination === 'chatgpt'
-              ? 'Connect & allow summaries'
-              : 'Continue'}
-            {!isSaving && <ArrowRight className="ml-2 h-4 w-4" strokeWidth={1.8} />}
-          </Button>
-        </div>
-        {summaryDestination === 'chatgpt' && !isChatGPTReady && (
-          <p className="text-right text-caption text-2">
-            Sign in and confirm an available model before continuing.
-          </p>
-        )}
       </div>
     </OnboardingContainer>
   );

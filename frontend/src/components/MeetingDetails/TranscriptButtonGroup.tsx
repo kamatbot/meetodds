@@ -2,8 +2,8 @@
 
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
+import { Copy, FolderOpen, MoreHorizontal, RefreshCw } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -38,8 +38,7 @@ export function TranscriptButtonGroup({
   }, [onRefetchTranscripts]);
 
   return (
-    <div className="flex items-center justify-center w-full gap-2">
-      <ButtonGroup>
+    <div className="flex shrink-0 items-center gap-1">
         <Button
           variant="outline"
           size="sm"
@@ -49,41 +48,21 @@ export function TranscriptButtonGroup({
           }}
           disabled={transcriptCount === 0}
           title={transcriptCount === 0 ? 'No transcript available' : 'Copy Transcript'}
+          aria-label="Copy transcript"
         >
           <Copy />
           <span className="hidden lg:inline">Copy</span>
         </Button>
 
-        <Button
-          size="sm"
-          variant="outline"
-          className="xl:px-4"
-          onClick={() => {
-            Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
-            onOpenMeetingFolder();
-          }}
-          title="Open Recording Folder"
-        >
-          <FolderOpen className="xl:mr-2" size={18} />
-          <span className="hidden lg:inline">Recording</span>
-        </Button>
-
-        {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
-            onClick={() => {
-              Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
-              setShowRetranscribeDialog(true);
-            }}
-            title="Retranscribe to enhance your recorded audio"
-          >
-            <RefreshCw className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline">Enhance</span>
-          </Button>
-        )}
-      </ButtonGroup>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" aria-label="More transcript actions"><MoreHorizontal /></Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => { void onOpenMeetingFolder(); }}><FolderOpen /> Open recording folder</DropdownMenuItem>
+            {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && <DropdownMenuItem onSelect={() => setShowRetranscribeDialog(true)}><RefreshCw /> Re-transcribe audio</DropdownMenuItem>}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
       {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
         <RetranscribeDialog

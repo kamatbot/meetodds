@@ -1,9 +1,9 @@
 "use client";
 
 import { Transcript, TranscriptSegmentData } from '@/types';
-import { TranscriptView } from '@/components/TranscriptView';
 import NotedTranscriptView from '@/components/Notes/NotedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
+import { SpeakerReview } from './SpeakerReview';
 import { useMemo } from 'react';
 
 interface TranscriptPanelProps {
@@ -68,19 +68,22 @@ export function TranscriptPanel({
 
   return (
     <div className="relative flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col bg-bg">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-text">Transcript</h2>
           <p className="mt-0.5 text-[11px] text-3">{usePagination ? `${totalCount ?? convertedSegments.length} saved segments` : `${transcripts.length} saved segments`}</p>
         </div>
-        <TranscriptButtonGroup
-          transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
-          onCopyTranscript={onCopyTranscript}
-          onOpenMeetingFolder={onOpenMeetingFolder}
-          meetingId={meetingId}
-          meetingFolderPath={meetingFolderPath}
-          onRefetchTranscripts={onRefetchTranscripts}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {meetingId && <SpeakerReview key={meetingId} meetingId={meetingId} disabled={isRecording} onChanged={onRefetchTranscripts} />}
+          <TranscriptButtonGroup
+            transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
+            onCopyTranscript={onCopyTranscript}
+            onOpenMeetingFolder={onOpenMeetingFolder}
+            meetingId={meetingId}
+            meetingFolderPath={meetingFolderPath}
+            onRefetchTranscripts={onRefetchTranscripts}
+          />
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden pb-3">

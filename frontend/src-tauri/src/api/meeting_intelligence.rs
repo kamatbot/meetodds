@@ -138,9 +138,16 @@ fn best_evidence(candidate: &str, transcripts: &[TranscriptSource]) -> Option<(T
 include!("summary_outcome_parser.rs");
 
 async fn fetch_transcripts<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, meeting_id: &str) -> Result<Vec<TranscriptSource>, String> {
-    let rows = sqlx::query("SELECT id, transcript, audio_start_time, audio_end_time, speaker_label FROM transcripts WHERE meeting_id = ? ORDER BY COALESCE(audio_start_time, 999999999.0) ASC, timestamp ASC, id ASC")
+    let rows = sqlx::query("SELECT id, transcript, audio_start_time, audio_end_time, speaker, speaker_label, speaker_source FROM transcripts WHERE meeting_id = ? ORDER BY COALESCE(audio_start_time, 999999999.0) ASC, timestamp ASC, id ASC")
         .bind(meeting_id).fetch_all(executor).await.map_err(db_error)?;
-    Ok(rows.into_iter().map(|row| TranscriptSource { id: row.get("id"), text: row.get("transcript"), start: row.try_get("audio_start_time").unwrap_or(None), end: row.try_get("audio_end_time").unwrap_or(None), speaker_label: row.try_get("speaker_label").unwrap_or(None) }).collect())
+    Ok(rows.into_iter().map(|row| TranscriptSource { id: row.get("id"), text: row.get("transcript"), start: row.try_get("audio_start_time").unwrap_or(None), end: row.try_get("audio_end_time").unwrap_or(None), speaker_label: Some(source_speaker_label(&row)) }).collect())
+}
+fn source_speaker_label(row: &sqlx::sqlite::SqliteRow) -> String {
+    super::meeting_export::speaker_display_label(
+        row.try_get::<Option<&str>, _>("speaker").ok().flatten(),
+        row.try_get::<Option<&str>, _>("speaker_label").ok().flatten(),
+        row.try_get::<Option<&str>, _>("speaker_source").ok().flatten(),
+    )
 }
 async fn ensure_meeting_exists(pool: &SqlitePool, meeting_id: &str) -> Result<(), String> {
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings WHERE id = ? AND deleted_at IS NULL").bind(meeting_id).fetch_one(pool).await.map_err(db_error)?;
@@ -209,11 +216,11 @@ async fn load_context(pool: &SqlitePool, meeting_id: &str) -> Result<MeetingCont
 }
 async fn load_evidence_for(pool: &SqlitePool, fact_id: Option<&str>, action_id: Option<&str>) -> Result<Vec<EvidenceReference>, String> {
     let rows = if let Some(id) = fact_id {
-        sqlx::query("SELECT * FROM meeting_evidence WHERE fact_id = ? ORDER BY created_at ASC").bind(id).fetch_all(pool).await
+        sqlx::query("SELECT e.id, e.meeting_id, e.source_kind, e.transcript_id, e.transcript_revision, e.quote, e.audio_start_time, e.audio_end_time, t.speaker, t.speaker_label, t.speaker_source FROM meeting_evidence e LEFT JOIN transcripts t ON t.id = e.transcript_id AND t.meeting_id = e.meeting_id WHERE e.fact_id = ? ORDER BY e.created_at ASC").bind(id).fetch_all(pool).await
     } else if let Some(id) = action_id {
-        sqlx::query("SELECT * FROM meeting_evidence WHERE action_id = ? ORDER BY created_at ASC").bind(id).fetch_all(pool).await
+        sqlx::query("SELECT e.id, e.meeting_id, e.source_kind, e.transcript_id, e.transcript_revision, e.quote, e.audio_start_time, e.audio_end_time, t.speaker, t.speaker_label, t.speaker_source FROM meeting_evidence e LEFT JOIN transcripts t ON t.id = e.transcript_id AND t.meeting_id = e.meeting_id WHERE e.action_id = ? ORDER BY e.created_at ASC").bind(id).fetch_all(pool).await
     } else { return Ok(Vec::new()); }.map_err(db_error)?;
-    Ok(rows.into_iter().map(|r| EvidenceReference { id: r.get("id"), meeting_id: r.get("meeting_id"), source_kind: r.get("source_kind"), transcript_id: r.try_get("transcript_id").unwrap_or(None), transcript_revision: r.try_get("transcript_revision").unwrap_or(1), quote: r.get("quote"), audio_start_time: r.try_get("audio_start_time").unwrap_or(None), audio_end_time: r.try_get("audio_end_time").unwrap_or(None), speaker_label: r.try_get("speaker_label").unwrap_or(None) }).collect())
+    Ok(rows.into_iter().map(|r| EvidenceReference { id: r.get("id"), meeting_id: r.get("meeting_id"), source_kind: r.get("source_kind"), transcript_id: r.try_get("transcript_id").unwrap_or(None), transcript_revision: r.try_get("transcript_revision").unwrap_or(1), quote: r.get("quote"), audio_start_time: r.try_get("audio_start_time").unwrap_or(None), audio_end_time: r.try_get("audio_end_time").unwrap_or(None), speaker_label: (r.get::<String,_>("source_kind") == "transcript").then(|| source_speaker_label(&r)) }).collect())
 }
 async fn action_from_row(pool: &SqlitePool, row: &sqlx::sqlite::SqliteRow, id: String) -> Result<MeetingAction, String> {
     Ok(MeetingAction { evidence: load_evidence_for(pool, None, Some(&id)).await?, id,

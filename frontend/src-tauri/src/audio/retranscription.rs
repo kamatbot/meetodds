@@ -85,6 +85,9 @@ pub async fn start_retranscription<R: Runtime>(
 ) -> Result<RetranscriptionResult> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = RetranscriptionGuard::acquire().map_err(|e| anyhow!(e))?;
+    if crate::api::meeting_speakers::analysis_in_progress() {
+        return Err(anyhow!("Wait for speaker analysis to finish before re-transcribing."));
+    }
 
     // Reset cancellation flag
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
