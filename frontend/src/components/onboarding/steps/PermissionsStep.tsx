@@ -52,7 +52,7 @@ function statusLabel(status: string): string {
 function SourceResult({ title, source }: { title: string; source: SourceCheck }) {
   const hasSamples = source.samplesReceived > 0;
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
+    <div className="rounded-xl border border-border bg-surface p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <strong className="text-ui font-semibold text-text">{title}</strong>
         <span className="inline-flex items-center gap-1.5 text-caption text-2">
@@ -61,7 +61,7 @@ function SourceResult({ title, source }: { title: string; source: SourceCheck })
         </span>
       </div>
       <p className="mt-1 break-all text-caption text-2">{source.deviceName || 'No device confirmed'}</p>
-      <p className="mt-2 text-caption leading-5 text-2">{source.message}</p>
+      <p className="mt-1 text-caption leading-5 text-2">{source.message}</p>
       {hasSamples && (
         <meter
           aria-label={`${title} measured level`}
@@ -187,19 +187,85 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
   const canOpenSettings = activeSources.some((source) =>
     source.status === 'permission_denied' || source.status === 'no_frames',
   );
+  const needsAudioCheck = !preflight || !checkedSelectionMatches;
+  const microphoneUsable = preflight
+    && (preflight.microphone.status === 'signal' || preflight.microphone.status === 'silent')
+    && Boolean(preflight.microphone.deviceName?.trim());
+  const systemAudioUsable = !includeSystem || (preflight
+    && (preflight.systemAudio.status === 'signal' || preflight.systemAudio.status === 'silent')
+    && Boolean(preflight.systemAudio.deviceName?.trim()));
+  const storageReady = preflight
+    && preflight.storageWritable
+    && Boolean(preflight.recordingFolder?.trim())
+    && Boolean(preflight.storageMessage?.trim())
+    && typeof preflight.audioRetained === 'boolean';
+  const preflightFailureReason = !microphoneUsable
+    ? 'Connect a working microphone, then check audio again.'
+    : !systemAudioUsable
+    ? 'Make system audio available, or choose microphone only, then check again.'
+    : !storageReady
+    ? 'Review the recording folder or retention setting, then check audio again.'
+    : null;
+  const finishBlockedReason = includeSystem === null
+    ? 'Choose what to capture, then check audio.'
+    : needsAudioCheck
+    ? 'Run Check audio for these selected sources before finishing.'
+    : preflightFailureReason
+    ? preflightFailureReason
+    : hasSilentSource && !acknowledgeSilence
+    ? 'Acknowledge the silent source to continue.'
+    : !participantsInformed
+    ? 'Confirm that participants are informed to continue.'
+    : !approvedCapture
+    ? 'Resolve the audio or storage issue shown above, then check again.'
+    : 'Audio, storage, and recording consent are ready.';
+
+  const footer = (
+    <div className="space-y-2">
+      {error && <p role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-3 py-2 text-caption text-danger">{error}</p>}
+      <p className={`text-caption ${approvedCapture ? 'text-2' : 'text-text'}`} aria-live="polite">{finishBlockedReason}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Button type="button" variant="ghost" onClick={goPrevious} disabled={busy !== null} className="h-9 px-2 text-2">
+          <ArrowLeft className="mr-1.5 h-4 w-4" /> Back
+        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant={needsAudioCheck ? 'default' : 'outline'}
+            onClick={() => void checkAudio()}
+            disabled={busy !== null || includeSystem === null}
+            className="h-10 rounded-xl px-4"
+          >
+            {busy === 'check' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCw className="mr-2 h-4 w-4" />}
+            {busy === 'check' ? 'Checking…' : preflight ? 'Check again' : 'Check audio'}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void finishSetup()}
+            disabled={!approvedCapture || busy !== null}
+            className="h-10 min-w-[142px] rounded-xl bg-text px-4 text-ui font-semibold text-surface hover:opacity-90"
+          >
+            {busy === 'finish' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {busy === 'finish' ? 'Finishing…' : 'Finish setup'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <OnboardingContainer
-      title="Let MeetOdds listen."
-      description="Choose what to capture, then check the real audio sources and recording folder before finishing setup."
+      title="Check your recording setup"
+      description="Choose what to capture, then verify the real sources and recording folder."
       step={3}
       totalSteps={3}
       className="max-w-[760px]"
+      footer={footer}
     >
-      <div className="mx-auto w-full max-w-[620px] space-y-5">
-        <section aria-labelledby="capture-choice-title" className="space-y-3">
+      <div className="mx-auto w-full max-w-[620px] space-y-4">
+        <section aria-labelledby="capture-choice-title" className="space-y-2">
           <h2 id="capture-choice-title" className="text-ui font-semibold text-text">What should a meeting include?</h2>
-          <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors ${includeSystem === true ? 'border-text bg-bg' : 'border-border bg-surface'}`}>
+          <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${includeSystem === true ? 'border-text bg-bg' : 'border-border bg-surface'}`}>
             <input
               type="radio"
               name="capture-mode"
@@ -213,7 +279,7 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
               <span className="mt-1 block text-caption leading-5 text-2">Capture your voice and the other people on the call.</span>
             </span>
           </label>
-          <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors ${includeSystem === false ? 'border-text bg-bg' : 'border-border bg-surface'}`}>
+          <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${includeSystem === false ? 'border-text bg-bg' : 'border-border bg-surface'}`}>
             <input
               type="radio"
               name="capture-mode"
@@ -233,35 +299,29 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
           </p>
         </section>
 
-        <section aria-labelledby="audio-check-title" className="space-y-3 border-t border-border pt-5">
+        <section aria-labelledby="audio-check-title" className="space-y-3 border-t border-border pt-4">
           <div>
-            <h2 id="audio-check-title" className="text-ui font-semibold text-text">Check your audio and storage</h2>
-            <p className="mt-1 text-caption leading-5 text-2">The test listens briefly to the selected sources, writes a temporary file in your recording folder, and discards the audio. It is not saved or transcribed.</p>
+            <h2 id="audio-check-title" className="text-ui font-semibold text-text">Audio and storage check</h2>
+            <p className="mt-1 text-caption leading-5 text-2">This brief test discards its audio after checking the selected sources and recording folder.</p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void checkAudio()}
-            disabled={busy !== null || includeSystem === null}
-            className="h-10 rounded-xl px-4"
-          >
-            {busy === 'check' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCw className="mr-2 h-4 w-4" />}
-            {busy === 'check' ? 'Checking actual sources…' : preflight ? 'Check audio again' : 'Check audio'}
-          </Button>
 
           {preflight && (
             <div className="space-y-3" aria-live="polite">
-              <SourceResult title="Microphone" source={preflight.microphone} />
-              {includeSystem && <SourceResult title="System audio" source={preflight.systemAudio} />}
-              <div className="rounded-xl border border-border bg-bg px-4 py-3 text-caption text-2">
+              <div className="rounded-xl border border-border bg-bg px-3 py-2.5 text-caption text-2">
                 <p className="font-semibold text-text">
-                  {preflight.audioRetained ? 'Audio will be kept on this Mac' : 'Transcript only · audio will not be retained'}
+                  Microphone: {statusLabel(preflight.microphone.status)}
+                  {includeSystem && ` · System: ${statusLabel(preflight.systemAudio.status)}`}
                 </p>
-                <p className="mt-1">{preflight.audioRetained
-                  ? 'Saved audio supports playback and re-transcription.'
-                  : 'There will be no saved audio for playback, repair or re-transcription.'}</p>
-                <p className="mt-2 break-all">Recording folder: {preflight.recordingFolder || 'Unavailable'}</p>
-                <p className={`mt-1 ${preflight.storageWritable ? '' : 'text-danger'}`}>{preflight.storageMessage}</p>
+                <p className={`mt-1 ${preflight.storageWritable ? '' : 'text-danger'}`}>Storage: {preflight.storageMessage}</p>
+                <p className="mt-1">{preflight.audioRetained ? 'Audio kept for playback and re-transcription.' : 'Transcript only—audio not saved.'}</p>
+                <details className="mt-2">
+                  <summary className="cursor-pointer font-medium text-text">Show check details</summary>
+                  <div className="mt-2 space-y-2">
+                    <SourceResult title="Microphone" source={preflight.microphone} />
+                    {includeSystem && <SourceResult title="System audio" source={preflight.systemAudio} />}
+                    <p className="break-all">Recording folder: {preflight.recordingFolder || 'Unavailable'}</p>
+                  </div>
+                </details>
               </div>
               {hasSilentSource && (
                 <label className="flex items-start gap-2 text-caption leading-5 text-2">
@@ -292,26 +352,8 @@ export function PermissionsStep({ onComplete }: PermissionsStepProps) {
               )}
             </div>
           )}
-          {!preflight && <p className="text-caption text-2">No audio or storage check has been run yet.</p>}
+          {!preflight && <p className="text-caption text-2">Choose a capture mode, then use Check audio below.</p>}
         </section>
-
-        {error && <p role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-caption text-danger">{error}</p>}
-
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <Button type="button" variant="ghost" onClick={goPrevious} disabled={busy !== null} className="text-2">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back
-          </Button>
-          <span className="text-right text-caption text-2">3 of 3 · Your checked choices are saved for the first meeting</span>
-          <Button
-            type="button"
-            onClick={() => void finishSetup()}
-            disabled={!approvedCapture || busy !== null}
-            className="h-11 min-w-[170px] rounded-xl bg-text px-5 text-ui font-semibold text-surface hover:opacity-90"
-          >
-            {busy === 'finish' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {busy === 'finish' ? 'Finishing setup…' : 'Finish setup'}
-          </Button>
-        </div>
       </div>
     </OnboardingContainer>
   );

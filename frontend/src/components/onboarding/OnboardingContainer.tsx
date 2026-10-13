@@ -22,7 +22,8 @@ export function OnboardingContainer({
   onPrevious,
   canGoNext = true,
   canGoPrevious = true,
-}: OnboardingContainerProps) {
+  footer,
+}: OnboardingContainerProps & { footer?: React.ReactNode }) {
   const { goToStep, goPrevious, goNext } = useOnboarding();
 
   const handlePrevious = () => {
@@ -44,9 +45,9 @@ export function OnboardingContainer({
       className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-bg text-text"
       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif' }}
     >
-      <div className={cn('flex h-full max-h-screen w-full max-w-[720px] flex-col px-6 py-6 md:px-10 md:py-8', className)}>
+      <div className={cn('flex h-full max-h-screen w-full max-w-[720px] flex-col px-4 py-4 sm:px-6 sm:py-5 md:px-8 md:py-6', className)}>
         {step && !hideProgress && (
-          <div className="relative mb-5 shrink-0">
+          <div className="relative mb-3 shrink-0">
             {showNavigation && (
               <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-between">
                 <button
@@ -87,11 +88,11 @@ export function OnboardingContainer({
 
         {/* hero === undefined -> default header; hero === null -> no header; otherwise render the given hero node */}
         {hero === undefined ? (
-          <header className="mb-6 shrink-0 text-center">
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-accent" aria-hidden="true" />
-            <h1 className="text-display text-text">{title}</h1>
+          <header className="mb-4 shrink-0 text-center">
+            <div className="mx-auto mb-2 h-1 w-8 rounded-full bg-accent" aria-hidden="true" />
+            <h1 className="text-xl font-semibold tracking-tight text-text sm:text-2xl">{title}</h1>
             {description && (
-              <p className="mx-auto mt-2 max-w-lg text-body leading-6 text-2">
+              <p className="mx-auto mt-1 max-w-lg text-ui leading-5 text-2">
                 {description}
               </p>
             )}
@@ -100,9 +101,13 @@ export function OnboardingContainer({
           hero
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
-          <div className="flex min-h-full flex-col pb-6">{children}</div>
+        <div
+          className="min-h-0 flex-1 overflow-y-scroll pr-2 custom-scrollbar [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-surface [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-text-3"
+          style={{ scrollbarColor: 'var(--text-3) var(--surface)' }}
+        >
+          <div className="flex min-h-full flex-col pb-3">{children}</div>
         </div>
+        {footer && <div className="shrink-0 border-t border-border pt-3">{footer}</div>}
       </div>
     </div>
   );
